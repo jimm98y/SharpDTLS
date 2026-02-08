@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Dtls13Test.Tests/Dtls13Test.Tests.csproj" Id="9d511f45-8a39-492f-a6f1-3f8df39d02fe" />
+  <Project Path="Dtls13Test/Dtls13Test.csproj" />
+</Solution>

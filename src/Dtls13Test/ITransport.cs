@@ -1,0 +1,291 @@
+﻿// SharpSRTP
+// Copyright (C) 2025 Lukas Volf
+// 
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// 
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
+// SOFTWARE.
+
+using System.Collections.Concurrent;
+using System.Net;
+using System.Net.Sockets;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace SharpSRTP.UDP
+{
+    public interface ITransport
+    {
+        void Send(byte[] buf, int off, int len);
+        int Receive(byte[] buf, int off, int len, int waitMillis);
+    }
+
+    /// <summary>
+    /// UDP transport.
+    /// </summary>
+    public class UdpTransport : ITransport
+    {
+        public const int MAX_RECEIVE_QUEUE_ITEMS = 32;
+        public const int MTU = 1472; // 1500 - 20 (IP) - 8 (UDP)
+
+        private readonly Socket _socket;
+        private readonly EndPoint _remote;
+        private readonly int _mtu = MTU;
+        private readonly Action<UdpTransport> _onClose;
+        private readonly BlockingCollection<byte[]> _receiveQueue = new BlockingCollection<byte[]>();
+
+        public string RemoteEndpoint { get { return _remote.ToString(); } }
+        public DateTime LastReceived { get; private set; } = DateTime.UtcNow;
+        public DateTime LastSent { get; private set; } = DateTime.UtcNow;
+        public DateTime LastUsed { get { return LastReceived > LastSent ? LastReceived : LastSent; } }
+
+        public UdpTransport(Socket socket, EndPoint remote = null, int mtu = MTU, Action<UdpTransport> onClose = null)
+        {
+            this._socket = socket ?? throw new ArgumentNullException(nameof(socket));
+            this._remote = remote;
+            this._mtu = mtu;
+            this._onClose = onClose;
+        }
+
+        public bool TryAddToReceiveQueue(byte[] data, int maxReceiveQueueSize = MAX_RECEIVE_QUEUE_ITEMS)
+        {
+            LastReceived = DateTime.UtcNow;
+            if (_receiveQueue.Count > maxReceiveQueueSize)
+            {
+                return false;
+            }
+            _receiveQueue.Add(data);
+            return true;
+        }
+
+        public virtual int GetReceiveLimit()
+        {
+            return _mtu;
+        }
+
+        public virtual int GetSendLimit()
+        {
+            return _mtu;
+        }
+
+        public virtual int Receive(byte[] buf, int off, int len, int waitMillis)
+        {
+            return Receive(buf.AsSpan(off, len), waitMillis);
+        }
+
+        public virtual int Receive(Span<byte> buffer, int waitMillis)
+        {
+            if (_remote == null)
+            {
+                this._socket.ReceiveTimeout = waitMillis;
+                try
+                {
+                    EndPoint remote = new IPEndPoint(IPAddress.Any, 0);
+                    var byteBuffer = buffer.ToArray();
+                    int len = this._socket.ReceiveFrom(byteBuffer, ref remote);
+                    byteBuffer.AsSpan().CopyTo(buffer);
+                    return len;
+                }
+                catch (SocketException)
+                {
+                    return -1;
+                }
+            }
+            else
+            {
+                if (_receiveQueue.TryTake(out byte[] data, waitMillis))
+                {
+                    data.AsSpan().CopyTo(buffer);
+                    return data.Length;
+                }
+                return -1;
+            }
+        }
+
+        public virtual void Send(byte[] buf, int off, int len)
+        {
+            if (len > GetSendLimit())
+            {
+                /*
+                 * RFC 4347 4.1.1. "If the application attempts to send a record larger than the MTU,
+                 * the DTLS implementation SHOULD generate an error, thus avoiding sending a packet
+                 * which will be fragmented."
+                 */
+                throw new Exception();
+            }
+
+            Send(buf.AsSpan(off, len));
+        }
+
+        public virtual void Send(ReadOnlySpan<byte> buffer)
+        {
+            LastSent = DateTime.UtcNow;
+
+            if (_remote == null)
+            {
+                _socket.Send(buffer.ToArray());
+            }
+            else
+            {
+                _socket.SendTo(buffer.ToArray(), _remote);
+            }
+        }
+
+        public virtual void Close()
+        {
+            _onClose?.Invoke(this);
+        }
+    }
+
+    public class ServerTransport 
+    {
+        private readonly object _listening;
+        private readonly ConcurrentDictionary<string, UdpTransport> _activeSessions;
+        public event EventHandler<byte[]> OnDataReceived;
+
+        public ServerTransport()
+        {
+            Socket listenSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            listenSocket.ReceiveTimeout = 30000;
+
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                // disables the SocketException on client hard crash
+                const int SIO_UDP_CONNRESET = -1744830452;
+                listenSocket.IOControl((IOControlCode)SIO_UDP_CONNRESET, new byte[] { 0, 0, 0, 0 }, null);
+                listenSocket.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.PacketInformation, true);
+            }
+
+            const int RECEIVE_TIMEOUT = 0;
+            const int INACTIVE_SESSION_TIMEOUT = 60000;
+            EndPoint localEndpoint = IPEndPoint.Parse("0.0.0.0:8888");
+            EndPoint remoteEndpoint = new IPEndPoint(IPAddress.Any, 0);
+            _activeSessions = new ConcurrentDictionary<string, UdpTransport>();
+
+            listenSocket.Bind(localEndpoint);
+
+            _listening = Task.Run(() =>
+            {
+                byte[] buffer = new byte[UdpTransport.MTU];
+
+                while (true)
+                {
+                    int length = 0;
+                    try
+                    {
+                        length = listenSocket.ReceiveFrom(buffer, ref remoteEndpoint);
+                    }
+                    catch (SocketException ex)
+                    {
+                        Console.WriteLine(ex.Message);
+                    }
+
+                    if (length > 0)
+                    {
+                        UdpTransport transport;
+                        if (_activeSessions.TryGetValue(remoteEndpoint.ToString(), out transport))
+                        {
+                            // current session
+                            if (!transport.TryAddToReceiveQueue(buffer.ToArray()))
+                            {
+                                throw new Exception("Receive queue full!");
+                            }
+                        }
+                        else
+                        {
+                            transport = new UdpTransport(listenSocket, remoteEndpoint, UdpTransport.MTU, (t) => _activeSessions.TryRemove(t.RemoteEndpoint, out _));
+
+                            if (_activeSessions.TryAdd(remoteEndpoint.ToString(), transport))
+                            {
+                                transport.TryAddToReceiveQueue(buffer.Take(length).ToArray());
+
+                                var session = Task.Run(() =>
+                                {
+                                    byte[] receiveBuffer = new byte[UdpTransport.MTU];
+                                    while (true)
+                                    {
+                                        int len = transport.Receive(receiveBuffer, 1000);
+                                        if (len > 0)
+                                        {
+                                            OnDataReceived?.Invoke(remoteEndpoint, receiveBuffer.AsSpan(0, len).ToArray());
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        public void Send(EndPoint endpoint, byte[] buf)
+        {
+            if(_activeSessions.TryGetValue(endpoint.ToString(), out UdpTransport transport))
+            {
+                transport.Send(buf, 0, buf.Length);
+            }
+            else
+            {
+                throw new Exception("No active session for endpoint " + endpoint);
+            }
+        }
+
+        public void Send(byte[] buf)
+        {
+            if (_activeSessions.TryGetValue(_activeSessions.First().Key, out UdpTransport transport))
+            {
+                transport.Send(buf, 0, buf.Length);
+            }
+            else
+            {
+                throw new Exception("No active session");
+            }
+        }
+    }
+
+    public class ClientTransport
+    {
+        private readonly UdpTransport _udpClientTransport;
+        private readonly object _receiving;
+        public event EventHandler<byte[]> OnDataReceived;
+
+        public ClientTransport()
+        {
+            Socket socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            IPEndPoint remoteEndpoint = IPEndPoint.Parse("127.0.0.1:8888");
+            socket.Connect(remoteEndpoint);
+
+            _udpClientTransport = new UdpTransport(socket);
+            _receiving = Task.Run(() =>
+            {
+                byte[] buffer = new byte[UdpTransport.MTU];
+                while (true)
+                {
+                    int len = _udpClientTransport.Receive(buffer, 1000);
+                    if (len > 0)
+                    {
+                        OnDataReceived?.Invoke(remoteEndpoint, buffer.AsSpan(0, len).ToArray());
+                    }
+                }
+            });
+        }
+
+        public void Send(byte[] buf)
+        {
+            _udpClientTransport.Send(buf, 0, buf.Length);
+        }
+    }
+}
