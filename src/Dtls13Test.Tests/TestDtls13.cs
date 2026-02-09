@@ -11,7 +11,7 @@ namespace Dtls13Test.Tests
         public void TestClientHelloCreate(string clientRandom, string publicKey, string expected)
         {
             byte[] publicKeyBytes = Convert.FromHexString(publicKey.Replace(":", ""));
-            var clientHello = new ClientHelloMessage(publicKeyBytes) { ClientRandom = Convert.FromHexString(clientRandom.Replace(" ", "")) };
+            var clientHello = new ClientHelloDatagram(publicKeyBytes) { ClientRandom = Convert.FromHexString(clientRandom.Replace(" ", "")) };
             string actual = Convert.ToHexString(clientHello.ToBytes()).ToLowerInvariant();
             Debug.WriteLine(actual);
             Debug.WriteLine(expected.Replace(" ", ""));
@@ -22,7 +22,7 @@ namespace Dtls13Test.Tests
         [TestMethod]
         public void TestClientHelloRead(string clientHelloHex)
         {
-            var clientHello = new ClientHelloMessage();
+            var clientHello = new ClientHelloDatagram();
             clientHello.FromBytes(Convert.FromHexString(clientHelloHex.Replace(" ", "")));
 
             string actual = Convert.ToHexString(clientHello.ToBytes()).ToLowerInvariant();
@@ -34,7 +34,7 @@ namespace Dtls13Test.Tests
         public void TestServerHelloCreate(string serverRandom, string publicKey, string expected)
         {
             byte[] publicKeyBytes = Convert.FromHexString(publicKey);
-            var serverHello = new ServerHelloMessage(publicKeyBytes, 0x1301) { ServerRandom = Convert.FromHexString(serverRandom.Replace(" ", "")) };
+            var serverHello = new ServerHelloDatagram(publicKeyBytes, 0x1301) { ServerRandom = Convert.FromHexString(serverRandom.Replace(" ", "")) };
             string actual = Convert.ToHexString(serverHello.ToBytes()).ToLowerInvariant();
             Debug.WriteLine(actual);
             Debug.WriteLine(expected.Replace(" ", ""));
@@ -46,7 +46,7 @@ namespace Dtls13Test.Tests
         [TestMethod]
         public void TestServerHelloRead(string serverHelloHex)
         {
-            var serverHello = new ServerHelloMessage();
+            var serverHello = new ServerHelloDatagram();
             serverHello.FromBytes(Convert.FromHexString(serverHelloHex.Replace(" ", "")));
 
             string actual = Convert.ToHexString(serverHello.ToBytes()).ToLowerInvariant();

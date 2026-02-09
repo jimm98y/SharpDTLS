@@ -2,16 +2,9 @@
 using SharpSRTP.UDP;
 using System.Diagnostics;
 using System.Net;
-using System.Runtime.Intrinsics.Arm;
-using System.Text;
 
 namespace Dtls13Test
 {
-    public class Dtls13Session
-    {
-        public List<IMessage> HandshakeMessages { get; } = new List<IMessage>();
-    }
-
     public class Dtls13Server
     {
         Dictionary<string, Dtls13Session> _sessions = new Dictionary<string, Dtls13Session>();
@@ -34,7 +27,7 @@ namespace Dtls13Test
                 session = new Dtls13Session();
                 if (_sessions.TryAdd(endpoint.ToString(), session))
                 {
-                    var clientHello = new ClientHelloMessage();
+                    var clientHello = new ClientHelloDatagram();
 
                     try
                     {
@@ -49,28 +42,37 @@ namespace Dtls13Test
                     session.HandshakeMessages.Add(clientHello);
 
                     // now send ServerHello
-                    byte[] privateKey = Convert.FromHexString("909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeaf");
-                    byte[] publicKey = Convert.FromHexString("9fd7ad6dcff4298dd3f96d5b1b2af910a0535b1488d7f8fabb349a982880b615");
-                    var serverHello = new ServerHelloMessage(publicKey, clientHello.CipherSuites.First());
+                    session.PrivateKey = Convert.FromHexString("909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeaf");
+                    session.PublicKey = Convert.FromHexString("9fd7ad6dcff4298dd3f96d5b1b2af910a0535b1488d7f8fabb349a982880b615");
+                    var serverHello = new ServerHelloDatagram(session.PublicKey, clientHello.CipherSuites.First()) { ServerRandom = Convert.FromHexString("70 71 72 73 74 75 76 77 78 79 7a 7b 7c 7d 7e 7f 80 81 82 83 84 85 86 87 88 89 8a 8b 8c 8d 8e 8f".Replace(" ", "")) };
                     var serverHelloBytes = serverHello.ToBytes();
 
+                    session.HandshakeMessages.Add(serverHello);
                     ServerTransport.Send(endpoint, serverHelloBytes);
 
-                    byte[] sharedSecret = CalculateHandshakeKeys(clientHello.PublicKey, privateKey, clientHello.OriginalBytes, serverHelloBytes);
+                    byte[] helloHash = CryptoUtils.CalculateHelloHash(clientHello.OriginalBytes, serverHelloBytes);
+                    Debug.WriteLine($"hello_hash: {Convert.ToHexString(helloHash).ToLowerInvariant()}");
+
+                    byte[] sharedSecret = CryptoUtils.DeriveSharedSecretX25519(session.PrivateKey, clientHello.PublicKey);
+                    Debug.WriteLine($"shared_secret: {Convert.ToHexString(sharedSecret).ToLowerInvariant()}");
+
+                    var serverHandshakeKeys = CryptoUtils.CalculateHandshakeKeys(helloHash, sharedSecret);
+                    Debug.WriteLine($"client_key: {Convert.ToHexString(serverHandshakeKeys.clientKey).ToLowerInvariant()}");
+                    Debug.WriteLine($"client_iv: {Convert.ToHexString(serverHandshakeKeys.clientIv).ToLowerInvariant()}");
+                    Debug.WriteLine($"server_key: {Convert.ToHexString(serverHandshakeKeys.serverKey).ToLowerInvariant()}");
+                    Debug.WriteLine($"server_iv: {Convert.ToHexString(serverHandshakeKeys.serverIv).ToLowerInvariant()}");
+                    Debug.WriteLine($"client_sn_key: {Convert.ToHexString(serverHandshakeKeys.clientSnKey).ToLowerInvariant()}");
+                    Debug.WriteLine($"server_sn_key: {Convert.ToHexString(serverHandshakeKeys.serverSnKey).ToLowerInvariant()}");
+
+                    // from now on the conneciton is encrypted
 
                 }
             }
 
         }
 
-        private byte[] CalculateHandshakeKeys(byte[] clientPublicKey, byte[] serverPrivateKey, byte[] clientHelloBytes, byte[] serverHelloBytes)
-        {
-            byte[] sharedSecret = CryptoUtils.DeriveSharedSecretX25519(serverPrivateKey, clientPublicKey);
-            Debug.WriteLine($"Derived shared secret: {Convert.ToHexString(sharedSecret)}");
+        
 
-            byte[] hello_hash;
-            
-
-        }
+      
     }
 }

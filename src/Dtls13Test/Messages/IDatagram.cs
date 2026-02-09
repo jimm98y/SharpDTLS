@@ -1,6 +1,6 @@
 ﻿namespace Dtls13Test.Messages
 {
-    public interface IMessage
+    public interface IDatagram
     {
         void FromBytes(byte[] bytes);
         byte[] ToBytes();

@@ -2,6 +2,11 @@
 using Org.BouncyCastle.Crypto.Generators;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Security;
+using Org.BouncyCastle.Tls;
+using Org.BouncyCastle.Tls.Crypto;
+using Org.BouncyCastle.Tls.Crypto.Impl.BC;
+using System.Diagnostics;
+using System.Security.Cryptography;
 
 namespace Dtls13Test
 {
@@ -37,5 +42,134 @@ namespace Dtls13Test
             priv.GenerateSecret(pub, shared, 0);
             return shared;
         }
+
+        public static byte[] CalculateHelloHash(byte[] clientHelloBytes, byte[] serverHelloBytes)
+        {
+            // skipping DTLS-specific bytes 
+            byte[] clientHello = clientHelloBytes.Skip(13).Take(4).Concat(clientHelloBytes.Skip(13 + 4 + 8)).ToArray();
+            byte[] serverHello = serverHelloBytes.Skip(13).Take(4).Concat(serverHelloBytes.Skip(13 + 4 + 8)).ToArray();
+            byte[] helloHash = SHA256.HashData(clientHello.Concat(serverHello).ToArray());
+            return helloHash;
+        }
+
+        public static (byte[] clientKey, byte[] clientIv, byte[] serverKey, byte[] serverIv, byte[] clientSnKey, byte[] serverSnKey) CalculateHandshakeKeys(byte[] helloHash, byte[] sharedSecret)
+        {
+            var crypto = new BcTlsCrypto();
+            var hashAlg = CryptoHashAlgorithm.sha256;
+            byte[] zeroKey = new byte[32];
+
+            var earlySecret = (new BcTlsSecret(crypto, new byte[] { 0x00 })).HkdfExtract(hashAlg, new BcTlsSecret(crypto, zeroKey)).Extract();
+
+            var emptyHash = SHA256.HashData(Array.Empty<byte>());
+            var derivedSecret = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, earlySecret), hashAlg, "derived", emptyHash, 32).Extract();
+
+            var handshakeSecret = (new BcTlsSecret(crypto, derivedSecret)).HkdfExtract(hashAlg, new BcTlsSecret(crypto, sharedSecret)).Extract();
+
+            var clientSecret = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, handshakeSecret), hashAlg, "c hs traffic", helloHash, 32).Extract();
+            var serverSecret = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, handshakeSecret), hashAlg, "s hs traffic", helloHash, 32).Extract();
+            var clientKey = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "key", new byte[0], 16).Extract();
+            var serverKey = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "key", new byte[0], 16).Extract();
+            var clientIv = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "iv", new byte[0], 12).Extract();
+            var serverIv = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "iv", new byte[0], 12).Extract();
+            var clientSnKey = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "sn", new byte[0], 16).Extract();
+            var serverSnKey = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "sn", new byte[0], 16).Extract();
+
+            return (clientKey, clientIv, serverKey, serverIv, clientSnKey, serverSnKey);
+        }
+
+        // we have to duplicate the HkdfExpandLabel method because we need a different prefix for DTLS 1.3
+        private readonly static byte[] Dtls13Prefix = System.Text.Encoding.ASCII.GetBytes("dtls13");
+
+        /// <exception cref="IOException"/>
+        public static TlsSecret HkdfExpandLabel(TlsSecret secret, int cryptoHashAlgorithm, string label,
+            byte[] context, int length)
+        {
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+            return HkdfExpandLabel(secret, cryptoHashAlgorithm, label.AsSpan(), context.AsSpan(), length);
+#else
+            int labelLength = label.Length;
+            if (labelLength < 1)
+                throw new TlsFatalAlert(AlertDescription.internal_error);
+
+            int contextLength = context.Length;
+            int expandedLabelLength = Dtls13Prefix.Length + labelLength;
+
+            byte[] hkdfLabel = new byte[2 + (1 + expandedLabelLength) + (1 + contextLength)];
+
+            // uint16 length
+            {
+                TlsUtilities.CheckUint16(length);
+                TlsUtilities.WriteUint16(length, hkdfLabel, 0);
+            }
+
+            // opaque label<7..255>
+            {
+                TlsUtilities.CheckUint8(expandedLabelLength);
+                TlsUtilities.WriteUint8(expandedLabelLength, hkdfLabel, 2);
+
+                Array.Copy(Dtls13Prefix, 0, hkdfLabel, 2 + 1, Dtls13Prefix.Length);
+
+                int labelPos = 2 + (1 + Dtls13Prefix.Length);
+                for (int i = 0; i < labelLength; ++i)
+                {
+                    char c = label[i];
+                    hkdfLabel[labelPos + i] = (byte)c;
+                }
+            }
+
+            // context
+            {
+                TlsUtilities.WriteOpaque8(context, hkdfLabel, 2 + (1 + expandedLabelLength));
+            }
+
+            return secret.HkdfExpand(cryptoHashAlgorithm, hkdfLabel, length);
+#endif
+        }
+
+#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
+        /// <exception cref="IOException"/>
+        public static TlsSecret HkdfExpandLabel(TlsSecret secret, int cryptoHashAlgorithm, ReadOnlySpan<char> label,
+            ReadOnlySpan<byte> context, int length)
+        {
+            int labelLength = label.Length;
+            if (labelLength < 1)
+                throw new TlsFatalAlert(AlertDescription.internal_error);
+
+            int contextLength = context.Length;
+            int expandedLabelLength = Dtls13Prefix.Length + labelLength;
+
+            int hkdfLabelLength = 2 + (1 + expandedLabelLength) + (1 + contextLength);
+            Span<byte> hkdfLabel = hkdfLabelLength <= 512
+                ? stackalloc byte[hkdfLabelLength]
+                : new byte[hkdfLabelLength];
+
+            // uint16 length
+            {
+                TlsUtilities.CheckUint16(length);
+                TlsUtilities.WriteUint16(length, hkdfLabel);
+            }
+
+            // opaque label<7..255>
+            {
+                TlsUtilities.CheckUint8(expandedLabelLength);
+                TlsUtilities.WriteUint8(expandedLabelLength, hkdfLabel[2..]);
+
+                Dtls13Prefix.CopyTo(hkdfLabel[3..]);
+
+                int labelPos = 2 + (1 + Dtls13Prefix.Length);
+                for (int i = 0; i < labelLength; ++i)
+                {
+                    hkdfLabel[labelPos + i] = (byte)label[i];
+                }
+            }
+
+            // context
+            {
+                TlsUtilities.WriteOpaque8(context, hkdfLabel.Slice(2 + (1 + expandedLabelLength)));
+            }
+
+            return secret.HkdfExpand(cryptoHashAlgorithm, hkdfLabel, length);
+        }
+#endif
     }
 }

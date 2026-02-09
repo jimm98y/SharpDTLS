@@ -1,6 +1,6 @@
 ﻿namespace Dtls13Test.Messages
 {
-    public class ClientHelloMessage : IMessage
+    public class ClientHelloDatagram : IDatagram
     {
         public List<ushort> CipherSuites = new List<ushort> { 0x1301, 0x1302, 0x1303 }; // TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256
         public byte[] PublicKey { get; private set; }
@@ -10,10 +10,10 @@
         public int RecordSequenceNumber { get; set; }
         public byte[] ClientRandom { get; set; } = null;
 
-        public ClientHelloMessage()
+        public ClientHelloDatagram()
         { }
 
-        public ClientHelloMessage(byte[] publicKey)
+        public ClientHelloDatagram(byte[] publicKey)
         {
             PublicKey = publicKey;
             ClientRandom = CryptoUtils.GenerateRandom(32);

@@ -1,9 +1,9 @@
 ﻿namespace Dtls13Test.Messages
 {
-    public class ServerHelloMessage : IMessage
+    public class ServerHelloDatagram : IDatagram
     {
         public byte[] ServerRandom { get; set; } = null;
-        public byte[] PublicKey { get; }
+        public byte[] PublicKey { get; private set; }
         public byte[] OriginalBytes { get; private set; }
         public int Epoch { get; set; }
         public int RecordSequenceNumber { get; set; }
@@ -11,10 +11,10 @@
 
         public ushort SelectedCipherSuite { get; set; } = 0x1301;
 
-        public ServerHelloMessage()
+        public ServerHelloDatagram()
         { }
 
-        public ServerHelloMessage(byte[] publicKey, ushort selectedCipherSuite)
+        public ServerHelloDatagram(byte[] publicKey, ushort selectedCipherSuite)
         {
             PublicKey = publicKey;
             SelectedCipherSuite = selectedCipherSuite;
@@ -98,6 +98,12 @@
 
                     if (!Extensions.Contains(extensionInstance)) Extensions.Add(extensionInstance);
                     pos += consumed;
+
+                    if(extensionInstance is ServerKeyShareExtension keyShareExt)
+                    {
+                        // If we successfully parsed a key share extension, we can populate the PublicKey property of the ServerHelloMessage for easier access.
+                        PublicKey = keyShareExt.PublicKey;
+                    }
                 }
                 else
                 {
