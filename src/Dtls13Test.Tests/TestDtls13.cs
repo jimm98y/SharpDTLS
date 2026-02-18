@@ -1,4 +1,5 @@
 ﻿using Dtls13Test.Messages;
+using Org.BouncyCastle.Asn1;
 using System.Diagnostics;
 
 namespace Dtls13Test.Tests
@@ -51,6 +52,17 @@ namespace Dtls13Test.Tests
 
             string actual = Convert.ToHexString(serverHello.ToBytes()).ToLowerInvariant();
             Assert.AreEqual(serverHelloHex.Replace(" ", ""), actual);
+        }
+
+        [DataRow("08 00 00 12 00 01 00 00 00 00 00 12 00 10 00 0a 00 0c 00 0a 00 17 00 1d 00 18 00 19 01 00 16")]
+        [TestMethod]
+        public void TestServerExtensions(string serverExtensionsHex)
+        {
+            var serverExtensions = new ServerExtensionsDatagram();
+            serverExtensions.FromBytes(Convert.FromHexString(serverExtensionsHex.Replace(" ", "")));
+
+            string actual = Convert.ToHexString(serverExtensions.ToBytes()).ToLowerInvariant();
+            Assert.AreEqual(serverExtensionsHex.Replace(" ", ""), actual);
         }
     }
 }
