@@ -41,12 +41,12 @@ namespace Dtls13Test
             Debug.WriteLine($"shared_secret: {Convert.ToHexString(sharedSecret).ToLowerInvariant()}");
 
             var serverHandshakeKeys = CryptoUtils.CalculateHandshakeKeys(helloHash, sharedSecret);
-            Debug.WriteLine($"client_key: {Convert.ToHexString(serverHandshakeKeys.clientKey).ToLowerInvariant()}");
-            Debug.WriteLine($"client_iv: {Convert.ToHexString(serverHandshakeKeys.clientIv).ToLowerInvariant()}");
-            Debug.WriteLine($"server_key: {Convert.ToHexString(serverHandshakeKeys.serverKey).ToLowerInvariant()}");
-            Debug.WriteLine($"server_iv: {Convert.ToHexString(serverHandshakeKeys.serverIv).ToLowerInvariant()}");
-            Debug.WriteLine($"client_sn_key: {Convert.ToHexString(serverHandshakeKeys.clientSnKey).ToLowerInvariant()}");
-            Debug.WriteLine($"server_sn_key: {Convert.ToHexString(serverHandshakeKeys.serverSnKey).ToLowerInvariant()}");
+            Debug.WriteLine($"client_key: {Convert.ToHexString(serverHandshakeKeys.ClientKey).ToLowerInvariant()}");
+            Debug.WriteLine($"client_iv: {Convert.ToHexString(serverHandshakeKeys.ClientIv).ToLowerInvariant()}");
+            Debug.WriteLine($"server_key: {Convert.ToHexString(serverHandshakeKeys.ServerKey).ToLowerInvariant()}");
+            Debug.WriteLine($"server_iv: {Convert.ToHexString(serverHandshakeKeys.ServerIv).ToLowerInvariant()}");
+            Debug.WriteLine($"client_sn_key: {Convert.ToHexString(serverHandshakeKeys.ClientSnKey).ToLowerInvariant()}");
+            Debug.WriteLine($"server_sn_key: {Convert.ToHexString(serverHandshakeKeys.ServerSnKey).ToLowerInvariant()}");
 
             // from now on the conneciton is encrypted
         }

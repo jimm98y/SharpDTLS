@@ -1,5 +1,4 @@
 ﻿using Dtls13Test.Messages;
-using Org.BouncyCastle.Asn1;
 using System.Diagnostics;
 
 namespace Dtls13Test.Tests
@@ -59,6 +58,23 @@ namespace Dtls13Test.Tests
         public void TestServerExtensions(string serverExtensionsHex)
         {
             var serverExtensions = new ServerExtensionsDatagram();
+            serverExtensions.FromBytes(Convert.FromHexString(serverExtensionsHex.Replace(" ", "")));
+
+            string actual = Convert.ToHexString(serverExtensions.ToBytes()).ToLowerInvariant();
+            Assert.AreEqual(serverExtensionsHex.Replace(" ", ""), actual);
+
+            var cryptoContext = new Dtls13CryptoContext("", "", "004e03e64ab6cba6b542775ec230e20a", "6d9924be044ee97c624913f2", "", "7173fac51194e775001d625ef69d7c9f");
+            var encrypted = new ServerEncryptedExtensionsDatagram(cryptoContext, serverExtensions);
+            encrypted.FromBytes(encrypted.ToBytes());
+        }
+
+
+        [DataRow("2e 79 fa 00 2f ee 9d cf f3 f8 67 9a 48 59 fe 68 37 7f b3 4a da 85 df 87 9c 67 3e 50 1d 7a 4e 8f 19 50 e0 fc f6 7f e4 42 e7 d7 d2 b8 a3 d5 fa 59 57 4f fd 00")]
+        [TestMethod]
+        public void TestEncryptedServerExtensions(string serverExtensionsHex)
+        {
+            var cryptoContext = new Dtls13CryptoContext("", "", "004e03e64ab6cba6b542775ec230e20a", "6d9924be044ee97c624913f2", "", "7173fac51194e775001d625ef69d7c9f");
+            var serverExtensions = new ServerEncryptedExtensionsDatagram(cryptoContext, new ServerExtensionsDatagram());
             serverExtensions.FromBytes(Convert.FromHexString(serverExtensionsHex.Replace(" ", "")));
 
             string actual = Convert.ToHexString(serverExtensions.ToBytes()).ToLowerInvariant();

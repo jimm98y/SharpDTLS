@@ -52,7 +52,7 @@ namespace Dtls13Test
             return helloHash;
         }
 
-        public static (byte[] clientKey, byte[] clientIv, byte[] serverKey, byte[] serverIv, byte[] clientSnKey, byte[] serverSnKey) CalculateHandshakeKeys(byte[] helloHash, byte[] sharedSecret)
+        public static Dtls13CryptoContext CalculateHandshakeKeys(byte[] helloHash, byte[] sharedSecret)
         {
             var crypto = new BcTlsCrypto();
             var hashAlg = CryptoHashAlgorithm.sha256;
@@ -74,7 +74,7 @@ namespace Dtls13Test
             var clientSnKey = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "sn", new byte[0], 16).Extract();
             var serverSnKey = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "sn", new byte[0], 16).Extract();
 
-            return (clientKey, clientIv, serverKey, serverIv, clientSnKey, serverSnKey);
+            return new Dtls13CryptoContext(clientKey, clientIv, serverKey, serverIv, clientSnKey, serverSnKey);
         }
 
         // we have to duplicate the HkdfExpandLabel method because we need a different prefix for DTLS 1.3

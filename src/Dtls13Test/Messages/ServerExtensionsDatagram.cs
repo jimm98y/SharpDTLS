@@ -8,6 +8,8 @@ namespace Dtls13Test.Messages
     {
         public List<ITlsExtension> Extensions { get; private set; } = new List<ITlsExtension>();
 
+        public int SequenceNumber { get; set; }
+
         public ServerExtensionsDatagram()
         {
             Extensions = new List<ITlsExtension>(GetDefaultExtensions());
@@ -30,7 +32,7 @@ namespace Dtls13Test.Messages
 
             int length = (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
 
-            int sequenceNumber = (bytes[4] << 8) | bytes[5];
+            this.SequenceNumber = (bytes[4] << 8) | bytes[5];
 
             int fragmentOffset = (bytes[6] << 16) | (bytes[7] << 8) | bytes[8];
             int fragmentLength = (bytes[9] << 16) | (bytes[10] << 8) | bytes[11];
@@ -84,9 +86,8 @@ namespace Dtls13Test.Messages
             data[3] = (byte)(length & 0xFF);
 
             // handshake reconstruction data
-            int sequenceNumber = 1;
-            data[4] = (byte)((sequenceNumber >> 8) & 0xFF);
-            data[5] = (byte)(sequenceNumber & 0xFF);
+            data[4] = (byte)((this.SequenceNumber >> 8) & 0xFF);
+            data[5] = (byte)(this.SequenceNumber & 0xFF);
             int fragmentOffset = 0;
             data[6] = 0;
             data[7] = 0;
