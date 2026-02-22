@@ -5,10 +5,10 @@
         public List<ushort> CipherSuites = new List<ushort> { 0x1301, 0x1302, 0x1303 }; // TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256
         public byte[] PublicKey { get; private set; }
         public List<ITlsExtension> Extensions { get; private set; }
-        public byte[] OriginalBytes { get; private set; }
         public int Epoch { get; set; }
         public int RecordSequenceNumber { get; set; }
         public byte[] ClientRandom { get; set; } = null;
+        public byte[] Bytes { get; private set; }
 
         public ClientHelloDatagram()
         { }
@@ -38,7 +38,7 @@
             if (bytes.Length < 67) throw new ArgumentException("Buffer too small to be a valid ClientHello.");
             if (bytes[0] != 0x16) throw new InvalidDataException("Not a handshake record.");
 
-            OriginalBytes = bytes.ToArray();
+            Bytes = bytes.ToArray();
             Epoch = (bytes[3] << 8) | bytes[4];
 
             long seq = 0;
@@ -202,7 +202,9 @@
             clientHello[23] = (byte)((fragmentLength >> 8) & 0xff);
             clientHello[24] = (byte)(fragmentLength & 0xff);
 
-            return clientHello.Take(nextExtensionOffset).ToArray();
+            Bytes = clientHello.Take(nextExtensionOffset).ToArray();
+
+            return Bytes;
         }
     }
 

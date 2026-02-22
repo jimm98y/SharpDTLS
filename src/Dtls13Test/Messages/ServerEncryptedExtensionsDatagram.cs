@@ -8,10 +8,15 @@ namespace Dtls13Test.Messages
         private readonly Dtls13CryptoContext _cryptoContext;
         public IDatagram Datagram { get; set; }
         public ushort RecordNumber { get; private set; }
+        public byte[] Bytes { get; private set; }
 
-        public ServerEncryptedExtensionsDatagram(Dtls13CryptoContext cryptoContext, IDatagram datagram)
+        public ServerEncryptedExtensionsDatagram(Dtls13CryptoContext cryptoContext)
         {
             this._cryptoContext = cryptoContext ?? throw new ArgumentNullException(nameof(cryptoContext));
+        }
+
+        public ServerEncryptedExtensionsDatagram(Dtls13CryptoContext cryptoContext, IDatagram datagram) : this(cryptoContext)
+        {
             this.Datagram = datagram;
         }
 
@@ -19,6 +24,8 @@ namespace Dtls13Test.Messages
         {
             if ((encrypted[0] & 0x20) != 0x20)
                 throw new Exception("Wrong datagram");
+
+            Bytes = encrypted.ToArray();
 
             bool connectionIdPresent = (encrypted[0] & 0x10) == 0x10;
             bool is16bitLength = (encrypted[0] & 0x08) == 0x08;
@@ -90,7 +97,9 @@ namespace Dtls13Test.Messages
             encrypted[1] = (byte)(((this.RecordNumber >> 8) & 0xFF) ^ headerEncryption[0]);
             encrypted[2] = (byte)((this.RecordNumber & 0xFF) ^ headerEncryption[1]);
 
-            return encrypted.Take(5 + plaintext.Length + 16).ToArray();
+            Bytes = encrypted.Take(5 + plaintext.Length + 16).ToArray();
+
+            return Bytes;
         }
 
         private byte[] GetHeaderEncryption(byte[] encrypted)

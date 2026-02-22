@@ -4,7 +4,7 @@
     {
         public byte[] ServerRandom { get; set; } = null;
         public byte[] PublicKey { get; private set; }
-        public byte[] OriginalBytes { get; private set; }
+        public byte[] Bytes { get; private set; }
         public int Epoch { get; set; }
         public int RecordSequenceNumber { get; set; }
         public List<ITlsExtension> Extensions { get; private set; }
@@ -35,11 +35,10 @@
         {
             if (bytes == null) throw new ArgumentNullException(nameof(bytes));
             if (bytes.Length < 65) throw new ArgumentException("Buffer too small to be a valid ServerHello.");
-
             if (bytes[0] != 0x16) throw new InvalidDataException("Not a handshake record.");
             if (bytes[13] != 0x02) throw new InvalidDataException("Not a ServerHello handshake message.");
 
-            OriginalBytes = bytes.ToArray();
+            Bytes = bytes.ToArray();
             Epoch = (bytes[3] << 8) | bytes[4];
 
             long seq = 0;
@@ -192,7 +191,9 @@
             serverHello[23] = (byte)((fragmentLength >> 8) & 0xff);
             serverHello[24] = (byte)(fragmentLength & 0xff);
 
-            return serverHello.Take(nextExtensionOffset).ToArray();
+            Bytes = serverHello.Take(nextExtensionOffset).ToArray();
+
+            return Bytes;
         }
     }
 

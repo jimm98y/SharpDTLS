@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Org.BouncyCastle.Utilities;
+using System;
 using System.Collections.Generic;
 using System.Text;
 
@@ -7,8 +8,8 @@ namespace Dtls13Test.Messages
     public class ServerExtensionsDatagram : IDatagram
     {
         public List<ITlsExtension> Extensions { get; private set; } = new List<ITlsExtension>();
-
         public int SequenceNumber { get; set; }
+        public byte[] Bytes { get; private set; }
 
         public ServerExtensionsDatagram()
         {
@@ -27,8 +28,9 @@ namespace Dtls13Test.Messages
         {
             if (bytes == null) throw new ArgumentNullException(nameof(bytes));
             if (bytes.Length < 14) throw new ArgumentException("Buffer too small to be a valid ServerExtensions message.");
-
             if (bytes[0] != 0x08) throw new InvalidDataException("Not an EncryptedExtensions handshake message.");
+
+            Bytes = bytes.ToArray();
 
             int length = (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
 
@@ -127,7 +129,9 @@ namespace Dtls13Test.Messages
             data[10] = (byte)((fragmentLength >> 8) & 0xFF);
             data[11] = (byte)(fragmentLength & 0xFF);
 
-            return data.Take(nextExtensionOffset).ToArray();
+            Bytes = data.Take(nextExtensionOffset).ToArray();
+
+            return Bytes;
         }
     }
 }

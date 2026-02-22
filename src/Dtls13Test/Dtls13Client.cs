@@ -8,7 +8,8 @@ namespace Dtls13Test
     {
         private Dtls13CryptoContext _serverHandshakeKeys;
         private ServerExtensionsDatagram _serverExtensionsDatagram = null;
-
+        private ServerCertificateDatagram _serverCertificateDatagram = null;
+        private ServerCertVerifyDatagram _serverCertVerifyDatagram = null;
         public Dtls13Session Session { get; } = new Dtls13Session();
         public ClientTransport ClientTransport { get; }
 
@@ -39,7 +40,7 @@ namespace Dtls13Test
 
                 var clientHello = Session.HandshakeMessages.OfType<ClientHelloDatagram>().Last();
 
-                byte[] helloHash = CryptoUtils.CalculateHelloHash(clientHello.ToBytes(), serverHello.OriginalBytes);
+                byte[] helloHash = CryptoUtils.CalculateHelloHash(clientHello.ToBytes(), serverHello.Bytes);
                 Debug.WriteLine($"hello_hash: {Convert.ToHexString(helloHash).ToLowerInvariant()}");
 
                 byte[] sharedSecret = CryptoUtils.DeriveSharedSecretX25519(Session.PrivateKey, serverHello.PublicKey);
@@ -57,22 +58,38 @@ namespace Dtls13Test
             }
             else if(_serverExtensionsDatagram == null)
             {
-                ServerExtensionsDatagram serverExtensionsDatagram = new ServerExtensionsDatagram();
-                ServerEncryptedExtensionsDatagram encryptedExtensionsDatagram = new ServerEncryptedExtensionsDatagram(_serverHandshakeKeys, serverExtensionsDatagram);
+                ServerEncryptedExtensionsDatagram encryptedExtensionsDatagram = new ServerEncryptedExtensionsDatagram(_serverHandshakeKeys);
                 encryptedExtensionsDatagram.FromBytes(data);
+                var serverExtensionsDatagram = encryptedExtensionsDatagram.Datagram as ServerExtensionsDatagram;
                 Session.HandshakeMessages.Add(encryptedExtensionsDatagram);
                 _serverHandshakeKeys.ServerKeyUseCounter++;
 
                 Debug.WriteLine($"Received server extensions: {serverExtensionsDatagram.Extensions.Count}");
+                _serverExtensionsDatagram = serverExtensionsDatagram;
+            }
+            else if(_serverCertificateDatagram == null)
+            {
+                ServerEncryptedExtensionsDatagram encryptedCertificateDatagram = new ServerEncryptedExtensionsDatagram(_serverHandshakeKeys);
+                encryptedCertificateDatagram.FromBytes(data);
+                var serverCertificateDatagram = encryptedCertificateDatagram.Datagram as ServerCertificateDatagram;
+                Session.HandshakeMessages.Add(encryptedCertificateDatagram);
+                _serverHandshakeKeys.ServerKeyUseCounter++;
+
+                Debug.WriteLine($"Received server certificate: {Convert.ToHexString(serverCertificateDatagram.Certificate).ToLowerInvariant()}");
+                _serverCertificateDatagram = serverCertificateDatagram;
             }
             else
             {
-                ServerCertificateDatagram serverCertificateDatagram = new ServerCertificateDatagram();
-                ServerEncryptedExtensionsDatagram encryptedCertificateDatagram = new ServerEncryptedExtensionsDatagram(_serverHandshakeKeys, serverCertificateDatagram);
-                encryptedCertificateDatagram.FromBytes(data);
-                Session.HandshakeMessages.Add(encryptedCertificateDatagram);
+                ServerEncryptedExtensionsDatagram encryptedCertVerifyDatagram = new ServerEncryptedExtensionsDatagram(_serverHandshakeKeys);
+                encryptedCertVerifyDatagram.FromBytes(data);
+                var serverCertVerifyDatagram = encryptedCertVerifyDatagram.Datagram as ServerCertVerifyDatagram;
+                Session.HandshakeMessages.Add(encryptedCertVerifyDatagram);
+                _serverHandshakeKeys.ServerKeyUseCounter++;
 
-                Debug.WriteLine($"Received server certificate: {Convert.ToHexString(serverCertificateDatagram.Certificate).ToLowerInvariant()}");
+                Debug.WriteLine($"Received server cert verify: {Convert.ToHexString(serverCertVerifyDatagram.Signature).ToLowerInvariant()}");
+                _serverCertVerifyDatagram = serverCertVerifyDatagram;
+
+                // TODO verify the signature
             }
         }
 
