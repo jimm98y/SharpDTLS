@@ -69,7 +69,7 @@ namespace Dtls13Test
                     var encryptedExtensionsDatagramBytes = encryptedExtensionsDatagram.ToBytes();
                     session.HandshakeMessages.Add(encryptedExtensionsDatagram);
                     ServerTransport.Send(endpoint, encryptedExtensionsDatagramBytes);
-                    serverHandshakeKeys.KeyUseCounter++;
+                    serverHandshakeKeys.ServerKeyUseCounter++;
 
                     ServerEncryptedExtensionsDatagram encryptedCertificateDatagram = new ServerEncryptedExtensionsDatagram(serverHandshakeKeys, new ServerCertificateDatagram());
                     var encryptedCertificateDatagramBytes = encryptedCertificateDatagram.ToBytes();

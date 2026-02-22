@@ -61,7 +61,7 @@ namespace Dtls13Test
                 ServerEncryptedExtensionsDatagram encryptedExtensionsDatagram = new ServerEncryptedExtensionsDatagram(_serverHandshakeKeys, serverExtensionsDatagram);
                 encryptedExtensionsDatagram.FromBytes(data);
                 Session.HandshakeMessages.Add(encryptedExtensionsDatagram);
-                _serverHandshakeKeys.KeyUseCounter++;
+                _serverHandshakeKeys.ServerKeyUseCounter++;
 
                 Debug.WriteLine($"Received server extensions: {serverExtensionsDatagram.Extensions.Count}");
             }

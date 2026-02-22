@@ -35,10 +35,10 @@ namespace Dtls13Test.Messages
 
             byte[] iv = new byte[_cryptoContext.ServerIv.Length];
             Buffer.BlockCopy(_cryptoContext.ServerIv, 0, iv, 0, _cryptoContext.ServerIv.Length);
-            iv[iv.Length - 1] ^= (byte)((_cryptoContext.KeyUseCounter >> 24) & 0xFF);
-            iv[iv.Length - 1] ^= (byte)((_cryptoContext.KeyUseCounter >> 16) & 0xFF);
-            iv[iv.Length - 1] ^= (byte)((_cryptoContext.KeyUseCounter >> 8) & 0xFF);
-            iv[iv.Length - 1] ^= (byte)(_cryptoContext.KeyUseCounter & 0xFF);
+            iv[iv.Length - 1] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 24) & 0xFF);
+            iv[iv.Length - 1] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 16) & 0xFF);
+            iv[iv.Length - 1] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 8) & 0xFF);
+            iv[iv.Length - 1] ^= (byte)(_cryptoContext.ServerKeyUseCounter & 0xFF);
 
             Encrypt(_cryptoContext.AeadEncryptEngine, false, encrypted, 5, encrypted.Length, iv, new KeyParameter(_cryptoContext.ServerKey), 16, encrypted.Take(5).ToArray());
 
@@ -48,6 +48,7 @@ namespace Dtls13Test.Messages
             {
                 0x08 => new ServerExtensionsDatagram(),
                 0x0b => new ServerCertificateDatagram(),
+                0x0f => new ServerCertVerifyDatagram(),
                 _ => throw new Exception("Unknown datagram type")
             };
 
@@ -77,10 +78,10 @@ namespace Dtls13Test.Messages
 
             byte[] iv = new byte[_cryptoContext.ServerIv.Length];
             Buffer.BlockCopy(_cryptoContext.ServerIv, 0, iv, 0, _cryptoContext.ServerIv.Length);
-            iv[iv.Length - 1] ^= (byte)((_cryptoContext.KeyUseCounter >> 24) & 0xFF);
-            iv[iv.Length - 1] ^= (byte)((_cryptoContext.KeyUseCounter >> 16) & 0xFF);
-            iv[iv.Length - 1] ^= (byte)((_cryptoContext.KeyUseCounter >> 8) & 0xFF);
-            iv[iv.Length - 1] ^= (byte)(_cryptoContext.KeyUseCounter & 0xFF);
+            iv[iv.Length - 1] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 24) & 0xFF);
+            iv[iv.Length - 1] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 16) & 0xFF);
+            iv[iv.Length - 1] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 8) & 0xFF);
+            iv[iv.Length - 1] ^= (byte)(_cryptoContext.ServerKeyUseCounter & 0xFF);
 
             Encrypt(_cryptoContext.AeadDecryptEngine, true, encrypted, 5, 5 + plaintext.Length, iv, new KeyParameter(_cryptoContext.ServerKey), 16, encrypted.Take(5).ToArray());
 

@@ -85,11 +85,23 @@ namespace Dtls13Test.Tests
         [TestMethod]
         public void TestEncryptedCertificate(string serverCertificateHex)
         {
-            var cryptoContext = new Dtls13CryptoContext("", "", "004e03e64ab6cba6b542775ec230e20a", "6d9924be044ee97c624913f2", "", "7173fac51194e775001d625ef69d7c9f") { KeyUseCounter = 1 };
+            var cryptoContext = new Dtls13CryptoContext("", "", "004e03e64ab6cba6b542775ec230e20a", "6d9924be044ee97c624913f2", "", "7173fac51194e775001d625ef69d7c9f") { ServerKeyUseCounter = 1 };
             var serverCertificate = new ServerEncryptedExtensionsDatagram(cryptoContext, new ServerCertificateDatagram());
             serverCertificate.FromBytes(Convert.FromHexString(serverCertificateHex.Replace(" ", "")));
 
             string actual = Convert.ToHexString(serverCertificate.ToBytes()).ToLowerInvariant();
+            Assert.AreEqual(serverCertificateHex.Replace(" ", ""), actual);
+        }
+
+        [DataRow("2e a4 3e 01 21 83 be df ea 0f 4a a5 78 45 3a f4 f4 a4 be 41 06 9b eb e5 9c e4 93 3b f2 f2 ff 35 36 f0 e6 11 45 9f 7a fc 07 14 1e 4a 80 e4 b1 10 f2 c5 48 24 4e 83 42 cd 13 46 26 f0 d6 bc 12 2c 6e e3 cc 81 64 e3 e1 1f b8 bc 7b 58 ff 8d ef af 99 c9 26 81 f7 42 64 cc 29 5d f2 69 b4 63 af e5 78 53 ba 86 04 bd 8e ef 74 91 a0 fc 5a 5d df c2 2b 87 f7 cc 55 94 fd 2b 13 69 68 ab 07 ce 1d 84 33 07 df 9f 41 37 27 11 0f e0 5a c6 df 33 7c 44 4c 9a 2d 8b 28 30 b3 50 48 13 72 dd a1 4b e3 04 63 cb 94 16 f8 15 b7 29 b8 20 be b9 1e df 34 f8 b2 29 fa 71 4d fa 58 68 61 c5 25 15 aa d2 8e 98 52 90 d2 a7 e1 97 df 5a 4f 73 20 4d 95 2c a3 e2 34 af 34 fa e6 5a 3a 34 c1 33 8b 52 dd b7 8e 87 a9 14 95 21 2c 8e da ed 59 6e 0b 4b ad 18 65 66 8d 5a 33 9f d7 61 31 43 bc b8 5d 96 10 41 22 f6 17 e5 39 3b 4c ba 44 d0 86 e5 32 c7 39 e8 15 ea dc 2a 84 07 c4 72 bd f0 f6 f0 06 0d b4 71 19 71 38 7c 21 89 39 4f")]
+        [TestMethod]
+        public void TestEncryptedCertVerify(string serverCertificateHex)
+        {
+            var cryptoContext = new Dtls13CryptoContext("", "", "004e03e64ab6cba6b542775ec230e20a", "6d9924be044ee97c624913f2", "", "7173fac51194e775001d625ef69d7c9f") { ServerKeyUseCounter = 2 };
+            var serverCertVerify = new ServerEncryptedExtensionsDatagram(cryptoContext, new ServerCertVerifyDatagram());
+            serverCertVerify.FromBytes(Convert.FromHexString(serverCertificateHex.Replace(" ", "")));
+
+            string actual = Convert.ToHexString(serverCertVerify.ToBytes()).ToLowerInvariant();
             Assert.AreEqual(serverCertificateHex.Replace(" ", ""), actual);
         }
     }
