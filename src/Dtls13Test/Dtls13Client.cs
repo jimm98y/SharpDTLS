@@ -6,6 +6,9 @@ namespace Dtls13Test
 {
     public class Dtls13Client
     {
+        private Dtls13CryptoContext _serverHandshakeKeys;
+        private ServerExtensionsDatagram _serverExtensionsDatagram = null;
+
         public Dtls13Session Session { get; } = new Dtls13Session();
         public ClientTransport ClientTransport { get; }
 
@@ -19,36 +22,58 @@ namespace Dtls13Test
         {
             Console.WriteLine($"The client received: {Convert.ToHexString(data)}");
 
-            var serverHello = new ServerHelloDatagram();
-            try
+            if (_serverHandshakeKeys == null)
             {
-                serverHello.FromBytes(data);
+                var serverHello = new ServerHelloDatagram();
+                try
+                {
+                    serverHello.FromBytes(data);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Failed to parse ServerHello: {ex.Message}");
+                    return;
+                }
+
+                Session.HandshakeMessages.Add(serverHello);
+
+                var clientHello = Session.HandshakeMessages.OfType<ClientHelloDatagram>().Last();
+
+                byte[] helloHash = CryptoUtils.CalculateHelloHash(clientHello.ToBytes(), serverHello.OriginalBytes);
+                Debug.WriteLine($"hello_hash: {Convert.ToHexString(helloHash).ToLowerInvariant()}");
+
+                byte[] sharedSecret = CryptoUtils.DeriveSharedSecretX25519(Session.PrivateKey, serverHello.PublicKey);
+                Debug.WriteLine($"shared_secret: {Convert.ToHexString(sharedSecret).ToLowerInvariant()}");
+
+                _serverHandshakeKeys = CryptoUtils.CalculateHandshakeKeys(helloHash, sharedSecret);
+                Debug.WriteLine($"client_key: {Convert.ToHexString(_serverHandshakeKeys.ClientKey).ToLowerInvariant()}");
+                Debug.WriteLine($"client_iv: {Convert.ToHexString(_serverHandshakeKeys.ClientIv).ToLowerInvariant()}");
+                Debug.WriteLine($"server_key: {Convert.ToHexString(_serverHandshakeKeys.ServerKey).ToLowerInvariant()}");
+                Debug.WriteLine($"server_iv: {Convert.ToHexString(_serverHandshakeKeys.ServerIv).ToLowerInvariant()}");
+                Debug.WriteLine($"client_sn_key: {Convert.ToHexString(_serverHandshakeKeys.ClientSnKey).ToLowerInvariant()}");
+                Debug.WriteLine($"server_sn_key: {Convert.ToHexString(_serverHandshakeKeys.ServerSnKey).ToLowerInvariant()}");
+
+                // from now on the conneciton is encrypted
             }
-            catch (Exception ex)
+            else if(_serverExtensionsDatagram == null)
             {
-                Debug.WriteLine($"Failed to parse ServerHello: {ex.Message}");
-                return;
+                ServerExtensionsDatagram serverExtensionsDatagram = new ServerExtensionsDatagram();
+                ServerEncryptedExtensionsDatagram encryptedExtensionsDatagram = new ServerEncryptedExtensionsDatagram(_serverHandshakeKeys, serverExtensionsDatagram);
+                encryptedExtensionsDatagram.FromBytes(data);
+                Session.HandshakeMessages.Add(encryptedExtensionsDatagram);
+                _serverHandshakeKeys.KeyUseCounter++;
+
+                Debug.WriteLine($"Received server extensions: {serverExtensionsDatagram.Extensions.Count}");
             }
+            else
+            {
+                ServerCertificateDatagram serverCertificateDatagram = new ServerCertificateDatagram();
+                ServerEncryptedExtensionsDatagram encryptedCertificateDatagram = new ServerEncryptedExtensionsDatagram(_serverHandshakeKeys, serverCertificateDatagram);
+                encryptedCertificateDatagram.FromBytes(data);
+                Session.HandshakeMessages.Add(encryptedCertificateDatagram);
 
-            Session.HandshakeMessages.Add(serverHello);
-
-            var clientHello = Session.HandshakeMessages.OfType<ClientHelloDatagram>().Last();
-
-            byte[] helloHash = CryptoUtils.CalculateHelloHash(clientHello.ToBytes(), serverHello.OriginalBytes);
-            Debug.WriteLine($"hello_hash: {Convert.ToHexString(helloHash).ToLowerInvariant()}");
-
-            byte[] sharedSecret = CryptoUtils.DeriveSharedSecretX25519(Session.PrivateKey, serverHello.PublicKey);
-            Debug.WriteLine($"shared_secret: {Convert.ToHexString(sharedSecret).ToLowerInvariant()}");
-
-            var serverHandshakeKeys = CryptoUtils.CalculateHandshakeKeys(helloHash, sharedSecret);
-            Debug.WriteLine($"client_key: {Convert.ToHexString(serverHandshakeKeys.ClientKey).ToLowerInvariant()}");
-            Debug.WriteLine($"client_iv: {Convert.ToHexString(serverHandshakeKeys.ClientIv).ToLowerInvariant()}");
-            Debug.WriteLine($"server_key: {Convert.ToHexString(serverHandshakeKeys.ServerKey).ToLowerInvariant()}");
-            Debug.WriteLine($"server_iv: {Convert.ToHexString(serverHandshakeKeys.ServerIv).ToLowerInvariant()}");
-            Debug.WriteLine($"client_sn_key: {Convert.ToHexString(serverHandshakeKeys.ClientSnKey).ToLowerInvariant()}");
-            Debug.WriteLine($"server_sn_key: {Convert.ToHexString(serverHandshakeKeys.ServerSnKey).ToLowerInvariant()}");
-
-            // from now on the conneciton is encrypted
+                Debug.WriteLine($"Received server certificate: {Convert.ToHexString(serverCertificateDatagram.Certificate).ToLowerInvariant()}");
+            }
         }
 
         // DTLS 1.3 impl

@@ -64,8 +64,17 @@ namespace Dtls13Test
                     Debug.WriteLine($"client_sn_key: {Convert.ToHexString(serverHandshakeKeys.ClientSnKey).ToLowerInvariant()}");
                     Debug.WriteLine($"server_sn_key: {Convert.ToHexString(serverHandshakeKeys.ServerSnKey).ToLowerInvariant()}");
 
-                    // from now on the conneciton is encrypted
+                    // from now on the connection is encrypted
+                    ServerEncryptedExtensionsDatagram encryptedExtensionsDatagram = new ServerEncryptedExtensionsDatagram(serverHandshakeKeys, new ServerExtensionsDatagram());
+                    var encryptedExtensionsDatagramBytes = encryptedExtensionsDatagram.ToBytes();
+                    session.HandshakeMessages.Add(encryptedExtensionsDatagram);
+                    ServerTransport.Send(endpoint, encryptedExtensionsDatagramBytes);
+                    serverHandshakeKeys.KeyUseCounter++;
 
+                    ServerEncryptedExtensionsDatagram encryptedCertificateDatagram = new ServerEncryptedExtensionsDatagram(serverHandshakeKeys, new ServerCertificateDatagram());
+                    var encryptedCertificateDatagramBytes = encryptedCertificateDatagram.ToBytes();
+                    session.HandshakeMessages.Add(encryptedCertificateDatagram);
+                    ServerTransport.Send(endpoint, encryptedCertificateDatagramBytes);
                 }
             }
 

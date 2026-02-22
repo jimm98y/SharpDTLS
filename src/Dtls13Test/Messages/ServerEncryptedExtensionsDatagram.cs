@@ -44,7 +44,13 @@ namespace Dtls13Test.Messages
 
             byte[] plaintext = encrypted.Skip(5).Take(encrypted.Length - 5 - 16).ToArray();
 
-            this.Datagram = new ServerExtensionsDatagram();
+            this.Datagram = plaintext[0] switch
+            {
+                0x08 => new ServerExtensionsDatagram(),
+                0x0b => new ServerCertificateDatagram(),
+                _ => throw new Exception("Unknown datagram type")
+            };
+
             this.Datagram.FromBytes(plaintext);
         }
 
