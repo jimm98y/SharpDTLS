@@ -7,5 +7,7 @@ namespace Dtls13Test
         public byte[] PrivateKey { get; set; }
         public byte[] PublicKey { get; set; }
         public List<IDatagram> HandshakeMessages { get; } = new List<IDatagram>();
+        public Dtls13CryptoContext ServerHandshakeKeys { get; internal set; }
+        public Dtls13CryptoContext ServerApplicationKeys { get; internal set; }
     }
 }

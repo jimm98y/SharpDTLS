@@ -1,8 +1,8 @@
 ﻿using Dtls13Test.Messages;
-using Org.BouncyCastle.Asn1;
 using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Crypto.Digests;
 using Org.BouncyCastle.Security;
+using Org.BouncyCastle.Tls.Crypto;
+using Org.BouncyCastle.Tls.Crypto.Impl.BC;
 using Org.BouncyCastle.X509;
 using SharpSRTP.UDP;
 using System.Diagnostics;
@@ -12,10 +12,11 @@ namespace Dtls13Test
 {
     public class Dtls13Client
     {
-        private Dtls13CryptoContext _serverHandshakeKeys;
         private ServerExtensionsDatagram _serverExtensionsDatagram = null;
         private ServerCertificateDatagram _serverCertificateDatagram = null;
         private ServerCertVerifyDatagram _serverCertVerifyDatagram = null;
+        private HandshakeFinishedDatagram _serverFinishedDatagram = null;
+
         public Dtls13Session Session { get; } = new Dtls13Session();
         public ClientTransport ClientTransport { get; }
 
@@ -29,7 +30,7 @@ namespace Dtls13Test
         {
             Console.WriteLine($"The client received: {Convert.ToHexString(data)}");
 
-            if (_serverHandshakeKeys == null)
+            if (Session.ServerHandshakeKeys == null)
             {
                 var serverHello = new ServerHelloDatagram();
                 try
@@ -52,64 +53,48 @@ namespace Dtls13Test
                 byte[] sharedSecret = CryptoUtils.DeriveSharedSecretX25519(Session.PrivateKey, serverHello.PublicKey);
                 Debug.WriteLine($"shared_secret: {Convert.ToHexString(sharedSecret).ToLowerInvariant()}");
 
-                _serverHandshakeKeys = CryptoUtils.CalculateHandshakeKeys(helloHash, sharedSecret);
-                Debug.WriteLine($"client_key: {Convert.ToHexString(_serverHandshakeKeys.ClientKey).ToLowerInvariant()}");
-                Debug.WriteLine($"client_iv: {Convert.ToHexString(_serverHandshakeKeys.ClientIv).ToLowerInvariant()}");
-                Debug.WriteLine($"server_key: {Convert.ToHexString(_serverHandshakeKeys.ServerKey).ToLowerInvariant()}");
-                Debug.WriteLine($"server_iv: {Convert.ToHexString(_serverHandshakeKeys.ServerIv).ToLowerInvariant()}");
-                Debug.WriteLine($"client_sn_key: {Convert.ToHexString(_serverHandshakeKeys.ClientSnKey).ToLowerInvariant()}");
-                Debug.WriteLine($"server_sn_key: {Convert.ToHexString(_serverHandshakeKeys.ServerSnKey).ToLowerInvariant()}");
+                Session.ServerHandshakeKeys = CryptoUtils.CalculateHandshakeKeys(helloHash, sharedSecret);
+                Debug.WriteLine($"handshake_secret: {Convert.ToHexString(Session.ServerHandshakeKeys.Secret).ToLowerInvariant()}");
+                Debug.WriteLine($"client_key: {Convert.ToHexString(Session.ServerHandshakeKeys.ClientKey).ToLowerInvariant()}");
+                Debug.WriteLine($"client_iv: {Convert.ToHexString(Session.ServerHandshakeKeys.ClientIv).ToLowerInvariant()}");
+                Debug.WriteLine($"server_key: {Convert.ToHexString(Session.ServerHandshakeKeys.ServerKey).ToLowerInvariant()}");
+                Debug.WriteLine($"server_iv: {Convert.ToHexString(Session.ServerHandshakeKeys.ServerIv).ToLowerInvariant()}");
+                Debug.WriteLine($"client_sn_key: {Convert.ToHexString(Session.ServerHandshakeKeys.ClientSnKey).ToLowerInvariant()}");
+                Debug.WriteLine($"server_sn_key: {Convert.ToHexString(Session.ServerHandshakeKeys.ServerSnKey).ToLowerInvariant()}");
 
                 // from now on the conneciton is encrypted
             }
             else if (_serverExtensionsDatagram == null)
             {
-                ServerEncryptedExtensionsDatagram encryptedExtensionsDatagram = new ServerEncryptedExtensionsDatagram(_serverHandshakeKeys);
+                ServerEncryptedExtensionsDatagram encryptedExtensionsDatagram = new ServerEncryptedExtensionsDatagram(Session.ServerHandshakeKeys);
                 encryptedExtensionsDatagram.FromBytes(data);
                 var serverExtensionsDatagram = encryptedExtensionsDatagram.Datagram as ServerExtensionsDatagram;
                 Session.HandshakeMessages.Add(encryptedExtensionsDatagram);
-                _serverHandshakeKeys.ServerKeyUseCounter++;
+                Session.ServerHandshakeKeys.ServerKeyUseCounter++;
 
                 Debug.WriteLine($"Received server extensions: {serverExtensionsDatagram.Extensions.Count}");
                 _serverExtensionsDatagram = serverExtensionsDatagram;
             }
             else if (_serverCertificateDatagram == null)
             {
-                ServerEncryptedExtensionsDatagram encryptedCertificateDatagram = new ServerEncryptedExtensionsDatagram(_serverHandshakeKeys);
+                ServerEncryptedExtensionsDatagram encryptedCertificateDatagram = new ServerEncryptedExtensionsDatagram(Session.ServerHandshakeKeys);
                 encryptedCertificateDatagram.FromBytes(data);
                 var serverCertificateDatagram = encryptedCertificateDatagram.Datagram as ServerCertificateDatagram;
                 Session.HandshakeMessages.Add(encryptedCertificateDatagram);
-                _serverHandshakeKeys.ServerKeyUseCounter++;
+                Session.ServerHandshakeKeys.ServerKeyUseCounter++;
 
                 Debug.WriteLine($"Received server certificate: {Convert.ToHexString(serverCertificateDatagram.Certificate).ToLowerInvariant()}");
                 _serverCertificateDatagram = serverCertificateDatagram;
             }
             else if(_serverCertVerifyDatagram == null)
             {
-                ServerEncryptedExtensionsDatagram encryptedCertVerifyDatagram = new ServerEncryptedExtensionsDatagram(_serverHandshakeKeys);
+                ServerEncryptedExtensionsDatagram encryptedCertVerifyDatagram = new ServerEncryptedExtensionsDatagram(Session.ServerHandshakeKeys);
                 encryptedCertVerifyDatagram.FromBytes(data);
                 var serverCertVerifyDatagram = encryptedCertVerifyDatagram.Datagram as ServerCertVerifyDatagram;
-                Session.HandshakeMessages.Add(encryptedCertVerifyDatagram);
-                _serverHandshakeKeys.ServerKeyUseCounter++;
 
                 Debug.WriteLine($"Received server cert verify: {Convert.ToHexString(serverCertVerifyDatagram.Signature).ToLowerInvariant()}");
 
-                Sha256Digest hash = new Sha256Digest();
-                // find hash of all message up to this point
-                foreach (var msg in Session.HandshakeMessages)
-                {
-                    int skip;
-                    if (msg is ClientHelloDatagram || msg is ServerHelloDatagram)
-                        skip = 13;
-                    else
-                        skip = 0;
-
-                    var msgBytes = msg.Bytes.Skip(skip).Take(4).Skip(8).ToArray();
-                    hash.BlockUpdate(msgBytes, 0, msgBytes.Length);
-                }
-
-                byte[] h = new byte[hash.GetDigestSize()];
-                hash.DoFinal(h, 0);
+                byte[] h = CryptoUtils.HashAllMessages(Session.HandshakeMessages);
                 Debug.WriteLine($"handshake_hash: {Convert.ToHexString(h).ToLowerInvariant()}");
 
                 byte[] toSign = Encoding.UTF8.GetBytes("                                                                TLS 1.3, server CertificateVerify\0").Concat(h).ToArray();
@@ -127,13 +112,58 @@ namespace Dtls13Test
                     throw new Exception("Signature invalid!");
                 }
 
+                Session.HandshakeMessages.Add(encryptedCertVerifyDatagram);
+                Session.ServerHandshakeKeys.ServerKeyUseCounter++;
                 _serverCertVerifyDatagram = serverCertVerifyDatagram;
 
                 Debug.WriteLine($"Signature verified");
             }
-            else
+            else if(_serverFinishedDatagram == null)
             {
+                ServerEncryptedExtensionsDatagram encryptedFinishedDatagram = new ServerEncryptedExtensionsDatagram(Session.ServerHandshakeKeys);
+                encryptedFinishedDatagram.FromBytes(data);
+                var serverFinishedDatagram = encryptedFinishedDatagram.Datagram as HandshakeFinishedDatagram;
 
+                Debug.WriteLine($"Received server finished: {Convert.ToHexString(serverFinishedDatagram.VerifyData).ToLowerInvariant()}");
+
+                var crypto = new BcTlsCrypto();
+                var hashAlg = CryptoHashAlgorithm.sha256;
+                var finishedServerKey = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, Session.ServerHandshakeKeys.ServerSecret), hashAlg, "finished", new byte[0], 32).Extract();
+                byte[] finishedServerHash = CryptoUtils.HashAllMessages(Session.HandshakeMessages);
+                byte[] verifyServerData = CryptoUtils.CalculateHmac(finishedServerKey, finishedServerHash);
+
+                if (!verifyServerData.SequenceEqual(serverFinishedDatagram.VerifyData))
+                {
+                    throw new Exception("Server verify failed!");
+                }
+
+                Debug.WriteLine($"Server verify successful!");
+
+                Session.HandshakeMessages.Add(encryptedFinishedDatagram);
+                Session.ServerHandshakeKeys.ServerKeyUseCounter++;
+                byte[] finishedClientHash = CryptoUtils.HashAllMessages(Session.HandshakeMessages);
+
+                var finishedClientKey = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, Session.ServerHandshakeKeys.ClientSecret), hashAlg, "finished", new byte[0], 32).Extract();
+                byte[] verifyClientData = CryptoUtils.CalculateHmac(finishedClientKey, finishedClientHash);
+
+                ClientEncryptedExtensionsDatagram encryptedClientFinishedDatagram = new ClientEncryptedExtensionsDatagram(Session.ServerHandshakeKeys, new HandshakeFinishedDatagram() { VerifyData = verifyClientData });
+                var encryptedClientFinishedDatagramBytes = encryptedClientFinishedDatagram.ToBytes();
+                Session.HandshakeMessages.Add(encryptedClientFinishedDatagram);
+                ClientTransport.Send(encryptedClientFinishedDatagramBytes);
+                Session.ServerHandshakeKeys.ClientKeyUseCounter++;
+
+                // calculate application keys
+                byte[] allMessagesHash = CryptoUtils.HashAllMessages(Session.HandshakeMessages);
+                Session.ServerApplicationKeys = CryptoUtils.CalculateApplicationKeys(allMessagesHash, Session.ServerHandshakeKeys.Secret);
+
+                Debug.WriteLine("Client Application Keys:");
+                Debug.WriteLine($"client_key: {Convert.ToHexString(Session.ServerApplicationKeys.ClientKey).ToLowerInvariant()}");
+                Debug.WriteLine($"client_iv: {Convert.ToHexString(Session.ServerApplicationKeys.ClientIv).ToLowerInvariant()}");
+                Debug.WriteLine($"server_key: {Convert.ToHexString(Session.ServerApplicationKeys.ServerKey).ToLowerInvariant()}");
+                Debug.WriteLine($"server_iv: {Convert.ToHexString(Session.ServerApplicationKeys.ServerIv).ToLowerInvariant()}");
+                Debug.WriteLine($"client_sn_key: {Convert.ToHexString(Session.ServerApplicationKeys.ClientSnKey).ToLowerInvariant()}");
+                Debug.WriteLine($"server_sn_key: {Convert.ToHexString(Session.ServerApplicationKeys.ServerSnKey).ToLowerInvariant()}");
+                Debug.WriteLine("------------------------");
             }
         }
 

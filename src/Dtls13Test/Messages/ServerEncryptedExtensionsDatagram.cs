@@ -56,6 +56,7 @@ namespace Dtls13Test.Messages
                 0x08 => new ServerExtensionsDatagram(),
                 0x0b => new ServerCertificateDatagram(),
                 0x0f => new ServerCertVerifyDatagram(),
+                0x14 => new HandshakeFinishedDatagram(),
                 _ => throw new Exception("Unknown datagram type")
             };
 

@@ -1,5 +1,8 @@
-﻿using Org.BouncyCastle.Crypto;
+﻿using Dtls13Test.Messages;
+using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Crypto.Digests;
 using Org.BouncyCastle.Crypto.Generators;
+using Org.BouncyCastle.Crypto.Macs;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Tls;
@@ -74,7 +77,30 @@ namespace Dtls13Test
             var clientSnKey = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "sn", new byte[0], 16).Extract();
             var serverSnKey = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "sn", new byte[0], 16).Extract();
 
-            return new Dtls13CryptoContext(clientKey, clientIv, serverKey, serverIv, clientSnKey, serverSnKey);
+            return new Dtls13CryptoContext(handshakeSecret, clientSecret, serverSecret, clientKey, clientIv, serverKey, serverIv, clientSnKey, serverSnKey);
+        }
+
+        public static Dtls13CryptoContext CalculateApplicationKeys(byte[] handshakeHash, byte[] handshakeSecret)
+        {
+            var crypto = new BcTlsCrypto();
+            var hashAlg = CryptoHashAlgorithm.sha256;
+            byte[] zeroKey = new byte[32];
+
+            var emptyHash = SHA256.HashData(Array.Empty<byte>());
+            var derivedSecret = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, handshakeSecret), hashAlg, "derived", emptyHash, 32).Extract();
+
+            var masterSecret = (new BcTlsSecret(crypto, derivedSecret)).HkdfExtract(hashAlg, new BcTlsSecret(crypto, zeroKey)).Extract();
+
+            var clientSecret = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, masterSecret), hashAlg, "c ap traffic", handshakeHash, 32).Extract();
+            var serverSecret = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, masterSecret), hashAlg, "s ap traffic", handshakeHash, 32).Extract();
+            var clientKey = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "key", new byte[0], 16).Extract();
+            var serverKey = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "key", new byte[0], 16).Extract();
+            var clientIv = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "iv", new byte[0], 12).Extract();
+            var serverIv = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "iv", new byte[0], 12).Extract();
+            var clientSnKey = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "sn", new byte[0], 16).Extract();
+            var serverSnKey = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "sn", new byte[0], 16).Extract();
+
+            return new Dtls13CryptoContext(masterSecret, clientSecret, serverSecret, clientKey, clientIv, serverKey, serverIv, clientSnKey, serverSnKey);
         }
 
         // we have to duplicate the HkdfExpandLabel method because we need a different prefix for DTLS 1.3
@@ -171,5 +197,36 @@ namespace Dtls13Test
             return secret.HkdfExpand(cryptoHashAlgorithm, hkdfLabel, length);
         }
 #endif
+
+        public static byte[] HashAllMessages(List<IDatagram> handshakeMessages)
+        {
+            Sha256Digest hash = new Sha256Digest();
+
+            foreach (var msg in handshakeMessages)
+            {
+                int skip;
+                if (msg is ClientHelloDatagram || msg is ServerHelloDatagram)
+                    skip = 13;
+                else
+                    skip = 0;
+
+                var msgBytes = msg.Bytes.Skip(skip).Take(4).Concat(msg.Bytes.Skip(skip + 4 + 8)).ToArray();
+                hash.BlockUpdate(msgBytes, 0, msgBytes.Length);
+            }
+
+            byte[] h = new byte[hash.GetDigestSize()];
+            hash.DoFinal(h, 0);
+            return h;
+        }
+
+        public static byte[] CalculateHmac(byte[] key, byte[] data)
+        {
+            var hmac = new HMac(new Sha256Digest());
+            hmac.Init(new KeyParameter(key));
+            byte[] mac = new byte[hmac.GetMacSize()];
+            hmac.BlockUpdate(data, 0, data.Length);
+            hmac.DoFinal(mac, 0);
+            return mac;
+        }
     }
 }

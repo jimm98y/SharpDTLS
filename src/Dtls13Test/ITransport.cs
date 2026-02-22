@@ -199,7 +199,7 @@ namespace SharpSRTP.UDP
                         if (_activeSessions.TryGetValue(remoteEndpoint.ToString(), out transport))
                         {
                             // current session
-                            if (!transport.TryAddToReceiveQueue(buffer.ToArray()))
+                            if (!transport.TryAddToReceiveQueue(buffer.Take(length).ToArray()))
                             {
                                 throw new Exception("Receive queue full!");
                             }

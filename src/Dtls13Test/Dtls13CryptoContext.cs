@@ -15,8 +15,11 @@ namespace Dtls13Test
         public int ServerKeyUseCounter { get; set; } = 0;
         public int ClientKeyUseCounter { get; set; } = 0;
 
-        public Dtls13CryptoContext(string clientKey, string clientIv, string serverKey, string serverIv, string clientSnKey, string serverSnKey)
+        public Dtls13CryptoContext(string secret, string clientSecret, string serverSecret, string clientKey, string clientIv, string serverKey, string serverIv, string clientSnKey, string serverSnKey)
         {
+            Secret = Convert.FromHexString(secret);
+            ClientSecret = Convert.FromHexString(clientSecret);
+            ServerSecret = Convert.FromHexString(serverSecret);
             ClientKey = Convert.FromHexString(clientKey);
             ClientIv = Convert.FromHexString(clientIv);
             ServerKey = Convert.FromHexString(serverKey);
@@ -25,8 +28,11 @@ namespace Dtls13Test
             ServerSnKey = Convert.FromHexString(serverSnKey);
         }
 
-        public Dtls13CryptoContext(byte[] clientKey, byte[] clientIv, byte[] serverKey, byte[] serverIv, byte[] clientSnKey, byte[] serverSnKey)
+        public Dtls13CryptoContext(byte[] secret, byte[] clientSecret, byte[] serverSecret, byte[] clientKey, byte[] clientIv, byte[] serverKey, byte[] serverIv, byte[] clientSnKey, byte[] serverSnKey)
         {
+            Secret = secret;
+            ClientSecret = clientSecret;
+            ServerSecret = serverSecret;
             ClientKey = clientKey;
             ClientIv = clientIv;
             ServerKey = serverKey;
@@ -35,6 +41,9 @@ namespace Dtls13Test
             ServerSnKey = serverSnKey;
         }
 
+        public byte[] Secret { get; }
+        public byte[] ClientSecret { get; }
+        public byte[] ServerSecret { get; }
         public byte[] ClientKey { get; }
         public byte[] ClientIv { get; }
         public byte[] ServerKey { get; }
