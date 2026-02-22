@@ -1,6 +1,12 @@
 ﻿using Dtls13Test.Messages;
+using Org.BouncyCastle.Asn1;
+using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Crypto.Digests;
+using Org.BouncyCastle.Security;
+using Org.BouncyCastle.X509;
 using SharpSRTP.UDP;
 using System.Diagnostics;
+using System.Text;
 
 namespace Dtls13Test
 {
@@ -56,7 +62,7 @@ namespace Dtls13Test
 
                 // from now on the conneciton is encrypted
             }
-            else if(_serverExtensionsDatagram == null)
+            else if (_serverExtensionsDatagram == null)
             {
                 ServerEncryptedExtensionsDatagram encryptedExtensionsDatagram = new ServerEncryptedExtensionsDatagram(_serverHandshakeKeys);
                 encryptedExtensionsDatagram.FromBytes(data);
@@ -67,7 +73,7 @@ namespace Dtls13Test
                 Debug.WriteLine($"Received server extensions: {serverExtensionsDatagram.Extensions.Count}");
                 _serverExtensionsDatagram = serverExtensionsDatagram;
             }
-            else if(_serverCertificateDatagram == null)
+            else if (_serverCertificateDatagram == null)
             {
                 ServerEncryptedExtensionsDatagram encryptedCertificateDatagram = new ServerEncryptedExtensionsDatagram(_serverHandshakeKeys);
                 encryptedCertificateDatagram.FromBytes(data);
@@ -78,7 +84,7 @@ namespace Dtls13Test
                 Debug.WriteLine($"Received server certificate: {Convert.ToHexString(serverCertificateDatagram.Certificate).ToLowerInvariant()}");
                 _serverCertificateDatagram = serverCertificateDatagram;
             }
-            else
+            else if(_serverCertVerifyDatagram == null)
             {
                 ServerEncryptedExtensionsDatagram encryptedCertVerifyDatagram = new ServerEncryptedExtensionsDatagram(_serverHandshakeKeys);
                 encryptedCertVerifyDatagram.FromBytes(data);
@@ -87,9 +93,47 @@ namespace Dtls13Test
                 _serverHandshakeKeys.ServerKeyUseCounter++;
 
                 Debug.WriteLine($"Received server cert verify: {Convert.ToHexString(serverCertVerifyDatagram.Signature).ToLowerInvariant()}");
-                _serverCertVerifyDatagram = serverCertVerifyDatagram;
+
+                Sha256Digest hash = new Sha256Digest();
+                // find hash of all message up to this point
+                foreach (var msg in Session.HandshakeMessages)
+                {
+                    int skip;
+                    if (msg is ClientHelloDatagram || msg is ServerHelloDatagram)
+                        skip = 13;
+                    else
+                        skip = 0;
+
+                    var msgBytes = msg.Bytes.Skip(skip).Take(4).Skip(8).ToArray();
+                    hash.BlockUpdate(msgBytes, 0, msgBytes.Length);
+                }
+
+                byte[] h = new byte[hash.GetDigestSize()];
+                hash.DoFinal(h, 0);
+                Debug.WriteLine($"handshake_hash: {Convert.ToHexString(h).ToLowerInvariant()}");
+
+                byte[] toSign = Encoding.UTF8.GetBytes("                                                                TLS 1.3, server CertificateVerify\0").Concat(h).ToArray();
 
                 // TODO verify the signature
+                X509Certificate serverCertificate = new X509CertificateParser().ReadCertificate(_serverCertificateDatagram.Certificate);
+                AsymmetricKeyParameter publicKey = serverCertificate.GetPublicKey();
+
+                ISigner signer = SignerUtilities.GetSigner(serverCertificate.SigAlgName);
+                signer.Init(false, publicKey);
+                signer.BlockUpdate(toSign);
+
+                if(!signer.VerifySignature(serverCertVerifyDatagram.Signature))
+                {
+                    throw new Exception("Signature invalid!");
+                }
+
+                _serverCertVerifyDatagram = serverCertVerifyDatagram;
+
+                Debug.WriteLine($"Signature verified");
+            }
+            else
+            {
+
             }
         }
 
