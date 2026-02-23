@@ -202,15 +202,35 @@ namespace Dtls13Test
         {
             Sha256Digest hash = new Sha256Digest();
 
-            foreach (var msg in handshakeMessages)
+            foreach (IDatagram msg in handshakeMessages)
             {
+                IDatagram msgToHash = msg;
                 int skip;
+                int last;
                 if (msg is ClientHelloDatagram || msg is ServerHelloDatagram)
+                {
                     skip = 13;
+                    last = 0;
+                }
                 else
+                {
                     skip = 0;
+                    last = 1;
+                    if (msg is ServerEncryptedExtensionsDatagram msgServer)
+                    {
+                        msgToHash = msgServer.Datagram;
+                    }
+                    else if(msg is ClientEncryptedExtensionsDatagram msgClient)
+                    {
+                        msgToHash = msgClient.Datagram;
+                    }
+                    else
+                    {
+                        throw new NotSupportedException();
+                    }
+                }
 
-                var msgBytes = msg.Bytes.Skip(skip).Take(4).Concat(msg.Bytes.Skip(skip + 4 + 8)).ToArray();
+                var msgBytes = msgToHash.Bytes.Skip(skip).Take(4).Concat(msgToHash.Bytes.Skip(skip + 4 + 8).Take(msgToHash.Bytes.Length - skip - 4 - 8 - last)).ToArray();
                 hash.BlockUpdate(msgBytes, 0, msgBytes.Length);
             }
 

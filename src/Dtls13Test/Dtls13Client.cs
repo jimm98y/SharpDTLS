@@ -103,7 +103,7 @@ namespace Dtls13Test
                 X509Certificate serverCertificate = new X509CertificateParser().ReadCertificate(_serverCertificateDatagram.Certificate);
                 AsymmetricKeyParameter publicKey = serverCertificate.GetPublicKey();
 
-                ISigner signer = SignerUtilities.GetSigner(serverCertificate.SigAlgName);
+                ISigner signer = SignerUtilities.GetSigner("SHA256WITHRSA/PSS");
                 signer.Init(false, publicKey);
                 signer.BlockUpdate(toSign);
 
