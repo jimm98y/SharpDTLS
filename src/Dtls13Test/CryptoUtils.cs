@@ -216,11 +216,11 @@ namespace Dtls13Test
                 {
                     skip = 0;
                     last = 1;
-                    if (msg is ServerEncryptedExtensionsDatagram msgServer)
+                    if (msg is ServerEncryptedDatagram msgServer)
                     {
                         msgToHash = msgServer.Datagram;
                     }
-                    else if(msg is ClientEncryptedExtensionsDatagram msgClient)
+                    else if(msg is ClientEncryptedDatagram msgClient)
                     {
                         msgToHash = msgClient.Datagram;
                     }

@@ -3,19 +3,19 @@ using Org.BouncyCastle.Crypto.Parameters;
 
 namespace Dtls13Test.Messages
 {
-    public class ServerEncryptedExtensionsDatagram : IDatagram
+    public class ClientEncryptedDatagram : IDatagram
     {
         private readonly Dtls13CryptoContext _cryptoContext;
         public IDatagram Datagram { get; set; }
         public ushort RecordNumber { get; private set; }
         public byte[] Bytes { get; private set; }
 
-        public ServerEncryptedExtensionsDatagram(Dtls13CryptoContext cryptoContext)
+        public ClientEncryptedDatagram(Dtls13CryptoContext cryptoContext)
         {
             this._cryptoContext = cryptoContext ?? throw new ArgumentNullException(nameof(cryptoContext));
         }
 
-        public ServerEncryptedExtensionsDatagram(Dtls13CryptoContext cryptoContext, IDatagram datagram) : this(cryptoContext)
+        public ClientEncryptedDatagram(Dtls13CryptoContext cryptoContext, IDatagram datagram) : this(cryptoContext)
         {
             this.Datagram = datagram;
         }
@@ -40,22 +40,19 @@ namespace Dtls13Test.Messages
             encrypted[1] = (byte)((this.RecordNumber >> 8) & 0xFF);
             encrypted[2] = (byte)(this.RecordNumber & 0xFF);
 
-            byte[] iv = new byte[_cryptoContext.ServerIv.Length];
-            Buffer.BlockCopy(_cryptoContext.ServerIv, 0, iv, 0, _cryptoContext.ServerIv.Length);
-            iv[iv.Length - 1] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 24) & 0xFF);
-            iv[iv.Length - 1] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 16) & 0xFF);
-            iv[iv.Length - 1] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 8) & 0xFF);
-            iv[iv.Length - 1] ^= (byte)(_cryptoContext.ServerKeyUseCounter & 0xFF);
+            byte[] iv = new byte[_cryptoContext.ClientIv.Length];
+            Buffer.BlockCopy(_cryptoContext.ClientIv, 0, iv, 0, _cryptoContext.ClientIv.Length);
+            iv[iv.Length - 1] ^= (byte)((_cryptoContext.ClientKeyUseCounter >> 24) & 0xFF);
+            iv[iv.Length - 1] ^= (byte)((_cryptoContext.ClientKeyUseCounter >> 16) & 0xFF);
+            iv[iv.Length - 1] ^= (byte)((_cryptoContext.ClientKeyUseCounter >> 8) & 0xFF);
+            iv[iv.Length - 1] ^= (byte)(_cryptoContext.ClientKeyUseCounter & 0xFF);
 
-            Encrypt(_cryptoContext.AeadEncryptEngine, false, encrypted, 5, encrypted.Length, iv, new KeyParameter(_cryptoContext.ServerKey), 16, encrypted.Take(5).ToArray());
+            Encrypt(_cryptoContext.AeadEncryptEngine, false, encrypted, 5, encrypted.Length, iv, new KeyParameter(_cryptoContext.ClientKey), 16, encrypted.Take(5).ToArray());
 
             byte[] plaintext = encrypted.Skip(5).Take(encrypted.Length - 5 - 16).ToArray();
 
             this.Datagram = plaintext[0] switch
             {
-                0x08 => new ServerExtensionsDatagram(),
-                0x0b => new ServerCertificateDatagram(),
-                0x0f => new ServerCertVerifyDatagram(),
                 0x14 => new HandshakeFinishedDatagram(),
                 _ => throw new Exception("Unknown datagram type")
             };
@@ -75,7 +72,7 @@ namespace Dtls13Test.Messages
             byte[] plaintext = Datagram.ToBytes();
             ushort recordLength = (ushort)(plaintext.Length + 16);
 
-            encrypted[1] = (byte)((this.RecordNumber >> 8) & 0xFF);         
+            encrypted[1] = (byte)((this.RecordNumber >> 8) & 0xFF);
             encrypted[2] = (byte)(this.RecordNumber & 0xFF);
 
             encrypted[3] = (byte)((recordLength >> 8) & 0xFF);
@@ -84,14 +81,14 @@ namespace Dtls13Test.Messages
             // encrypted data
             Buffer.BlockCopy(plaintext, 0, encrypted, 5, plaintext.Length);
 
-            byte[] iv = new byte[_cryptoContext.ServerIv.Length];
-            Buffer.BlockCopy(_cryptoContext.ServerIv, 0, iv, 0, _cryptoContext.ServerIv.Length);
-            iv[iv.Length - 1] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 24) & 0xFF);
-            iv[iv.Length - 1] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 16) & 0xFF);
-            iv[iv.Length - 1] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 8) & 0xFF);
-            iv[iv.Length - 1] ^= (byte)(_cryptoContext.ServerKeyUseCounter & 0xFF);
+            byte[] iv = new byte[_cryptoContext.ClientIv.Length];
+            Buffer.BlockCopy(_cryptoContext.ClientIv, 0, iv, 0, _cryptoContext.ClientIv.Length);
+            iv[iv.Length - 1] ^= (byte)((_cryptoContext.ClientKeyUseCounter >> 24) & 0xFF);
+            iv[iv.Length - 1] ^= (byte)((_cryptoContext.ClientKeyUseCounter >> 16) & 0xFF);
+            iv[iv.Length - 1] ^= (byte)((_cryptoContext.ClientKeyUseCounter >> 8) & 0xFF);
+            iv[iv.Length - 1] ^= (byte)(_cryptoContext.ClientKeyUseCounter & 0xFF);
 
-            Encrypt(_cryptoContext.AeadDecryptEngine, true, encrypted, 5, 5 + plaintext.Length, iv, new KeyParameter(_cryptoContext.ServerKey), 16, encrypted.Take(5).ToArray());
+            Encrypt(_cryptoContext.AeadDecryptEngine, true, encrypted, 5, 5 + plaintext.Length, iv, new KeyParameter(_cryptoContext.ClientKey), 16, encrypted.Take(5).ToArray());
 
             // encrypt record number
             byte[] headerEncryption = GetHeaderEncryption(encrypted);
@@ -107,7 +104,7 @@ namespace Dtls13Test.Messages
         {
             byte[] sample = new byte[16];
             Buffer.BlockCopy(encrypted, 5, sample, 0, 16);
-            _cryptoContext.AesEngine.Init(true, new KeyParameter(_cryptoContext.ServerSnKey));
+            _cryptoContext.AesEngine.Init(true, new KeyParameter(_cryptoContext.ClientSnKey));
             _cryptoContext.AesEngine.ProcessBlock(sample, 0, sample, 0);
             return sample;
         }

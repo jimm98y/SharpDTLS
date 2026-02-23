@@ -66,7 +66,7 @@ namespace Dtls13Test
             }
             else if (_serverExtensionsDatagram == null)
             {
-                ServerEncryptedExtensionsDatagram encryptedExtensionsDatagram = new ServerEncryptedExtensionsDatagram(Session.ServerHandshakeKeys);
+                ServerEncryptedDatagram encryptedExtensionsDatagram = new ServerEncryptedDatagram(Session.ServerHandshakeKeys);
                 encryptedExtensionsDatagram.FromBytes(data);
                 var serverExtensionsDatagram = encryptedExtensionsDatagram.Datagram as ServerExtensionsDatagram;
                 Session.HandshakeMessages.Add(encryptedExtensionsDatagram);
@@ -77,7 +77,7 @@ namespace Dtls13Test
             }
             else if (_serverCertificateDatagram == null)
             {
-                ServerEncryptedExtensionsDatagram encryptedCertificateDatagram = new ServerEncryptedExtensionsDatagram(Session.ServerHandshakeKeys);
+                ServerEncryptedDatagram encryptedCertificateDatagram = new ServerEncryptedDatagram(Session.ServerHandshakeKeys);
                 encryptedCertificateDatagram.FromBytes(data);
                 var serverCertificateDatagram = encryptedCertificateDatagram.Datagram as ServerCertificateDatagram;
                 Session.HandshakeMessages.Add(encryptedCertificateDatagram);
@@ -88,7 +88,7 @@ namespace Dtls13Test
             }
             else if(_serverCertVerifyDatagram == null)
             {
-                ServerEncryptedExtensionsDatagram encryptedCertVerifyDatagram = new ServerEncryptedExtensionsDatagram(Session.ServerHandshakeKeys);
+                ServerEncryptedDatagram encryptedCertVerifyDatagram = new ServerEncryptedDatagram(Session.ServerHandshakeKeys);
                 encryptedCertVerifyDatagram.FromBytes(data);
                 var serverCertVerifyDatagram = encryptedCertVerifyDatagram.Datagram as ServerCertVerifyDatagram;
 
@@ -120,7 +120,7 @@ namespace Dtls13Test
             }
             else if(_serverFinishedDatagram == null)
             {
-                ServerEncryptedExtensionsDatagram encryptedFinishedDatagram = new ServerEncryptedExtensionsDatagram(Session.ServerHandshakeKeys);
+                ServerEncryptedDatagram encryptedFinishedDatagram = new ServerEncryptedDatagram(Session.ServerHandshakeKeys);
                 encryptedFinishedDatagram.FromBytes(data);
                 var serverFinishedDatagram = encryptedFinishedDatagram.Datagram as HandshakeFinishedDatagram;
 
@@ -146,7 +146,7 @@ namespace Dtls13Test
                 var finishedClientKey = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, Session.ServerHandshakeKeys.ClientSecret), hashAlg, "finished", new byte[0], 32).Extract();
                 byte[] verifyClientData = CryptoUtils.CalculateHmac(finishedClientKey, finishedClientHash);
 
-                ClientEncryptedExtensionsDatagram encryptedClientFinishedDatagram = new ClientEncryptedExtensionsDatagram(Session.ServerHandshakeKeys, new HandshakeFinishedDatagram() { VerifyData = verifyClientData });
+                ClientEncryptedDatagram encryptedClientFinishedDatagram = new ClientEncryptedDatagram(Session.ServerHandshakeKeys, new HandshakeFinishedDatagram() { VerifyData = verifyClientData });
                 var encryptedClientFinishedDatagramBytes = encryptedClientFinishedDatagram.ToBytes();
                 Session.HandshakeMessages.Add(encryptedClientFinishedDatagram);
                 ClientTransport.Send(encryptedClientFinishedDatagramBytes);

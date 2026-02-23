@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace Dtls13Test.Messages
+﻿namespace Dtls13Test.Messages
 {
     public class ServerCertificateDatagram : IDatagram
     {

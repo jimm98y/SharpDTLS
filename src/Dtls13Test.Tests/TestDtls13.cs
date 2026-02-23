@@ -64,7 +64,7 @@ namespace Dtls13Test.Tests
             Assert.AreEqual(serverExtensionsHex.Replace(" ", ""), actual);
 
             var cryptoContext = new Dtls13CryptoContext("", "", "", "", "", "004e03e64ab6cba6b542775ec230e20a", "6d9924be044ee97c624913f2", "", "7173fac51194e775001d625ef69d7c9f");
-            var encrypted = new ServerEncryptedExtensionsDatagram(cryptoContext, serverExtensions);
+            var encrypted = new ServerEncryptedDatagram(cryptoContext, serverExtensions);
             encrypted.FromBytes(encrypted.ToBytes());
         }
 
@@ -74,7 +74,7 @@ namespace Dtls13Test.Tests
         public void TestEncryptedServerExtensions(string serverExtensionsHex)
         {
             var cryptoContext = new Dtls13CryptoContext("", "", "", "", "", "004e03e64ab6cba6b542775ec230e20a", "6d9924be044ee97c624913f2", "", "7173fac51194e775001d625ef69d7c9f");
-            var serverExtensions = new ServerEncryptedExtensionsDatagram(cryptoContext);
+            var serverExtensions = new ServerEncryptedDatagram(cryptoContext);
             serverExtensions.FromBytes(Convert.FromHexString(serverExtensionsHex.Replace(" ", "")));
 
             string actual = Convert.ToHexString(serverExtensions.ToBytes()).ToLowerInvariant();
@@ -86,7 +86,7 @@ namespace Dtls13Test.Tests
         public void TestEncryptedCertificate(string serverCertificateHex)
         {
             var cryptoContext = new Dtls13CryptoContext("", "", "", "", "", "004e03e64ab6cba6b542775ec230e20a", "6d9924be044ee97c624913f2", "", "7173fac51194e775001d625ef69d7c9f") { ServerKeyUseCounter = 1 };
-            var serverCertificate = new ServerEncryptedExtensionsDatagram(cryptoContext);
+            var serverCertificate = new ServerEncryptedDatagram(cryptoContext);
             serverCertificate.FromBytes(Convert.FromHexString(serverCertificateHex.Replace(" ", "")));
 
             string actual = Convert.ToHexString(serverCertificate.ToBytes()).ToLowerInvariant();
@@ -98,7 +98,7 @@ namespace Dtls13Test.Tests
         public void TestEncryptedCertVerify(string serverCertVerifyHex)
         {
             var cryptoContext = new Dtls13CryptoContext("", "", "", "", "", "004e03e64ab6cba6b542775ec230e20a", "6d9924be044ee97c624913f2", "", "7173fac51194e775001d625ef69d7c9f") { ServerKeyUseCounter = 2 };
-            var serverCertVerify = new ServerEncryptedExtensionsDatagram(cryptoContext);
+            var serverCertVerify = new ServerEncryptedDatagram(cryptoContext);
             serverCertVerify.FromBytes(Convert.FromHexString(serverCertVerifyHex.Replace(" ", "")));
 
             string actual = Convert.ToHexString(serverCertVerify.ToBytes()).ToLowerInvariant();
@@ -110,7 +110,7 @@ namespace Dtls13Test.Tests
         public void TestEncryptedHandshakeFinished(string serverFinishedHex)
         {
             var cryptoContext = new Dtls13CryptoContext("", "", "", "", "", "004e03e64ab6cba6b542775ec230e20a", "6d9924be044ee97c624913f2", "", "7173fac51194e775001d625ef69d7c9f") { ServerKeyUseCounter = 3 };
-            var serverCertVerify = new ServerEncryptedExtensionsDatagram(cryptoContext);
+            var serverCertVerify = new ServerEncryptedDatagram(cryptoContext);
             serverCertVerify.FromBytes(Convert.FromHexString(serverFinishedHex.Replace(" ", "")));
 
             string actual = Convert.ToHexString(serverCertVerify.ToBytes()).ToLowerInvariant();

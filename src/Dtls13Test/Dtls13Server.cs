@@ -79,13 +79,13 @@ namespace Dtls13Test
                     Debug.WriteLine($"server_sn_key: {Convert.ToHexString(session.ServerHandshakeKeys.ServerSnKey).ToLowerInvariant()}");
 
                     // from now on the connection is encrypted
-                    ServerEncryptedExtensionsDatagram encryptedExtensionsDatagram = new ServerEncryptedExtensionsDatagram(session.ServerHandshakeKeys, new ServerExtensionsDatagram());
+                    ServerEncryptedDatagram encryptedExtensionsDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new ServerExtensionsDatagram());
                     var encryptedExtensionsDatagramBytes = encryptedExtensionsDatagram.ToBytes();
                     session.HandshakeMessages.Add(encryptedExtensionsDatagram);
                     ServerTransport.Send(endpoint, encryptedExtensionsDatagramBytes);
                     session.ServerHandshakeKeys.ServerKeyUseCounter++;
 
-                    ServerEncryptedExtensionsDatagram encryptedCertificateDatagram = new ServerEncryptedExtensionsDatagram(session.ServerHandshakeKeys, new ServerCertificateDatagram());
+                    ServerEncryptedDatagram encryptedCertificateDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new ServerCertificateDatagram());
                     var encryptedCertificateDatagramBytes = encryptedCertificateDatagram.ToBytes();
                     session.HandshakeMessages.Add(encryptedCertificateDatagram);
                     ServerTransport.Send(endpoint, encryptedCertificateDatagramBytes);
@@ -131,7 +131,7 @@ namespace Dtls13Test
                     byte[] signature = signer.GenerateSignature();
                     Debug.WriteLine($"signature: {Convert.ToHexString(signature).ToLowerInvariant()}");
 
-                    ServerEncryptedExtensionsDatagram encryptedCertVerifyDatagram = new ServerEncryptedExtensionsDatagram(session.ServerHandshakeKeys, new ServerCertVerifyDatagram() { Signature = signature });
+                    ServerEncryptedDatagram encryptedCertVerifyDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new ServerCertVerifyDatagram() { Signature = signature });
                     var encryptedCertVerifyDatagramBytes = encryptedCertVerifyDatagram.ToBytes();
                     session.HandshakeMessages.Add(encryptedCertVerifyDatagram);
                     ServerTransport.Send(endpoint, encryptedCertVerifyDatagramBytes);
@@ -143,7 +143,7 @@ namespace Dtls13Test
                     byte[] finishedHash = CryptoUtils.HashAllMessages(session.HandshakeMessages);
                     byte[] verifyServerData = CryptoUtils.CalculateHmac(finishedServerKey, finishedHash);
 
-                    ServerEncryptedExtensionsDatagram encryptedFinishedDatagram = new ServerEncryptedExtensionsDatagram(session.ServerHandshakeKeys, new HandshakeFinishedDatagram() { VerifyData = verifyServerData });
+                    ServerEncryptedDatagram encryptedFinishedDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new HandshakeFinishedDatagram() { VerifyData = verifyServerData });
                     var encryptedFinishedDatagramBytes = encryptedFinishedDatagram.ToBytes();
                     session.HandshakeMessages.Add(encryptedFinishedDatagram);
                     ServerTransport.Send(endpoint, encryptedFinishedDatagramBytes);
@@ -157,7 +157,7 @@ namespace Dtls13Test
             else
             {
                 // session was already added, we're waiting for Finished
-                ClientEncryptedExtensionsDatagram encryptedFinishedDatagram = new ClientEncryptedExtensionsDatagram(session.ServerHandshakeKeys);
+                ClientEncryptedDatagram encryptedFinishedDatagram = new ClientEncryptedDatagram(session.ServerHandshakeKeys);
                 encryptedFinishedDatagram.FromBytes(data);
                 var clientFinishedDatagram = encryptedFinishedDatagram.Datagram as HandshakeFinishedDatagram;
 
