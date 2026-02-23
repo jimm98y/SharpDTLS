@@ -110,7 +110,7 @@ namespace Dtls13Test.Messages
                 nextExtensionOffset += extensionLength;
             }
              
-            data[nextExtensionOffset] = 0x16; // type is 22(handshake record)
+            data[nextExtensionOffset] = 0x16; // type is 22 (handshake record)
             nextExtensionOffset += 1;
 
             // fill in lengths
