@@ -116,5 +116,18 @@ namespace Dtls13Test.Tests
             string actual = Convert.ToHexString(serverCertVerify.ToBytes()).ToLowerInvariant();
             Assert.AreEqual(serverFinishedHex.Replace(" ", ""), actual);
         }
+
+
+        [DataRow("2f 31 50 00 23 ea 80 ab 8e 08 c9 38 95 41 8d 24 35 71 ea 6d e7 d8 63 ee 84 23 0b b6 04 3c b3 84 df 94 b6 da 28 5a 3b c4")]
+        [TestMethod]
+        public void TestEncryptedServerAck(string serverAckHex)
+        {
+            var cryptoContext = new Dtls13CryptoContext("", "", "", "", "", "2b65fffbbc8189474aa2003c43c32d4d", "582f5a11bdaf973fe3ffeb4e", "", "57ba02596c6a1352d7fe8416c7e17d5a") { ServerKeyUseCounter = 0 };
+            var serverAck = new ServerEncryptedDatagram(cryptoContext);
+            serverAck.FromBytes(Convert.FromHexString(serverAckHex.Replace(" ", "")));
+
+            string actual = Convert.ToHexString(serverAck.ToBytes()).ToLowerInvariant();
+            Assert.AreEqual(serverAckHex.Replace(" ", ""), actual);
+        }
     }
 }

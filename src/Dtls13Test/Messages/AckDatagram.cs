@@ -9,7 +9,7 @@
 
         public void FromBytes(byte[] bytes)
         {
-            if (bytes == null) throw new ArgumentNullException(nameof(bytes)); if (bytes.Length < 19) throw new ArgumentException("Buffer too small for ServerAckDatagram.");
+            if (bytes == null) throw new ArgumentNullException(nameof(bytes)); if (bytes.Length < 19) throw new ArgumentException("Buffer too small for AckDatagram.");
             int length = (bytes[0] << 8) | bytes[1];
             if (length != 16) throw new InvalidDataException($"Unexpected payload length: {length}");
 

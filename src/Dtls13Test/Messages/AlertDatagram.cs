@@ -15,7 +15,7 @@
 
         public void FromBytes(byte[] bytes)
         {
-            if (bytes == null) throw new ArgumentNullException(nameof(bytes)); if (bytes.Length < 3) throw new ArgumentException("Buffer too small for ServerAckDatagram.");
+            if (bytes == null) throw new ArgumentNullException(nameof(bytes)); if (bytes.Length < 3) throw new ArgumentException("Buffer too small for AlertDatagram.");
 
             this.Bytes = bytes.ToArray();
             this.Alert = (ushort)((bytes[0] << 8) | bytes[1]);
