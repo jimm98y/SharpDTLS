@@ -35,7 +35,6 @@ namespace Dtls13Test
 
             if (!_sessions.TryGetValue(endpoint.ToString(), out var session))
             {
-                session = new Dtls13Session();                
                 var clientHello = new ClientHelloDatagram();
 
                 try
@@ -48,12 +47,7 @@ namespace Dtls13Test
                     return;
                 }
 
-                session.HandshakeMessages.Add(clientHello);
-
                 // now send ServerHello
-                session.PrivateKey = Convert.FromHexString("909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeaf");
-                session.PublicKey = Convert.FromHexString("9fd7ad6dcff4298dd3f96d5b1b2af910a0535b1488d7f8fabb349a982880b615");
-
                 if (clientHello.Extensions.OfType<CookieExtension>().FirstOrDefault() == null)
                 {
                     var serverHelloRetry = new ServerHelloDatagram()
@@ -75,6 +69,11 @@ namespace Dtls13Test
                         throw new Exception("Invalid cookie!");
                     }
                 }
+
+                session = new Dtls13Session();
+                session.HandshakeMessages.Add(clientHello);
+                session.PrivateKey = Convert.FromHexString("909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeaf");
+                session.PublicKey = Convert.FromHexString("9fd7ad6dcff4298dd3f96d5b1b2af910a0535b1488d7f8fabb349a982880b615");
 
                 if (_sessions.TryAdd(endpoint.ToString(), session))
                 {
