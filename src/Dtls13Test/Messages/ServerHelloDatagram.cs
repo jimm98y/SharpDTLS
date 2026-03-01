@@ -2,7 +2,7 @@
 {
     public class ServerHelloDatagram : IDatagram
     {
-        public byte[] ServerRandom { get; set; } = Convert.FromHexString("CF 21 AD 74 E5 9A 61 11 BE 1D 8C 02 1E 65 B8 91 C2 A2 11 16 7A BB 8C 5E 07 9E 09 E2 C8 A8 33 9C".Replace(" ", "")); // the HelloRetryRequest message uses the same structure as the ServerHello, but with Random set to the special value
+        public byte[] ServerRandom { get; set; } 
         public byte[] PublicKey { get; private set; }
         public byte[] Bytes { get; private set; }
         public int Epoch { get; set; } = 0;
@@ -14,11 +14,11 @@
         public ServerHelloDatagram()
         { }
 
-        public ServerHelloDatagram(byte[] publicKey, ushort selectedCipherSuite)
+        public ServerHelloDatagram(byte[] publicKey, ushort selectedCipherSuite, byte[] serverRandom)
         {
             PublicKey = publicKey;
             SelectedCipherSuite = selectedCipherSuite;
-            ServerRandom = CryptoUtils.GenerateRandom(32);
+            ServerRandom = serverRandom;
             Extensions = new List<ITlsExtension>(GetDefaultExtensions(publicKey));
         }
 
