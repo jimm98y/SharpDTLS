@@ -9,5 +9,6 @@ namespace Dtls13Test
         public List<IDatagram> HandshakeMessages { get; } = new List<IDatagram>();
         public Dtls13CryptoContext ServerHandshakeKeys { get; internal set; }
         public Dtls13CryptoContext ServerApplicationKeys { get; internal set; }
+        public ushort RecordNumber { get; set; }
     }
 }

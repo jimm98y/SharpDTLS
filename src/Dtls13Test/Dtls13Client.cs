@@ -29,7 +29,7 @@ namespace Dtls13Test
             ClientTransport.OnDataReceived += ClientTransport_OnDataReceived;
         }
 
-        private void ClientTransport_OnDataReceived(object? sender, byte[] data)
+        private async void ClientTransport_OnDataReceived(object? sender, byte[] data)
         {
             Console.WriteLine($"The client received: {Convert.ToHexString(data)}");
 
@@ -201,9 +201,9 @@ namespace Dtls13Test
                 ServerEncryptedDatagram encryptedServerAckDatagram = new ServerEncryptedDatagram(Session.ServerApplicationKeys);
                 encryptedServerAckDatagram.FromBytes(data);
                 var serverAckDatagram = encryptedServerAckDatagram.Datagram as AckDatagram;
+                Session.ServerApplicationKeys.ServerKeyUseCounter++;
 
                 _serverAckDatagram = serverAckDatagram;
-                Session.ServerApplicationKeys.ServerKeyUseCounter++;
 
                 HandshakeFinished?.Invoke(this, EventArgs.Empty);
             }
@@ -215,6 +215,10 @@ namespace Dtls13Test
                 Session.ServerApplicationKeys.ServerKeyUseCounter++;
 
                 Debug.WriteLine($"Received server application data: {Encoding.UTF8.GetString(serverApplicationDatagram.Data)}");
+
+                await Task.Delay(1000);
+
+                SendApplicationData(Encoding.UTF8.GetBytes("Hello from client!"));
             }
         }
 
@@ -233,17 +237,16 @@ namespace Dtls13Test
 
             Session.HandshakeMessages.Add(clientHello);
             ClientTransport.Send(clientHello.ToBytes());
-        }    
-        
+        }
+
+        private ushort _recordNumber = 0; 
+
         public void SendApplicationData(byte[] data)
         {
-            ClientEncryptedDatagram encryptedApplicationData = new ClientEncryptedDatagram(Session.ServerApplicationKeys, new ApplicationDataDatagram()
-            {
-                Data = data
-            })
+            ClientEncryptedDatagram encryptedApplicationData = new ClientEncryptedDatagram(Session.ServerApplicationKeys, new ApplicationDataDatagram(data))
             {
                  Epoch = 3,
-                 RecordNumber = 0
+                 RecordNumber = _recordNumber++
             };
             var encryptedApplicationDataBytes = encryptedApplicationData.ToBytes();
             Session.ServerApplicationKeys.ClientKeyUseCounter++;

@@ -5,7 +5,7 @@
         public List<ushort> CipherSuites = new List<ushort> { 0x1301, 0x1302, 0x1303 }; // TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256
         public byte[] PublicKey { get; private set; }
         public List<ITlsExtension> Extensions { get; private set; }
-        public int Epoch { get; set; }
+        public int Epoch { get; set; } = 0;
         public int RecordSequenceNumber { get; set; }
         public byte[] ClientRandom { get; set; } = null;
         public byte[] Bytes { get; private set; }

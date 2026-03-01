@@ -29,7 +29,7 @@ namespace Dtls13Test
             ServerTransport.OnDataReceived += ServerTransport_OnDataReceived;
         }
 
-        private void ServerTransport_OnDataReceived(object? sender, byte[] data)
+        private async void ServerTransport_OnDataReceived(object? sender, byte[] data)
         {
             var endpoint = (EndPoint)sender;
             Console.WriteLine($"The server received: {Convert.ToHexString(data)}");
@@ -81,8 +81,8 @@ namespace Dtls13Test
 
                 if (_sessions.TryAdd(endpoint.ToString(), session))
                 {
-                    var serverHello = new ServerHelloDatagram(session.PublicKey, clientHello.CipherSuites.First()) 
-                    { 
+                    var serverHello = new ServerHelloDatagram(session.PublicKey, clientHello.CipherSuites.First())
+                    {
                         ServerRandom = Convert.FromHexString("70 71 72 73 74 75 76 77 78 79 7a 7b 7c 7d 7e 7f 80 81 82 83 84 85 86 87 88 89 8a 8b 8c 8d 8e 8f".Replace(" ", ""))
                     };
                     var serverHelloBytes = serverHello.ToBytes();
@@ -106,13 +106,21 @@ namespace Dtls13Test
                     Debug.WriteLine($"server_sn_key: {Convert.ToHexString(session.ServerHandshakeKeys.ServerSnKey).ToLowerInvariant()}");
 
                     // from now on the connection is encrypted
-                    ServerEncryptedDatagram encryptedExtensionsDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new ExtensionsDatagram());
+                    ServerEncryptedDatagram encryptedExtensionsDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new ExtensionsDatagram())
+                    {
+                        Epoch = 2,
+                        RecordNumber = session.RecordNumber++
+                    };
                     var encryptedExtensionsDatagramBytes = encryptedExtensionsDatagram.ToBytes();
                     session.HandshakeMessages.Add(encryptedExtensionsDatagram);
                     ServerTransport.Send(endpoint, encryptedExtensionsDatagramBytes);
                     session.ServerHandshakeKeys.ServerKeyUseCounter++;
 
-                    ServerEncryptedDatagram encryptedCertificateDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new CertificateDatagram()) { RecordNumber = 1 };
+                    ServerEncryptedDatagram encryptedCertificateDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new CertificateDatagram())
+                    {
+                        Epoch = 2,
+                        RecordNumber = session.RecordNumber++,
+                    };
                     var encryptedCertificateDatagramBytes = encryptedCertificateDatagram.ToBytes();
                     session.HandshakeMessages.Add(encryptedCertificateDatagram);
                     ServerTransport.Send(endpoint, encryptedCertificateDatagramBytes);
@@ -157,8 +165,12 @@ namespace Dtls13Test
                     byte[] signature = signer.GenerateSignature();
                     Debug.WriteLine($"signature: {Convert.ToHexString(signature).ToLowerInvariant()}");
 
-                    //ServerEncryptedDatagram encryptedCertVerifyDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new CertVerifyDatagram() { Signature = signature }) { RecordNumber = 2 };
-                    
+                    //ServerEncryptedDatagram encryptedCertVerifyDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new CertVerifyDatagram() { Signature = signature })
+                    //{ 
+                    //    Epoch = 2,
+                    //    RecordNumber = session.RecordNumber++,
+                    //};
+
                     // For testing with the sample to avoid getting random data in our SHA256/PSS
                     ServerEncryptedDatagram encryptedCertVerifyDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys);
                     encryptedCertVerifyDatagram.FromBytes(Convert.FromHexString("2e a4 3e 01 21 83 be df ea 0f 4a a5 78 45 3a f4 f4 a4 be 41 06 9b eb e5 9c e4 93 3b f2 f2 ff 35 36 f0 e6 11 45 9f 7a fc 07 14 1e 4a 80 e4 b1 10 f2 c5 48 24 4e 83 42 cd 13 46 26 f0 d6 bc 12 2c 6e e3 cc 81 64 e3 e1 1f b8 bc 7b 58 ff 8d ef af 99 c9 26 81 f7 42 64 cc 29 5d f2 69 b4 63 af e5 78 53 ba 86 04 bd 8e ef 74 91 a0 fc 5a 5d df c2 2b 87 f7 cc 55 94 fd 2b 13 69 68 ab 07 ce 1d 84 33 07 df 9f 41 37 27 11 0f e0 5a c6 df 33 7c 44 4c 9a 2d 8b 28 30 b3 50 48 13 72 dd a1 4b e3 04 63 cb 94 16 f8 15 b7 29 b8 20 be b9 1e df 34 f8 b2 29 fa 71 4d fa 58 68 61 c5 25 15 aa d2 8e 98 52 90 d2 a7 e1 97 df 5a 4f 73 20 4d 95 2c a3 e2 34 af 34 fa e6 5a 3a 34 c1 33 8b 52 dd b7 8e 87 a9 14 95 21 2c 8e da ed 59 6e 0b 4b ad 18 65 66 8d 5a 33 9f d7 61 31 43 bc b8 5d 96 10 41 22 f6 17 e5 39 3b 4c ba 44 d0 86 e5 32 c7 39 e8 15 ea dc 2a 84 07 c4 72 bd f0 f6 f0 06 0d b4 71 19 71 38 7c 21 89 39 4f".Replace(" ", "")));
@@ -175,7 +187,11 @@ namespace Dtls13Test
                     Debug.WriteLine("finished handshake hash:" + Convert.ToHexString(finishedHash));                    
                     byte[] verifyServerData = CryptoUtils.CalculateHmac(finishedServerKey, finishedHash);
 
-                    ServerEncryptedDatagram encryptedFinishedDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new HandshakeFinishedDatagram() { VerifyData = verifyServerData }) { RecordNumber = 3 };
+                    ServerEncryptedDatagram encryptedFinishedDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new HandshakeFinishedDatagram() { VerifyData = verifyServerData })
+                    {
+                        Epoch = 2,
+                        RecordNumber = session.RecordNumber++,
+                    };
                     var encryptedFinishedDatagramBytes = encryptedFinishedDatagram.ToBytes();
                     session.HandshakeMessages.Add(encryptedFinishedDatagram);
                     ServerTransport.Send(endpoint, encryptedFinishedDatagramBytes);
@@ -221,18 +237,21 @@ namespace Dtls13Test
                 Debug.WriteLine($"server_sn_key: {Convert.ToHexString(session.ServerApplicationKeys.ServerSnKey).ToLowerInvariant()}");
                 Debug.WriteLine("------------------------");
 
+                // new Epoch, reset
+                session.RecordNumber = 0;
+
                 // send ack
                 var ack = new AckDatagram();
                 Debug.WriteLine($"ack: {Convert.ToHexString(ack.ToBytes()).ToLowerInvariant()}");
                 var serverAckDatagram = new ServerEncryptedDatagram(session.ServerApplicationKeys, ack) 
                 { 
                     Epoch = 3,
-                    RecordNumber = 0
+                    RecordNumber = session.RecordNumber++,
                 };
                 var encryptedAckDatagramBytes = serverAckDatagram.ToBytes();
+                session.ServerApplicationKeys.ServerKeyUseCounter++;
                 ServerTransport.Send(endpoint, encryptedAckDatagramBytes);
                 Debug.WriteLine($"Server sent ACK: {Convert.ToHexString(encryptedAckDatagramBytes).ToLowerInvariant()}");
-                session.ServerApplicationKeys.ServerKeyUseCounter++;
 
                 HandshakeFinished?.Invoke(this, EventArgs.Empty);
                 KeylogUtils.WriteKeys(
@@ -247,8 +266,20 @@ namespace Dtls13Test
                 ClientEncryptedDatagram encryptedApplicationDatagram = new ClientEncryptedDatagram(session.ServerApplicationKeys);
                 encryptedApplicationDatagram.FromBytes(data);
                 var clientApplicationDatagram = encryptedApplicationDatagram.Datagram as ApplicationDataDatagram;
+                session.ServerApplicationKeys.ClientKeyUseCounter++;
 
                 Debug.WriteLine($"Received server application data: {Encoding.UTF8.GetString(clientApplicationDatagram.Data)}");
+
+                await Task.Delay(1000);
+
+                ServerEncryptedDatagram encryptedDatagram = new ServerEncryptedDatagram(session.ServerApplicationKeys, new ApplicationDataDatagram(Encoding.UTF8.GetBytes("Hello from server!")))
+                {
+                    Epoch = 3,
+                    RecordNumber = session.RecordNumber++,
+                };
+                var bytes = encryptedDatagram.ToBytes();
+                session.ServerApplicationKeys.ServerKeyUseCounter++;
+                ServerTransport.Send(endpoint, bytes);
             }
         }
     }
