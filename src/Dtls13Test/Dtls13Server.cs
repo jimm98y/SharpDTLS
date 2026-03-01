@@ -18,6 +18,7 @@ namespace Dtls13Test
     public class Dtls13Server
     {
         Dictionary<string, Dtls13Session> _sessions = new Dictionary<string, Dtls13Session>();
+        public event EventHandler<EventArgs> HandshakeFinished;
 
         public ServerTransport ServerTransport { get; }
 
@@ -173,7 +174,7 @@ namespace Dtls13Test
                     throw new Exception("Failed to add new session");
                 }
             }
-            else
+            else if(session.ServerApplicationKeys == null)
             {
                 // session was already added, we're waiting for Finished
                 ClientEncryptedDatagram encryptedFinishedDatagram = new ClientEncryptedDatagram(session.ServerHandshakeKeys);
@@ -208,6 +209,29 @@ namespace Dtls13Test
                 Debug.WriteLine($"client_sn_key: {Convert.ToHexString(session.ServerApplicationKeys.ClientSnKey).ToLowerInvariant()}");
                 Debug.WriteLine($"server_sn_key: {Convert.ToHexString(session.ServerApplicationKeys.ServerSnKey).ToLowerInvariant()}");
                 Debug.WriteLine("------------------------");
+
+                // send ack
+                var ack = new AckDatagram();
+                Debug.WriteLine($"ack: {Convert.ToHexString(ack.ToBytes()).ToLowerInvariant()}");
+                var serverAckDatagram = new ServerEncryptedDatagram(session.ServerApplicationKeys, ack) 
+                { 
+                    RecordNumber = session.ServerApplicationKeys.ServerKeyUseCounter,
+                    Epoch = 3
+                };
+                var encryptedAckDatagramBytes = serverAckDatagram.ToBytes();
+                ServerTransport.Send(endpoint, encryptedAckDatagramBytes);
+                Debug.WriteLine($"Server sent ACK: {Convert.ToHexString(encryptedAckDatagramBytes).ToLowerInvariant()}");
+                session.ServerApplicationKeys.ServerKeyUseCounter++;
+
+                HandshakeFinished?.Invoke(this, EventArgs.Empty);   
+            }
+            else
+            {
+                ClientEncryptedDatagram encryptedApplicationDatagram = new ClientEncryptedDatagram(session.ServerApplicationKeys);
+                encryptedApplicationDatagram.FromBytes(data);
+                var clientApplicationDatagram = encryptedApplicationDatagram.Datagram as ApplicationDataDatagram;
+
+                Debug.WriteLine($"Received server application data: {Encoding.UTF8.GetString(clientApplicationDatagram.Data)}");
             }
         }
     }

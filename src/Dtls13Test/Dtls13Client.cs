@@ -16,6 +16,9 @@ namespace Dtls13Test
         private ServerCertificateDatagram _serverCertificateDatagram = null;
         private ServerCertVerifyDatagram _serverCertVerifyDatagram = null;
         private HandshakeFinishedDatagram _serverFinishedDatagram = null;
+        private AckDatagram _serverAckDatagram = null;
+
+        public event EventHandler<EventArgs> HandshakeFinished;
 
         public Dtls13Session Session { get; } = new Dtls13Session();
         public ClientTransport ClientTransport { get; }
@@ -180,6 +183,34 @@ namespace Dtls13Test
                 Debug.WriteLine($"client_sn_key: {Convert.ToHexString(Session.ServerApplicationKeys.ClientSnKey).ToLowerInvariant()}");
                 Debug.WriteLine($"server_sn_key: {Convert.ToHexString(Session.ServerApplicationKeys.ServerSnKey).ToLowerInvariant()}");
                 Debug.WriteLine("------------------------");
+
+                _serverFinishedDatagram = serverFinishedDatagram;
+            }
+            else if(_serverAckDatagram == null)
+            {
+                Debug.WriteLine($"Client received ACK: {Convert.ToHexString(data).ToLowerInvariant()}");
+
+                Debug.WriteLine($"server_sn_key: {Convert.ToHexString(Session.ServerApplicationKeys.ServerSnKey).ToLowerInvariant()}");
+                Debug.WriteLine($"server_key: {Convert.ToHexString(Session.ServerApplicationKeys.ServerKey).ToLowerInvariant()}");
+                Debug.WriteLine($"server_iv: {Convert.ToHexString(Session.ServerApplicationKeys.ServerIv).ToLowerInvariant()}");
+
+                ServerEncryptedDatagram encryptedServerAckDatagram = new ServerEncryptedDatagram(Session.ServerApplicationKeys);
+                encryptedServerAckDatagram.FromBytes(data);
+                var serverAckDatagram = encryptedServerAckDatagram.Datagram as AckDatagram;
+
+                _serverAckDatagram = serverAckDatagram;
+                Session.ServerApplicationKeys.ServerKeyUseCounter++;
+
+                HandshakeFinished?.Invoke(this, EventArgs.Empty);
+            }
+            else
+            {
+                ServerEncryptedDatagram encryptedServerApplicationDatagram = new ServerEncryptedDatagram(Session.ServerApplicationKeys);
+                encryptedServerApplicationDatagram.FromBytes(data);
+                var serverApplicationDatagram = encryptedServerApplicationDatagram.Datagram as ApplicationDataDatagram;
+                Session.ServerApplicationKeys.ServerKeyUseCounter++;
+
+                Debug.WriteLine($"Received server application data: {Encoding.UTF8.GetString(serverApplicationDatagram.Data)}");
             }
         }
 
@@ -198,6 +229,20 @@ namespace Dtls13Test
 
             Session.HandshakeMessages.Add(clientHello);
             ClientTransport.Send(clientHello.ToBytes());
-        }                      
+        }    
+        
+        public void SendApplicationData(byte[] data)
+        {
+            ClientEncryptedDatagram encryptedApplicationData = new ClientEncryptedDatagram(Session.ServerApplicationKeys, new ApplicationDataDatagram()
+            {
+                Data = data
+            })
+            {
+                RecordNumber = Session.ServerApplicationKeys.ClientKeyUseCounter
+            };
+            var encryptedApplicationDataBytes = encryptedApplicationData.ToBytes();
+            Session.ServerApplicationKeys.ClientKeyUseCounter++;
+            ClientTransport.Send(encryptedApplicationDataBytes);
+        }
     }   
 }

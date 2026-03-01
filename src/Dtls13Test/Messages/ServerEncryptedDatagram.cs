@@ -7,7 +7,7 @@ namespace Dtls13Test.Messages
     {
         private readonly Dtls13CryptoContext _cryptoContext;
         public IDatagram Datagram { get; set; }
-        public ushort RecordNumber { get; private set; }
+        public ushort RecordNumber { get; set; }
         public int Epoch { get; set; } = 2;
         public byte[] Bytes { get; private set; }
 
@@ -66,6 +66,10 @@ namespace Dtls13Test.Messages
             else if(plaintext[plaintext.Length - 1] == 0x1a)
             {
                 this.Datagram = new AckDatagram();
+            }
+            else if (plaintext[plaintext.Length - 1] == 0x17)
+            {
+                this.Datagram = new ApplicationDataDatagram();
             }
             else
             {

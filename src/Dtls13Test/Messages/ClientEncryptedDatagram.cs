@@ -7,8 +7,9 @@ namespace Dtls13Test.Messages
     {
         private readonly Dtls13CryptoContext _cryptoContext;
         public IDatagram Datagram { get; set; }
-        public ushort RecordNumber { get; private set; }
-        public byte[] Bytes { get; private set; }
+        public ushort RecordNumber { get; set; }
+        public byte Epoch { get; set; } = 2;
+        public byte[] Bytes { get; set; }
 
         public ClientEncryptedDatagram(Dtls13CryptoContext cryptoContext)
         {
@@ -30,7 +31,7 @@ namespace Dtls13Test.Messages
             bool connectionIdPresent = (encrypted[0] & 0x10) == 0x10;
             bool is16bitLength = (encrypted[0] & 0x08) == 0x08;
             bool isLengthPresent = (encrypted[0] & 0x04) == 0x04;
-            int epochLSB = encrypted[0] & 0x03;
+            this.Epoch = (byte)(encrypted[0] & 0x03);
 
             ushort recordLength = (ushort)((encrypted[3] << 8) | encrypted[4]);
 
@@ -51,11 +52,26 @@ namespace Dtls13Test.Messages
 
             byte[] plaintext = encrypted.Skip(5).Take(encrypted.Length - 5 - 16).ToArray();
 
-            this.Datagram = plaintext[0] switch
+            if (plaintext[plaintext.Length - 1] == 0x16)
             {
-                0x14 => new HandshakeFinishedDatagram(),
-                _ => throw new Exception("Unknown datagram type")
-            };
+                this.Datagram = plaintext[0] switch
+                {
+                    0x14 => new HandshakeFinishedDatagram(),
+                    _ => throw new Exception("Unknown datagram type")
+                };
+            }
+            else if (plaintext[plaintext.Length - 1] == 0x1a)
+            {
+                this.Datagram = new AckDatagram();
+            }
+            else if (plaintext[plaintext.Length - 1] == 0x17)
+            {
+                this.Datagram = new ApplicationDataDatagram();
+            }
+            else
+            {
+                throw new NotSupportedException();
+            }
 
             this.Datagram.FromBytes(plaintext);
         }
@@ -66,8 +82,8 @@ namespace Dtls13Test.Messages
             bool connectionIdPresent = false; // Assume Connection ID is included for this example
             bool is16bitLength = true;
             bool isLengthPresent = true;
-            int epochLSB = 2;
-            encrypted[0] = (byte)(0x20 | (connectionIdPresent ? 0x10 : 0x00) | (is16bitLength ? 0x08 : 0x00) | (isLengthPresent ? 0x04 : 0x00) | (epochLSB & 0x03));
+
+            encrypted[0] = (byte)(0x20 | (connectionIdPresent ? 0x10 : 0x00) | (is16bitLength ? 0x08 : 0x00) | (isLengthPresent ? 0x04 : 0x00) | (this.Epoch & 0x03));
 
             byte[] plaintext = Datagram.ToBytes();
             ushort recordLength = (ushort)(plaintext.Length + 16);

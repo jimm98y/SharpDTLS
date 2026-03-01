@@ -9,8 +9,8 @@ namespace Dtls13Test
         public GcmBlockCipher AeadEncryptEngine { get; } = new GcmBlockCipher(new AesEngine());
         public GcmBlockCipher AeadDecryptEngine { get; } = new GcmBlockCipher(new AesEngine());
 
-        public int ServerKeyUseCounter { get; set; } = 0;
-        public int ClientKeyUseCounter { get; set; } = 0;
+        public ushort ServerKeyUseCounter { get; set; } = 0;
+        public ushort ClientKeyUseCounter { get; set; } = 0;
 
         public Dtls13CryptoContext(string secret, string clientSecret, string serverSecret, string clientKey, string clientIv, string serverKey, string serverIv, string clientSnKey, string serverSnKey)
         {
