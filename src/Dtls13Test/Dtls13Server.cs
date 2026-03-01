@@ -37,26 +37,48 @@ namespace Dtls13Test
 
             if (!_sessions.TryGetValue(endpoint.ToString(), out var session))
             {
-                session = new Dtls13Session();
+                session = new Dtls13Session();                
+                var clientHello = new ClientHelloDatagram();
+
+                try
+                {
+                    clientHello.FromBytes(data);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Failed to parse ClientHello from {endpoint}: {ex.Message}");
+                    return;
+                }
+
+                session.HandshakeMessages.Add(clientHello);
+
+                // now send ServerHello
+                session.PrivateKey = Convert.FromHexString("909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeaf");
+                session.PublicKey = Convert.FromHexString("9fd7ad6dcff4298dd3f96d5b1b2af910a0535b1488d7f8fabb349a982880b615");
+
+                if (clientHello.Extensions.OfType<CookieExtension>().FirstOrDefault() == null)
+                {
+                    var serverHelloRetry = new ServerHelloDatagram(session.PublicKey, clientHello.CipherSuites.First())
+                    {
+                        // the HelloRetryRequest message uses the same structure as the ServerHello, but with Random set to the special value
+                        ServerRandom = Convert.FromHexString("CF 21 AD 74 E5 9A 61 11 BE 1D 8C 02 1E 65 B8 91 C2 A2 11 16 7A BB 8C 5E 07 9E 09 E2 C8 A8 33 9C".Replace(" ", ""))
+                    };
+                    serverHelloRetry.Extensions.Add(new CookieExtension(CryptoUtils.CreateCookie(((IPEndPoint)endpoint).Address.ToString(), ((IPEndPoint)endpoint).Port)));
+                    var serverHelloRetryBytes = serverHelloRetry.ToBytes();
+                    ServerTransport.Send(endpoint, serverHelloRetryBytes);
+                    return;
+                }
+                else
+                {
+                    // verify cookie
+                    if(!CryptoUtils.ValidateCookie(((IPEndPoint)endpoint).Address.ToString(), ((IPEndPoint)endpoint).Port, clientHello.Extensions.OfType<CookieExtension>().FirstOrDefault().Cookie))
+                    {
+                        throw new Exception("Invalid cookie!");
+                    }
+                }
+
                 if (_sessions.TryAdd(endpoint.ToString(), session))
                 {
-                    var clientHello = new ClientHelloDatagram();
-
-                    try
-                    {
-                        clientHello.FromBytes(data);
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"Failed to parse ClientHello from {endpoint}: {ex.Message}");
-                        return;
-                    }
-
-                    session.HandshakeMessages.Add(clientHello);
-
-                    // now send ServerHello
-                    session.PrivateKey = Convert.FromHexString("909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeaf");
-                    session.PublicKey = Convert.FromHexString("9fd7ad6dcff4298dd3f96d5b1b2af910a0535b1488d7f8fabb349a982880b615");
                     var serverHello = new ServerHelloDatagram(session.PublicKey, clientHello.CipherSuites.First()) { ServerRandom = Convert.FromHexString("70 71 72 73 74 75 76 77 78 79 7a 7b 7c 7d 7e 7f 80 81 82 83 84 85 86 87 88 89 8a 8b 8c 8d 8e 8f".Replace(" ", "")) };
                     var serverHelloBytes = serverHello.ToBytes();
 

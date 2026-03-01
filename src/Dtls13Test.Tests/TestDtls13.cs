@@ -129,5 +129,14 @@ namespace Dtls13Test.Tests
             string actual = Convert.ToHexString(serverAck.ToBytes()).ToLowerInvariant();
             Assert.AreEqual(serverAckHex.Replace(" ", ""), actual);
         }
+
+        [TestMethod]
+        public void TestCookie()
+        {
+            for (int i = 0; i < 100; i++)
+            {
+                Debug.WriteLine(Convert.ToHexString(CryptoUtils.CreateCookie("127.0.0.1", 65512)));
+            }            
+        }
     }
 }

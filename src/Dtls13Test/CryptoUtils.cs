@@ -1,4 +1,5 @@
 ﻿using Dtls13Test.Messages;
+using Org.BouncyCastle.Asn1;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Digests;
 using Org.BouncyCastle.Crypto.Generators;
@@ -8,13 +9,47 @@ using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Tls;
 using Org.BouncyCastle.Tls.Crypto;
 using Org.BouncyCastle.Tls.Crypto.Impl.BC;
-using System.Diagnostics;
 using System.Security.Cryptography;
 
 namespace Dtls13Test
 {
     public static class CryptoUtils
     {
+        private static readonly byte[] _privateKey;
+
+        static CryptoUtils()
+        {
+            _privateKey = new byte[32];
+            new SecureRandom().NextBytes(_privateKey);
+        }
+
+        public static byte[] CreateCookie(string clientIP, int clientPort, int minuteTimeOffset = 0)
+        {
+            DateTime timestamp = DateTime.UtcNow;
+            DateTime timestampRounded = new DateTime(timestamp.Year, timestamp.Month, timestamp.Day, timestamp.Hour, timestamp.Minute, 0, DateTimeKind.Utc);
+            timestampRounded = timestampRounded.AddMinutes(minuteTimeOffset);
+
+            string data = $"{clientIP}:{clientPort}:{timestampRounded.ToFileTime()}";
+            using (var hmac = new HMACSHA256(_privateKey))
+            {
+                return hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(data));
+            }
+        }
+
+        public static bool ValidateCookie(string clientIP, int clientPort, byte[] cookie)
+        {
+            byte[] expectedCookie = CreateCookie(clientIP, clientPort);
+            if(expectedCookie.SequenceEqual(cookie))
+            {
+                return true;
+            }
+            else
+            {
+                expectedCookie = CreateCookie(clientIP, clientPort, -1);
+                return expectedCookie.SequenceEqual(cookie);
+            }
+        }
+
         public static (X25519PrivateKeyParameters privateX25519, X25519PublicKeyParameters publicX25519) CreateX25519KeyPair()
         {
             X25519KeyPairGenerator x25519KeyPairGenerator = new X25519KeyPairGenerator();

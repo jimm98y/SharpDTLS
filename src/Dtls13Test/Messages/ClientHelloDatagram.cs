@@ -93,7 +93,8 @@
                     0x000d => new ClientSignatureAlgorithms(),
                     0x0016 => new EncryptThenMac(),
                     0x000a => new ClientSupportedGroups(),
-                    _ => null
+                    0x002c => new CookieExtension(),
+                    _ => throw new NotSupportedException()
                 };
 
                 if (matching != null)

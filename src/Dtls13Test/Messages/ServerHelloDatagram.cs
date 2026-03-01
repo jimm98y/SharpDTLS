@@ -2,7 +2,7 @@
 {
     public class ServerHelloDatagram : IDatagram
     {
-        public byte[] ServerRandom { get; set; } = null;
+        public byte[] ServerRandom { get; set; } = Convert.FromHexString("CF 21 AD 74 E5 9A 61 11 BE 1D 8C 02 1E 65 B8 91 C2 A2 11 16 7A BB 8C 5E 07 9E 09 E2 C8 A8 33 9C".Replace(" ", "")); // the HelloRetryRequest message uses the same structure as the ServerHello, but with Random set to the special value
         public byte[] PublicKey { get; private set; }
         public byte[] Bytes { get; private set; }
         public int Epoch { get; set; }
@@ -87,7 +87,8 @@
                 {
                     0x0033 => new ServerKeyShareExtension(),
                     0x002b => new ServerSupportedVersions(),
-                    _ => null
+                    0x002c => new CookieExtension(),    
+                    _ => throw new NotSupportedException()
                 };
 
                 if (extensionInstance != null)
@@ -297,6 +298,50 @@
             destination[offset + 4] = 0xfe; // DTLS 1.3 major version
             destination[offset + 5] = 0xfc; // DTLS 1.3 minor version
             return 6; // total length of the extension data
+        }
+    }
+
+    public class CookieExtension : ITlsExtension
+    {
+        public byte[] Cookie { get; set; }
+
+        public CookieExtension()
+        { }
+
+        public CookieExtension(byte[] cookie)
+        {
+            this.Cookie = cookie ?? throw new ArgumentNullException(nameof(cookie));
+        }
+
+        public int CalculateLength()
+        {
+            return 4 + this.Cookie.Length;
+        }
+
+        public int Read(int offset, byte[] source)
+        {
+            if (source == null) throw new ArgumentNullException(nameof(source));
+            if (offset < 0) throw new ArgumentOutOfRangeException(nameof(offset));
+
+            ushort extType = (ushort)((source[offset] << 8) | source[offset + 1]);
+            if (extType != 0x002c) throw new InvalidDataException($"Unexpected extension type: 0x{extType:X4}");
+
+            ushort extLen = (ushort)((source[offset + 2] << 8) | source[offset + 3]);
+            this.Cookie = new byte[extLen];
+            Buffer.BlockCopy(source, offset + 4, this.Cookie, 0, extLen);
+
+            return 4 + this.Cookie.Length;
+        }
+
+        public int Write(int offset, byte[] destination)
+        {
+            destination[offset] = 0x00;
+            destination[offset + 1] = 0x2c; // Extension type 0x002c (Cookie)
+            int length = this.Cookie.Length;
+            destination[offset + 2] = (byte)((length >> 8) & 0xff); // Extension length
+            destination[offset + 3] = (byte)(length & 0xff); // Extension length
+            Buffer.BlockCopy(this.Cookie, 0, destination, offset + 4, this.Cookie.Length);
+            return 4 + this.Cookie.Length; // total length of the extension data
         }
     }
 }

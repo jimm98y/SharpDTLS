@@ -45,6 +45,19 @@ namespace Dtls13Test
 
                 Session.HandshakeMessages.Add(serverHello);
 
+                if (serverHello.Extensions.OfType<CookieExtension>().FirstOrDefault() != null)
+                {
+                    var clientHelloWithCookie = new ClientHelloDatagram(Session.PublicKey)
+                    {
+                        ClientRandom = Convert.FromHexString("e0 e1 e2 e3 e4 e5 e6 e7 e8 e9 ea eb ec ed ee ef f0 f1 f2 f3 f4 f5 f6 f7 f8 f9 fa fb fc fd fe ff".Replace(" ", "")),
+                    };
+                    clientHelloWithCookie.Extensions.Add(new CookieExtension() { Cookie = serverHello.Extensions.OfType<CookieExtension>().First().Cookie });
+
+                    Session.HandshakeMessages.Add(clientHelloWithCookie);
+                    ClientTransport.Send(clientHelloWithCookie.ToBytes());
+                    return;
+                }
+
                 var clientHello = Session.HandshakeMessages.OfType<ClientHelloDatagram>().Last();
 
                 byte[] helloHash = CryptoUtils.CalculateHelloHash(clientHello.ToBytes(), serverHello.Bytes);
