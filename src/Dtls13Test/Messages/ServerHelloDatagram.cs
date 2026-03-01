@@ -7,7 +7,7 @@
         public byte[] Bytes { get; private set; }
         public int Epoch { get; set; }
         public int RecordSequenceNumber { get; set; }
-        public List<ITlsExtension> Extensions { get; private set; }
+        public List<ITlsExtension> Extensions { get; private set; } = new List<ITlsExtension>();
 
         public ushort SelectedCipherSuite { get; set; } = 0x1301;
 
@@ -315,7 +315,7 @@
 
         public int CalculateLength()
         {
-            return 4 + this.Cookie.Length;
+            return 6 + this.Cookie.Length;
         }
 
         public int Read(int offset, byte[] source)
@@ -327,21 +327,25 @@
             if (extType != 0x002c) throw new InvalidDataException($"Unexpected extension type: 0x{extType:X4}");
 
             ushort extLen = (ushort)((source[offset + 2] << 8) | source[offset + 3]);
-            this.Cookie = new byte[extLen];
-            Buffer.BlockCopy(source, offset + 4, this.Cookie, 0, extLen);
+            ushort cookieLen = (ushort)((source[offset + 4] << 8) | source[offset + 5]);
+            
+            this.Cookie = new byte[cookieLen];
+            Buffer.BlockCopy(source, offset + 6, this.Cookie, 0, cookieLen);
 
-            return 4 + this.Cookie.Length;
+            return 6 + this.Cookie.Length;
         }
 
         public int Write(int offset, byte[] destination)
         {
             destination[offset] = 0x00;
             destination[offset + 1] = 0x2c; // Extension type 0x002c (Cookie)
-            int length = this.Cookie.Length;
+            int length = 2 + this.Cookie.Length;
             destination[offset + 2] = (byte)((length >> 8) & 0xff); // Extension length
             destination[offset + 3] = (byte)(length & 0xff); // Extension length
-            Buffer.BlockCopy(this.Cookie, 0, destination, offset + 4, this.Cookie.Length);
-            return 4 + this.Cookie.Length; // total length of the extension data
+            destination[offset + 4] = (byte)((this.Cookie.Length >> 8) & 0xff); // Cookie length
+            destination[offset + 5] = (byte)(this.Cookie.Length & 0xff); // Cookie length
+            Buffer.BlockCopy(this.Cookie, 0, destination, offset + 6, this.Cookie.Length);
+            return 6 + this.Cookie.Length; // total length of the extension data
         }
     }
 }

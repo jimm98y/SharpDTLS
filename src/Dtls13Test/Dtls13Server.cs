@@ -2,9 +2,6 @@
 using Org.BouncyCastle.Asn1;
 using Org.BouncyCastle.Asn1.Pkcs;
 using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Crypto.Digests;
-using Org.BouncyCastle.Crypto.Macs;
-using Org.BouncyCastle.Crypto.Paddings;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Tls.Crypto;
@@ -58,7 +55,7 @@ namespace Dtls13Test
 
                 if (clientHello.Extensions.OfType<CookieExtension>().FirstOrDefault() == null)
                 {
-                    var serverHelloRetry = new ServerHelloDatagram(session.PublicKey, clientHello.CipherSuites.First())
+                    var serverHelloRetry = new ServerHelloDatagram()
                     {
                         // the HelloRetryRequest message uses the same structure as the ServerHello, but with Random set to the special value
                         ServerRandom = Convert.FromHexString("CF 21 AD 74 E5 9A 61 11 BE 1D 8C 02 1E 65 B8 91 C2 A2 11 16 7A BB 8C 5E 07 9E 09 E2 C8 A8 33 9C".Replace(" ", ""))
