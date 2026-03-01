@@ -10,5 +10,6 @@ namespace Dtls13Test
         public Dtls13CryptoContext ServerHandshakeKeys { get; internal set; }
         public Dtls13CryptoContext ServerApplicationKeys { get; internal set; }
         public ushort RecordNumber { get; set; }
+        public int Epoch { get; set; } = 0;
     }
 }

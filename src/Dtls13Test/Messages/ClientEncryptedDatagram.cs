@@ -8,7 +8,7 @@ namespace Dtls13Test.Messages
         private readonly Dtls13CryptoContext _cryptoContext;
         public IDatagram Datagram { get; set; }
         public ushort RecordNumber { get; set; }
-        public byte Epoch { get; set; } = 2;
+        public int Epoch { get; set; } = 2;
         public byte[] Bytes { get; set; }
 
         public ClientEncryptedDatagram(Dtls13CryptoContext cryptoContext)

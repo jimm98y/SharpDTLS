@@ -10,6 +10,11 @@
         public CertVerifyDatagram()
         {  }
 
+        public CertVerifyDatagram(byte[] signature)
+        {
+            this.Signature = signature;
+        }
+
         public void FromBytes(byte[] bytes)
         {
             if (bytes == null) throw new ArgumentNullException(nameof(bytes));

@@ -82,6 +82,8 @@ namespace Dtls13Test
                 Debug.WriteLine($"server_sn_key: {Convert.ToHexString(Session.ServerHandshakeKeys.ServerSnKey).ToLowerInvariant()}");
 
                 // from now on the conneciton is encrypted
+                Session.Epoch = 2;
+                Session.RecordNumber = 0;
             }
             else if (_serverExtensionsDatagram == null)
             {
@@ -167,7 +169,8 @@ namespace Dtls13Test
 
                 ClientEncryptedDatagram encryptedClientFinishedDatagram = new ClientEncryptedDatagram(Session.ServerHandshakeKeys, new HandshakeFinishedDatagram() { VerifyData = verifyClientData })
                 {
-                    RecordNumber = 0
+                    Epoch = Session.Epoch,
+                    RecordNumber = Session.RecordNumber++,
                 };
                 var encryptedClientFinishedDatagramBytes = encryptedClientFinishedDatagram.ToBytes();
                 //Session.HandshakeMessages.Add(encryptedClientFinishedDatagram);
@@ -194,16 +197,15 @@ namespace Dtls13Test
             {
                 Debug.WriteLine($"Client received ACK: {Convert.ToHexString(data).ToLowerInvariant()}");
 
-                Debug.WriteLine($"server_sn_key: {Convert.ToHexString(Session.ServerApplicationKeys.ServerSnKey).ToLowerInvariant()}");
-                Debug.WriteLine($"server_key: {Convert.ToHexString(Session.ServerApplicationKeys.ServerKey).ToLowerInvariant()}");
-                Debug.WriteLine($"server_iv: {Convert.ToHexString(Session.ServerApplicationKeys.ServerIv).ToLowerInvariant()}");
-
                 ServerEncryptedDatagram encryptedServerAckDatagram = new ServerEncryptedDatagram(Session.ServerApplicationKeys);
                 encryptedServerAckDatagram.FromBytes(data);
                 var serverAckDatagram = encryptedServerAckDatagram.Datagram as AckDatagram;
                 Session.ServerApplicationKeys.ServerKeyUseCounter++;
 
                 _serverAckDatagram = serverAckDatagram;
+
+                Session.Epoch = 3;
+                Session.RecordNumber = 0;
 
                 HandshakeFinished?.Invoke(this, EventArgs.Empty);
             }
@@ -239,14 +241,12 @@ namespace Dtls13Test
             ClientTransport.Send(clientHello.ToBytes());
         }
 
-        private ushort _recordNumber = 0; 
-
         public void SendApplicationData(byte[] data)
         {
             ClientEncryptedDatagram encryptedApplicationData = new ClientEncryptedDatagram(Session.ServerApplicationKeys, new ApplicationDataDatagram(data))
             {
-                 Epoch = 3,
-                 RecordNumber = _recordNumber++
+                 Epoch = Session.Epoch,
+                 RecordNumber = Session.RecordNumber++
             };
             var encryptedApplicationDataBytes = encryptedApplicationData.ToBytes();
             Session.ServerApplicationKeys.ClientKeyUseCounter++;

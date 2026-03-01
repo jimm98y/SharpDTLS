@@ -17,11 +17,16 @@ namespace Dtls13Test
 {
     public class Dtls13Server
     {
+        private string _serverCertificatePrivateKey = "-----BEGIN RSA PRIVATE KEY-----\r\nMIIEowIBAAKCAQEAxIA2BrrnR2sIlATsp7aRBD/3krwZ7vt9dNeoDQAee0s6SuYP\r\n6MBx/HPnAkwNvPS90R05a7pwRkoT6Ur4PfPhCVlUe8lV+0Eto3ZSEeHz3HdsqlM3\r\nbso67L7Dqrc7MdVstlKcgJi8yeAoGOIL9/igOv0XBFCeznm9nznx6mnsR5cugw+1\r\nypXelaHmBCLV7r5SeVSh57+KhvZGbQ2fFpUaTPegRpJZXBNS8lSeWvtOv9d6N5UB\r\nROTAJodMZT5AfX0jB0QB9IT/0I96H6BSENH08NXOeXApMuLKvnAf361rS7cRAfRL\r\nrWZqERMP4u6Cnk0Cnckc3WcW27kGGIbtwbqUIQIDAQABAoIBAGF7OVIdZp8Hejn0\r\nN3L8HvT8xtUEe9kS6ioM0lGgvX5s035Uo4/T6LhUx0VcdXRH9eLHnLTUyN4V4cra\r\nZkxVsE3zAvZl60G6E+oDyLMWZOP6Wu4kWlub9597A5atT7BpMIVCdmFVZFLB4SJ3\r\nAXkC3nplFAYP+Lh1rJxRIrIn2g+pEeBboWbYA++oDNuMQffDZaokTkJ8Bn1JZYh0\r\nxEXKY8Bi2Egd5NMeZa1UFO6y8tUbZfwgVs6Enq5uOgtfayq79vZwyjj1kd29MBUD\r\n8g8byV053ZKxbUOiOuUts97eb+fN3DIDRTcT2c+lXt/4C54M1FclJAbtYRK/qwsl\r\npYWKQAECgYEA4ZUbqQnTo1ICvj81ifGrz+H4LKQqe92Hbf/W51D/Umk2kP702W22\r\nHP4CvrJRtALThJIG9m2TwUjl/WAuZIBrhSAbIvc3Fcoa2HjdRp+sO5U1ueDq7d/S\r\nZ+PxRI8cbLbRpEdIaoR46qr/2uWZ943PHMv9h4VHPYn1w8b94hwD6vkCgYEA3v87\r\nmFLzyM9ercnEv9zHMRlMZFQhlcUGQZvfb8BuJYl/WogyT6vRrUuM0QXULNEPlrin\r\nmBQTqc1nCYbgkFFsD2VVt1qIyiAJsB9MD1LNV6YuvE7T2KOSadmsA4fa9PUqbr71\r\nhf3lTTq+LeR09LebO7WgSGYY+5YKVOEGpYMR1GkCgYEAxPVQmk3HKHEhjgRYdaG5\r\nlp9A9ZE8uruYVJWtiHgzBTxx9TV2iST+fd/We7PsHFTfY3+wbpcMDBXfIVRKDVwH\r\nBMwchXH9+Ztlxx34bYJaegd0SmA0Hw9ugWEHNgoSEmWpM1s9wir5/ELjc7dGsFtz\r\nuzvsl9fpdLSxDYgAAdzeGtkCgYBAzKIgrVox7DBzB8KojhtD5ToRnXD0+H/M6OKQ\r\nsrZPKhlb0V/tTtxrIx0UUEFLlKSXA6mPw6XDHfDnD86JoV9pSeUSlrhRI+Ysy6tq\r\neIE7CwthpPZiaYXORHZ7wCqcK/HcpJjsCs9rFbrV0yE5S3FMdIbTAvgXg44VBB7O\r\nUbwIoQKBgDuY8gSrA5/A747wjjmsdRWK4DMTMEV4eCW1BEP7Tg7Cxd5n3xPJiYhr\r\nnhLGN+mMnVIcv2zEMS0/eNZr1j/0BtEdx+3IC6Eq+ONY0anZ4Irt57/5QeKgKn/L\r\nJPhfPySIPG4UmwE4gW8t79vfOKxnUu2fDD1ZXUYopan6EckACNH/\r\n-----END RSA PRIVATE KEY-----";
+        private string _serverCertificate = "-----BEGIN CERTIFICATE-----\r\nMIIDITCCAgmgAwIBAgIIFVqSrcIEj5AwDQYJKoZIhvcNAQELBQAwIjELMAkGA1UE\r\nBhMCVVMxEzARBgNVBAoTCkV4YW1wbGUgQ0EwHhcNMTgxMDA1MDEzODE3WhcNMTkx\r\nMDA1MDEzODE3WjArMQswCQYDVQQGEwJVUzEcMBoGA1UEAxMTZXhhbXBsZS51bGZo\r\nZWltLm5ldDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMSANga650dr\r\nCJQE7Ke2kQQ/95K8Ge77fXTXqA0AHntLOkrmD+jAcfxz5wJMDbz0vdEdOWu6cEZK\r\nE+lK+D3z4QlZVHvJVftBLaN2UhHh89x3bKpTN27KOuy+w6q3OzHVbLZSnICYvMng\r\nKBjiC/f4oDr9FwRQns55vZ858epp7EeXLoMPtcqV3pWh5gQi1e6+UnlUoee/iob2\r\nRm0NnxaVGkz3oEaSWVwTUvJUnlr7Tr/XejeVAUTkwCaHTGU+QH19IwdEAfSE/9CP\r\neh+gUhDR9PDVznlwKTLiyr5wH9+ta0u3EQH0S61mahETD+Lugp5NAp3JHN1nFtu5\r\nBhiG7cG6lCECAwEAAaNSMFAwDgYDVR0PAQH/BAQDAgWgMB0GA1UdJQQWMBQGCCsG\r\nAQUFBwMCBggrBgEFBQcDATAfBgNVHSMEGDAWgBSJT95bzGniUs8+owDfsZe4HeHB\r\nRjANBgkqhkiG9w0BAQsFAAOCAQEAWRZFppouN3nk9t0nGrocC/1s11WZtefDblM+\r\n/zZZCEMkyeelBAedOeDUKYf/4+vdCcHPHZFEVYcLVx3Rm98dJPi7mhH+gP1ZK6A5\r\njN4R4mUeYYzlmPqW5Tcu7z0kiv3hdGPrv6u45NGrUCpU7ABk6S94GWYNPyfPIJ5m\r\nf85a4uSsmcfJOBj4slEHIt/tl/MuPpNJ1MZsnqY5bXREYqBrQsbVumiOrDoBe938\r\njiz8rSfLadPM3KKAQURl0640jODzSrL7nGGDcTErGRBBZBwjfxGl1lyETwQEhJk4\r\ncSuVntaFvFxd1kXtGZCUc0ApJty0DjRpoVlB6OLMqEu2CEY2oA==\r\n-----END CERTIFICATE-----";
+        private string privateKey = "909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeaf";
+        private string publicKey = "9fd7ad6dcff4298dd3f96d5b1b2af910a0535b1488d7f8fabb349a982880b615";
+
         Dictionary<string, Dtls13Session> _sessions = new Dictionary<string, Dtls13Session>();
         public event EventHandler<EventArgs> HandshakeFinished;
 
         public ServerTransport ServerTransport { get; }
-        public bool ShouldSendHelloRetry { get; set; } = false;
+        public bool ShouldSendHelloRetry { get; set; } = true;
 
         public Dtls13Server(ServerTransport serverTransport)
         {
@@ -53,10 +58,11 @@ namespace Dtls13Test
                 {
                     if (clientHello.Extensions.OfType<CookieExtension>().FirstOrDefault() == null)
                     {
+                        const string HelloRetryRequestRandom = "CF21AD74E59A6111BE1D8C021E65B891C2A211167ABB8C5E079E09E2C8A8339C";
                         var serverHelloRetry = new ServerHelloDatagram()
                         {
                             // the HelloRetryRequest message uses the same structure as the ServerHello, but with Random set to the special value
-                            ServerRandom = Convert.FromHexString("CF 21 AD 74 E5 9A 61 11 BE 1D 8C 02 1E 65 B8 91 C2 A2 11 16 7A BB 8C 5E 07 9E 09 E2 C8 A8 33 9C".Replace(" ", ""))
+                            ServerRandom = Convert.FromHexString(HelloRetryRequestRandom)
                         };
                         serverHelloRetry.Extensions.Add(new ServerSupportedVersions());
                         serverHelloRetry.Extensions.Add(new CookieExtension(CryptoUtils.CreateCookie(((IPEndPoint)endpoint).Address.ToString(), ((IPEndPoint)endpoint).Port)));
@@ -76,8 +82,9 @@ namespace Dtls13Test
 
                 session = new Dtls13Session();
                 session.HandshakeMessages.Add(clientHello);
-                session.PrivateKey = Convert.FromHexString("909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeaf");
-                session.PublicKey = Convert.FromHexString("9fd7ad6dcff4298dd3f96d5b1b2af910a0535b1488d7f8fabb349a982880b615");
+
+                session.PrivateKey = Convert.FromHexString(privateKey);
+                session.PublicKey = Convert.FromHexString(publicKey);
 
                 if (_sessions.TryAdd(endpoint.ToString(), session))
                 {
@@ -105,10 +112,13 @@ namespace Dtls13Test
                     Debug.WriteLine($"client_sn_key: {Convert.ToHexString(session.ServerHandshakeKeys.ClientSnKey).ToLowerInvariant()}");
                     Debug.WriteLine($"server_sn_key: {Convert.ToHexString(session.ServerHandshakeKeys.ServerSnKey).ToLowerInvariant()}");
 
+
                     // from now on the connection is encrypted
+                    session.Epoch = 2;
+
                     ServerEncryptedDatagram encryptedExtensionsDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new ExtensionsDatagram())
                     {
-                        Epoch = 2,
+                        Epoch = session.Epoch,
                         RecordNumber = session.RecordNumber++
                     };
                     var encryptedExtensionsDatagramBytes = encryptedExtensionsDatagram.ToBytes();
@@ -118,7 +128,7 @@ namespace Dtls13Test
 
                     ServerEncryptedDatagram encryptedCertificateDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new CertificateDatagram())
                     {
-                        Epoch = 2,
+                        Epoch = session.Epoch,
                         RecordNumber = session.RecordNumber++,
                     };
                     var encryptedCertificateDatagramBytes = encryptedCertificateDatagram.ToBytes();
@@ -132,10 +142,8 @@ namespace Dtls13Test
 
                     byte[] toSign = Encoding.UTF8.GetBytes("                                                                TLS 1.3, server CertificateVerify\0").Concat(h).ToArray();
 
-                    string serverCertificatePrivateKey = "-----BEGIN RSA PRIVATE KEY-----\r\nMIIEowIBAAKCAQEAxIA2BrrnR2sIlATsp7aRBD/3krwZ7vt9dNeoDQAee0s6SuYP\r\n6MBx/HPnAkwNvPS90R05a7pwRkoT6Ur4PfPhCVlUe8lV+0Eto3ZSEeHz3HdsqlM3\r\nbso67L7Dqrc7MdVstlKcgJi8yeAoGOIL9/igOv0XBFCeznm9nznx6mnsR5cugw+1\r\nypXelaHmBCLV7r5SeVSh57+KhvZGbQ2fFpUaTPegRpJZXBNS8lSeWvtOv9d6N5UB\r\nROTAJodMZT5AfX0jB0QB9IT/0I96H6BSENH08NXOeXApMuLKvnAf361rS7cRAfRL\r\nrWZqERMP4u6Cnk0Cnckc3WcW27kGGIbtwbqUIQIDAQABAoIBAGF7OVIdZp8Hejn0\r\nN3L8HvT8xtUEe9kS6ioM0lGgvX5s035Uo4/T6LhUx0VcdXRH9eLHnLTUyN4V4cra\r\nZkxVsE3zAvZl60G6E+oDyLMWZOP6Wu4kWlub9597A5atT7BpMIVCdmFVZFLB4SJ3\r\nAXkC3nplFAYP+Lh1rJxRIrIn2g+pEeBboWbYA++oDNuMQffDZaokTkJ8Bn1JZYh0\r\nxEXKY8Bi2Egd5NMeZa1UFO6y8tUbZfwgVs6Enq5uOgtfayq79vZwyjj1kd29MBUD\r\n8g8byV053ZKxbUOiOuUts97eb+fN3DIDRTcT2c+lXt/4C54M1FclJAbtYRK/qwsl\r\npYWKQAECgYEA4ZUbqQnTo1ICvj81ifGrz+H4LKQqe92Hbf/W51D/Umk2kP702W22\r\nHP4CvrJRtALThJIG9m2TwUjl/WAuZIBrhSAbIvc3Fcoa2HjdRp+sO5U1ueDq7d/S\r\nZ+PxRI8cbLbRpEdIaoR46qr/2uWZ943PHMv9h4VHPYn1w8b94hwD6vkCgYEA3v87\r\nmFLzyM9ercnEv9zHMRlMZFQhlcUGQZvfb8BuJYl/WogyT6vRrUuM0QXULNEPlrin\r\nmBQTqc1nCYbgkFFsD2VVt1qIyiAJsB9MD1LNV6YuvE7T2KOSadmsA4fa9PUqbr71\r\nhf3lTTq+LeR09LebO7WgSGYY+5YKVOEGpYMR1GkCgYEAxPVQmk3HKHEhjgRYdaG5\r\nlp9A9ZE8uruYVJWtiHgzBTxx9TV2iST+fd/We7PsHFTfY3+wbpcMDBXfIVRKDVwH\r\nBMwchXH9+Ztlxx34bYJaegd0SmA0Hw9ugWEHNgoSEmWpM1s9wir5/ELjc7dGsFtz\r\nuzvsl9fpdLSxDYgAAdzeGtkCgYBAzKIgrVox7DBzB8KojhtD5ToRnXD0+H/M6OKQ\r\nsrZPKhlb0V/tTtxrIx0UUEFLlKSXA6mPw6XDHfDnD86JoV9pSeUSlrhRI+Ysy6tq\r\neIE7CwthpPZiaYXORHZ7wCqcK/HcpJjsCs9rFbrV0yE5S3FMdIbTAvgXg44VBB7O\r\nUbwIoQKBgDuY8gSrA5/A747wjjmsdRWK4DMTMEV4eCW1BEP7Tg7Cxd5n3xPJiYhr\r\nnhLGN+mMnVIcv2zEMS0/eNZr1j/0BtEdx+3IC6Eq+ONY0anZ4Irt57/5QeKgKn/L\r\nJPhfPySIPG4UmwE4gW8t79vfOKxnUu2fDD1ZXUYopan6EckACNH/\r\n-----END RSA PRIVATE KEY-----";
-                    string serverCertificate = "-----BEGIN CERTIFICATE-----\r\nMIIDITCCAgmgAwIBAgIIFVqSrcIEj5AwDQYJKoZIhvcNAQELBQAwIjELMAkGA1UE\r\nBhMCVVMxEzARBgNVBAoTCkV4YW1wbGUgQ0EwHhcNMTgxMDA1MDEzODE3WhcNMTkx\r\nMDA1MDEzODE3WjArMQswCQYDVQQGEwJVUzEcMBoGA1UEAxMTZXhhbXBsZS51bGZo\r\nZWltLm5ldDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMSANga650dr\r\nCJQE7Ke2kQQ/95K8Ge77fXTXqA0AHntLOkrmD+jAcfxz5wJMDbz0vdEdOWu6cEZK\r\nE+lK+D3z4QlZVHvJVftBLaN2UhHh89x3bKpTN27KOuy+w6q3OzHVbLZSnICYvMng\r\nKBjiC/f4oDr9FwRQns55vZ858epp7EeXLoMPtcqV3pWh5gQi1e6+UnlUoee/iob2\r\nRm0NnxaVGkz3oEaSWVwTUvJUnlr7Tr/XejeVAUTkwCaHTGU+QH19IwdEAfSE/9CP\r\neh+gUhDR9PDVznlwKTLiyr5wH9+ta0u3EQH0S61mahETD+Lugp5NAp3JHN1nFtu5\r\nBhiG7cG6lCECAwEAAaNSMFAwDgYDVR0PAQH/BAQDAgWgMB0GA1UdJQQWMBQGCCsG\r\nAQUFBwMCBggrBgEFBQcDATAfBgNVHSMEGDAWgBSJT95bzGniUs8+owDfsZe4HeHB\r\nRjANBgkqhkiG9w0BAQsFAAOCAQEAWRZFppouN3nk9t0nGrocC/1s11WZtefDblM+\r\n/zZZCEMkyeelBAedOeDUKYf/4+vdCcHPHZFEVYcLVx3Rm98dJPi7mhH+gP1ZK6A5\r\njN4R4mUeYYzlmPqW5Tcu7z0kiv3hdGPrv6u45NGrUCpU7ABk6S94GWYNPyfPIJ5m\r\nf85a4uSsmcfJOBj4slEHIt/tl/MuPpNJ1MZsnqY5bXREYqBrQsbVumiOrDoBe938\r\njiz8rSfLadPM3KKAQURl0640jODzSrL7nGGDcTErGRBBZBwjfxGl1lyETwQEhJk4\r\ncSuVntaFvFxd1kXtGZCUc0ApJty0DjRpoVlB6OLMqEu2CEY2oA==\r\n-----END CERTIFICATE-----";
 
-                    PemObject pemPrivateKey = new PemReader(new StringReader(serverCertificatePrivateKey)).ReadPemObject();
+                    PemObject pemPrivateKey = new PemReader(new StringReader(_serverCertificatePrivateKey)).ReadPemObject();
                     string type = pemPrivateKey.Type.Substring(0, pemPrivateKey.Type.Length - "PRIVATE KEY".Length).Trim();
                     Asn1Sequence seq = Asn1Sequence.GetInstance(pemPrivateKey.Content);
                     AsymmetricKeyParameter privateKey = null;
@@ -155,7 +163,7 @@ namespace Dtls13Test
                             throw new NotImplementedException();
                     }
 
-                    X509Certificate cert = new X509CertificateParser().ReadCertificate(Encoding.UTF8.GetBytes(serverCertificate));
+                    X509Certificate cert = new X509CertificateParser().ReadCertificate(Encoding.UTF8.GetBytes(_serverCertificate));
                     AsymmetricKeyParameter publicKey = cert.GetPublicKey();
 
                     ISigner signer = SignerUtilities.GetSigner("SHA256WITHRSA/PSS");
@@ -165,9 +173,9 @@ namespace Dtls13Test
                     byte[] signature = signer.GenerateSignature();
                     Debug.WriteLine($"signature: {Convert.ToHexString(signature).ToLowerInvariant()}");
 
-                    ServerEncryptedDatagram encryptedCertVerifyDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new CertVerifyDatagram() { Signature = signature })
+                    ServerEncryptedDatagram encryptedCertVerifyDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new CertVerifyDatagram(signature))
                     {
-                        Epoch = 2,
+                        Epoch = session.Epoch,
                         RecordNumber = session.RecordNumber++,
                     };
 
@@ -189,7 +197,7 @@ namespace Dtls13Test
 
                     ServerEncryptedDatagram encryptedFinishedDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new HandshakeFinishedDatagram() { VerifyData = verifyServerData })
                     {
-                        Epoch = 2,
+                        Epoch = session.Epoch,
                         RecordNumber = session.RecordNumber++,
                     };
                     var encryptedFinishedDatagramBytes = encryptedFinishedDatagram.ToBytes();
@@ -239,13 +247,14 @@ namespace Dtls13Test
 
                 // new Epoch, reset
                 session.RecordNumber = 0;
+                session.Epoch = 3;
 
                 // send ack
                 var ack = new AckDatagram();
                 Debug.WriteLine($"ack: {Convert.ToHexString(ack.ToBytes()).ToLowerInvariant()}");
                 var serverAckDatagram = new ServerEncryptedDatagram(session.ServerApplicationKeys, ack) 
                 { 
-                    Epoch = 3,
+                    Epoch = session.Epoch,
                     RecordNumber = session.RecordNumber++,
                 };
                 var encryptedAckDatagramBytes = serverAckDatagram.ToBytes();
@@ -274,7 +283,7 @@ namespace Dtls13Test
 
                 ServerEncryptedDatagram encryptedDatagram = new ServerEncryptedDatagram(session.ServerApplicationKeys, new ApplicationDataDatagram(Encoding.UTF8.GetBytes("Hello from server!")))
                 {
-                    Epoch = 3,
+                    Epoch = session.Epoch,
                     RecordNumber = session.RecordNumber++,
                 };
                 var bytes = encryptedDatagram.ToBytes();
