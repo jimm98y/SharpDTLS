@@ -170,7 +170,7 @@ namespace Dtls13Test
                     RecordNumber = 0
                 };
                 var encryptedClientFinishedDatagramBytes = encryptedClientFinishedDatagram.ToBytes();
-                Session.HandshakeMessages.Add(encryptedClientFinishedDatagram);
+                //Session.HandshakeMessages.Add(encryptedClientFinishedDatagram);
                 ClientTransport.Send(encryptedClientFinishedDatagramBytes);
                 Session.ServerHandshakeKeys.ClientKeyUseCounter++;
 
@@ -240,7 +240,11 @@ namespace Dtls13Test
             ClientEncryptedDatagram encryptedApplicationData = new ClientEncryptedDatagram(Session.ServerApplicationKeys, new ApplicationDataDatagram()
             {
                 Data = data
-            });
+            })
+            {
+                 Epoch = 3,
+                 RecordNumber = 0
+            };
             var encryptedApplicationDataBytes = encryptedApplicationData.ToBytes();
             Session.ServerApplicationKeys.ClientKeyUseCounter++;
             ClientTransport.Send(encryptedApplicationDataBytes);
