@@ -21,6 +21,7 @@ namespace Dtls13Test
         public event EventHandler<EventArgs> HandshakeFinished;
 
         public ServerTransport ServerTransport { get; }
+        public bool ShouldSendHelloRetry { get; set; } = false;
 
         public Dtls13Server(ServerTransport serverTransport)
         {
@@ -48,25 +49,28 @@ namespace Dtls13Test
                 }
 
                 // now send ServerHello
-                if (clientHello.Extensions.OfType<CookieExtension>().FirstOrDefault() == null)
+                if (ShouldSendHelloRetry)
                 {
-                    var serverHelloRetry = new ServerHelloDatagram()
+                    if (clientHello.Extensions.OfType<CookieExtension>().FirstOrDefault() == null)
                     {
-                        // the HelloRetryRequest message uses the same structure as the ServerHello, but with Random set to the special value
-                        ServerRandom = Convert.FromHexString("CF 21 AD 74 E5 9A 61 11 BE 1D 8C 02 1E 65 B8 91 C2 A2 11 16 7A BB 8C 5E 07 9E 09 E2 C8 A8 33 9C".Replace(" ", ""))
-                    };
-                    serverHelloRetry.Extensions.Add(new ServerSupportedVersions());
-                    serverHelloRetry.Extensions.Add(new CookieExtension(CryptoUtils.CreateCookie(((IPEndPoint)endpoint).Address.ToString(), ((IPEndPoint)endpoint).Port)));
-                    var serverHelloRetryBytes = serverHelloRetry.ToBytes();
-                    ServerTransport.Send(endpoint, serverHelloRetryBytes);
-                    return;
-                }
-                else
-                {
-                    // verify cookie
-                    if(!CryptoUtils.ValidateCookie(((IPEndPoint)endpoint).Address.ToString(), ((IPEndPoint)endpoint).Port, clientHello.Extensions.OfType<CookieExtension>().FirstOrDefault().Cookie))
+                        var serverHelloRetry = new ServerHelloDatagram()
+                        {
+                            // the HelloRetryRequest message uses the same structure as the ServerHello, but with Random set to the special value
+                            ServerRandom = Convert.FromHexString("CF 21 AD 74 E5 9A 61 11 BE 1D 8C 02 1E 65 B8 91 C2 A2 11 16 7A BB 8C 5E 07 9E 09 E2 C8 A8 33 9C".Replace(" ", ""))
+                        };
+                        serverHelloRetry.Extensions.Add(new ServerSupportedVersions());
+                        serverHelloRetry.Extensions.Add(new CookieExtension(CryptoUtils.CreateCookie(((IPEndPoint)endpoint).Address.ToString(), ((IPEndPoint)endpoint).Port)));
+                        var serverHelloRetryBytes = serverHelloRetry.ToBytes();
+                        ServerTransport.Send(endpoint, serverHelloRetryBytes);
+                        return;
+                    }
+                    else
                     {
-                        throw new Exception("Invalid cookie!");
+                        // verify cookie
+                        if (!CryptoUtils.ValidateCookie(((IPEndPoint)endpoint).Address.ToString(), ((IPEndPoint)endpoint).Port, clientHello.Extensions.OfType<CookieExtension>().FirstOrDefault().Cookie))
+                        {
+                            throw new Exception("Invalid cookie!");
+                        }
                     }
                 }
 
