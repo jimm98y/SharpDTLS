@@ -215,7 +215,6 @@ namespace Dtls13Test
                 Debug.WriteLine($"ack: {Convert.ToHexString(ack.ToBytes()).ToLowerInvariant()}");
                 var serverAckDatagram = new ServerEncryptedDatagram(session.ServerApplicationKeys, ack) 
                 { 
-                    RecordNumber = session.ServerApplicationKeys.ServerKeyUseCounter,
                     Epoch = 3
                 };
                 var encryptedAckDatagramBytes = serverAckDatagram.ToBytes();

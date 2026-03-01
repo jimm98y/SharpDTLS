@@ -10,6 +10,7 @@ namespace Dtls13Test.Messages
         public ushort RecordNumber { get; set; }
         public int Epoch { get; set; } = 2;
         public byte[] Bytes { get; private set; }
+        public ulong KeyUseCounter { get; set; }
 
         public ServerEncryptedDatagram(Dtls13CryptoContext cryptoContext)
         {
@@ -43,9 +44,13 @@ namespace Dtls13Test.Messages
 
             byte[] iv = new byte[_cryptoContext.ServerIv.Length];
             Buffer.BlockCopy(_cryptoContext.ServerIv, 0, iv, 0, _cryptoContext.ServerIv.Length);
-            iv[iv.Length - 1] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 24) & 0xFF);
-            iv[iv.Length - 1] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 16) & 0xFF);
-            iv[iv.Length - 1] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 8) & 0xFF);
+            iv[iv.Length - 8] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 56) & 0xFF);
+            iv[iv.Length - 7] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 48) & 0xFF);
+            iv[iv.Length - 6] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 40) & 0xFF);
+            iv[iv.Length - 5] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 32) & 0xFF);
+            iv[iv.Length - 4] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 24) & 0xFF);
+            iv[iv.Length - 3] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 16) & 0xFF);
+            iv[iv.Length - 2] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 8) & 0xFF);
             iv[iv.Length - 1] ^= (byte)(_cryptoContext.ServerKeyUseCounter & 0xFF);
 
             Encrypt(_cryptoContext.AeadEncryptEngine, false, encrypted, 5, encrypted.Length, iv, new KeyParameter(_cryptoContext.ServerKey), 16, encrypted.Take(5).ToArray());

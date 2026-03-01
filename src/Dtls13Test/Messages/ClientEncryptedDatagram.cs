@@ -43,9 +43,13 @@ namespace Dtls13Test.Messages
 
             byte[] iv = new byte[_cryptoContext.ClientIv.Length];
             Buffer.BlockCopy(_cryptoContext.ClientIv, 0, iv, 0, _cryptoContext.ClientIv.Length);
-            iv[iv.Length - 1] ^= (byte)((_cryptoContext.ClientKeyUseCounter >> 24) & 0xFF);
-            iv[iv.Length - 1] ^= (byte)((_cryptoContext.ClientKeyUseCounter >> 16) & 0xFF);
-            iv[iv.Length - 1] ^= (byte)((_cryptoContext.ClientKeyUseCounter >> 8) & 0xFF);
+            iv[iv.Length - 8] ^= (byte)((_cryptoContext.ClientKeyUseCounter >> 56) & 0xFF);
+            iv[iv.Length - 7] ^= (byte)((_cryptoContext.ClientKeyUseCounter >> 48) & 0xFF);
+            iv[iv.Length - 6] ^= (byte)((_cryptoContext.ClientKeyUseCounter >> 40) & 0xFF);
+            iv[iv.Length - 5] ^= (byte)((_cryptoContext.ClientKeyUseCounter >> 32) & 0xFF);
+            iv[iv.Length - 4] ^= (byte)((_cryptoContext.ClientKeyUseCounter >> 24) & 0xFF);
+            iv[iv.Length - 3] ^= (byte)((_cryptoContext.ClientKeyUseCounter >> 16) & 0xFF);
+            iv[iv.Length - 2] ^= (byte)((_cryptoContext.ClientKeyUseCounter >> 8) & 0xFF);
             iv[iv.Length - 1] ^= (byte)(_cryptoContext.ClientKeyUseCounter & 0xFF);
 
             Encrypt(_cryptoContext.AeadEncryptEngine, false, encrypted, 5, encrypted.Length, iv, new KeyParameter(_cryptoContext.ClientKey), 16, encrypted.Take(5).ToArray());

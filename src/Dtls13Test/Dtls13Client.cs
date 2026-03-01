@@ -236,10 +236,7 @@ namespace Dtls13Test
             ClientEncryptedDatagram encryptedApplicationData = new ClientEncryptedDatagram(Session.ServerApplicationKeys, new ApplicationDataDatagram()
             {
                 Data = data
-            })
-            {
-                RecordNumber = Session.ServerApplicationKeys.ClientKeyUseCounter
-            };
+            });
             var encryptedApplicationDataBytes = encryptedApplicationData.ToBytes();
             Session.ServerApplicationKeys.ClientKeyUseCounter++;
             ClientTransport.Send(encryptedApplicationDataBytes);
