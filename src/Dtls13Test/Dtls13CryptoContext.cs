@@ -12,8 +12,9 @@ namespace Dtls13Test
         public ulong ServerKeyUseCounter { get; set; } = 0; // 64-bit sequence number is maintained separately for reading and writing records.
         public ulong ClientKeyUseCounter { get; set; } = 0; // 64-bit sequence number is maintained separately for reading and writing records.
 
-        public Dtls13CryptoContext(string secret, string clientSecret, string serverSecret, string clientKey, string clientIv, string serverKey, string serverIv, string clientSnKey, string serverSnKey)
+        public Dtls13CryptoContext(string clientRandom, string secret, string clientSecret, string serverSecret, string clientKey, string clientIv, string serverKey, string serverIv, string clientSnKey, string serverSnKey)
         {
+            ClientRandom = Convert.FromHexString(clientRandom);
             Secret = Convert.FromHexString(secret);
             ClientSecret = Convert.FromHexString(clientSecret);
             ServerSecret = Convert.FromHexString(serverSecret);
@@ -25,8 +26,9 @@ namespace Dtls13Test
             ServerSnKey = Convert.FromHexString(serverSnKey);
         }
 
-        public Dtls13CryptoContext(byte[] secret, byte[] clientSecret, byte[] serverSecret, byte[] clientKey, byte[] clientIv, byte[] serverKey, byte[] serverIv, byte[] clientSnKey, byte[] serverSnKey)
+        public Dtls13CryptoContext(byte[] clientRandom, byte[] secret, byte[] clientSecret, byte[] serverSecret, byte[] clientKey, byte[] clientIv, byte[] serverKey, byte[] serverIv, byte[] clientSnKey, byte[] serverSnKey)
         {
+            ClientRandom = clientRandom;
             Secret = secret;
             ClientSecret = clientSecret;
             ServerSecret = serverSecret;
@@ -38,6 +40,7 @@ namespace Dtls13Test
             ServerSnKey = serverSnKey;
         }
 
+        public byte[] ClientRandom { get; }
         public byte[] Secret { get; }
         public byte[] ClientSecret { get; }
         public byte[] ServerSecret { get; }

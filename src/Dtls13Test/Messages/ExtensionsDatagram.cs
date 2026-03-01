@@ -1,12 +1,12 @@
 ﻿namespace Dtls13Test.Messages
 {
-    public class ServerExtensionsDatagram : IDatagram
+    public class ExtensionsDatagram : IDatagram
     {
         public List<ITlsExtension> Extensions { get; private set; } = new List<ITlsExtension>();
-        public int SequenceNumber { get; set; }
+        public int SequenceNumber { get; set; } = 1;
         public byte[] Bytes { get; private set; }
 
-        public ServerExtensionsDatagram()
+        public ExtensionsDatagram()
         {
             Extensions = new List<ITlsExtension>(GetDefaultExtensions());
         }

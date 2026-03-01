@@ -1,13 +1,13 @@
 ﻿namespace Dtls13Test.Messages
 {
-    public class ServerCertVerifyDatagram : IDatagram
+    public class CertVerifyDatagram : IDatagram
     {
         public int SequenceNumber { get; set; } = 3;
         public uint SignatureType { get; set; } = 0x0804; // assigned value for RSA-PSS-RSAE-SHA256 signature
         public byte[] Signature { get; set; } = null;
         public byte[] Bytes { get; private set; }
 
-        public ServerCertVerifyDatagram()
+        public CertVerifyDatagram()
         {  }
 
         public void FromBytes(byte[] bytes)

@@ -10,7 +10,6 @@ namespace Dtls13Test.Messages
         public ushort RecordNumber { get; set; }
         public int Epoch { get; set; } = 2;
         public byte[] Bytes { get; private set; }
-        public ulong KeyUseCounter { get; set; }
 
         public ServerEncryptedDatagram(Dtls13CryptoContext cryptoContext)
         {
@@ -61,9 +60,9 @@ namespace Dtls13Test.Messages
             {
                 this.Datagram = plaintext[0] switch
                 {
-                    0x08 => new ServerExtensionsDatagram(),
-                    0x0b => new ServerCertificateDatagram(),
-                    0x0f => new ServerCertVerifyDatagram(),
+                    0x08 => new ExtensionsDatagram(),
+                    0x0b => new CertificateDatagram(),
+                    0x0f => new CertVerifyDatagram(),
                     0x14 => new HandshakeFinishedDatagram(),
                     _ => throw new Exception("Unknown datagram type")
                 };

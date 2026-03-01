@@ -1,6 +1,6 @@
 ﻿namespace Dtls13Test.Messages
 {
-    public class ServerCertificateDatagram : IDatagram
+    public class CertificateDatagram : IDatagram
     {
         public int SequenceNumber { get; set; } = 2;
         public byte RequestContext { get; set; } = 0;
