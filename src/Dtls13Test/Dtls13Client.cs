@@ -53,6 +53,9 @@ namespace Dtls13Test
                     };
                     clientHelloWithCookie.Extensions.Add(new CookieExtension() { Cookie = serverHello.Extensions.OfType<CookieExtension>().First().Cookie });
 
+                    // in cases where the cookie exchange is used, the initial ClientHello and HelloVerifyRequest MUST NOT be included in the CertificateVerify or Finished MAC computations
+                    Session.HandshakeMessages.Clear();
+
                     Session.HandshakeMessages.Add(clientHelloWithCookie);
                     ClientTransport.Send(clientHelloWithCookie.ToBytes());
                     return;
