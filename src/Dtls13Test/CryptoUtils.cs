@@ -8,6 +8,9 @@ using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Tls;
 using Org.BouncyCastle.Tls.Crypto;
 using Org.BouncyCastle.Tls.Crypto.Impl.BC;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Security.Cryptography;
 
 namespace Dtls13Test
@@ -98,18 +101,18 @@ namespace Dtls13Test
             var earlySecret = (new BcTlsSecret(crypto, new byte[] { 0x00 })).HkdfExtract(hashAlg, new BcTlsSecret(crypto, zeroKey)).Extract();
 
             var emptyHash = SHA256.HashData(Array.Empty<byte>());
-            var derivedSecret = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, earlySecret), hashAlg, "derived", emptyHash, 32).Extract();
+            var derivedSecret = HkdfExpandLabel(new BcTlsSecret(crypto, earlySecret), hashAlg, "derived", emptyHash, 32).Extract();
 
             var handshakeSecret = (new BcTlsSecret(crypto, derivedSecret)).HkdfExtract(hashAlg, new BcTlsSecret(crypto, sharedSecret)).Extract();
 
-            var clientSecret = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, handshakeSecret), hashAlg, "c hs traffic", helloHash, 32).Extract();
-            var serverSecret = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, handshakeSecret), hashAlg, "s hs traffic", helloHash, 32).Extract();
-            var clientKey = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "key", new byte[0], 16).Extract();
-            var serverKey = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "key", new byte[0], 16).Extract();
-            var clientIv = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "iv", new byte[0], 12).Extract();
-            var serverIv = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "iv", new byte[0], 12).Extract();
-            var clientSnKey = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "sn", new byte[0], 16).Extract();
-            var serverSnKey = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "sn", new byte[0], 16).Extract();
+            var clientSecret = HkdfExpandLabel(new BcTlsSecret(crypto, handshakeSecret), hashAlg, "c hs traffic", helloHash, 32).Extract();
+            var serverSecret = HkdfExpandLabel(new BcTlsSecret(crypto, handshakeSecret), hashAlg, "s hs traffic", helloHash, 32).Extract();
+            var clientKey = HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "key", new byte[0], 16).Extract();
+            var serverKey = HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "key", new byte[0], 16).Extract();
+            var clientIv = HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "iv", new byte[0], 12).Extract();
+            var serverIv = HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "iv", new byte[0], 12).Extract();
+            var clientSnKey = HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "sn", new byte[0], 16).Extract();
+            var serverSnKey = HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "sn", new byte[0], 16).Extract();
 
             return new Dtls13CryptoContext(clientRandom, handshakeSecret, clientSecret, serverSecret, clientKey, clientIv, serverKey, serverIv, clientSnKey, serverSnKey);
         }
@@ -121,18 +124,18 @@ namespace Dtls13Test
             byte[] zeroKey = new byte[32];
 
             var emptyHash = SHA256.HashData(Array.Empty<byte>());
-            var derivedSecret = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, handshakeSecret), hashAlg, "derived", emptyHash, 32).Extract();
+            var derivedSecret = HkdfExpandLabel(new BcTlsSecret(crypto, handshakeSecret), hashAlg, "derived", emptyHash, 32).Extract();
 
             var masterSecret = (new BcTlsSecret(crypto, derivedSecret)).HkdfExtract(hashAlg, new BcTlsSecret(crypto, zeroKey)).Extract();
 
-            var clientSecret = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, masterSecret), hashAlg, "c ap traffic", handshakeHash, 32).Extract();
-            var serverSecret = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, masterSecret), hashAlg, "s ap traffic", handshakeHash, 32).Extract();
-            var clientKey = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "key", new byte[0], 16).Extract();
-            var serverKey = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "key", new byte[0], 16).Extract();
-            var clientIv = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "iv", new byte[0], 12).Extract();
-            var serverIv = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "iv", new byte[0], 12).Extract();
-            var clientSnKey = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "sn", new byte[0], 16).Extract();
-            var serverSnKey = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "sn", new byte[0], 16).Extract();
+            var clientSecret = HkdfExpandLabel(new BcTlsSecret(crypto, masterSecret), hashAlg, "c ap traffic", handshakeHash, 32).Extract();
+            var serverSecret = HkdfExpandLabel(new BcTlsSecret(crypto, masterSecret), hashAlg, "s ap traffic", handshakeHash, 32).Extract();
+            var clientKey = HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "key", new byte[0], 16).Extract();
+            var serverKey = HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "key", new byte[0], 16).Extract();
+            var clientIv = HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "iv", new byte[0], 12).Extract();
+            var serverIv = HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "iv", new byte[0], 12).Extract();
+            var clientSnKey = HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "sn", new byte[0], 16).Extract();
+            var serverSnKey = HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "sn", new byte[0], 16).Extract();
 
             return new Dtls13CryptoContext(clientRandom, masterSecret, clientSecret, serverSecret, clientKey, clientIv, serverKey, serverIv, clientSnKey, serverSnKey);
         }

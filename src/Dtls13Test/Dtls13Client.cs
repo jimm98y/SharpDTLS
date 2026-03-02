@@ -5,8 +5,11 @@ using Org.BouncyCastle.Tls.Crypto;
 using Org.BouncyCastle.Tls.Crypto.Impl.BC;
 using Org.BouncyCastle.X509;
 using SharpSRTP.UDP;
+using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace Dtls13Test
 {
@@ -124,7 +127,6 @@ namespace Dtls13Test
 
                 byte[] toSign = Encoding.UTF8.GetBytes("                                                                TLS 1.3, server CertificateVerify\0").Concat(h).ToArray();
 
-                // TODO verify the signature
                 X509Certificate serverCertificate = new X509CertificateParser().ReadCertificate(_serverCertificateDatagram.Certificate);
                 AsymmetricKeyParameter publicKey = serverCertificate.GetPublicKey();
 
@@ -177,7 +179,6 @@ namespace Dtls13Test
                     RecordNumber = Session.RecordNumber++,
                 };
                 var encryptedClientFinishedDatagramBytes = encryptedClientFinishedDatagram.ToBytes();
-                //Session.HandshakeMessages.Add(encryptedClientFinishedDatagram);
                 ClientTransport.Send(encryptedClientFinishedDatagramBytes);
                 Session.ServerHandshakeKeys.ClientKeyUseCounter++;
 

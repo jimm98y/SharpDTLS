@@ -1,4 +1,9 @@
-﻿namespace Dtls13Test.Messages
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+
+namespace Dtls13Test.Messages
 {
     public class ServerHelloDatagram : IDatagram
     {
@@ -7,7 +12,7 @@
         public byte[] Bytes { get; private set; }
         public int Epoch { get; set; } = 0;
         public int RecordSequenceNumber { get; set; }
-        public List<ITlsExtension> Extensions { get; private set; } = new List<ITlsExtension>();
+        public List<ITlsExtension> Extensions { get; protected set; } = new List<ITlsExtension>();
 
         public ushort SelectedCipherSuite { get; set; } = 0x1301;
 

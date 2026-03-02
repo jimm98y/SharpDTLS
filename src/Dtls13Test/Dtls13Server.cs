@@ -9,9 +9,14 @@ using Org.BouncyCastle.Tls.Crypto.Impl.BC;
 using Org.BouncyCastle.Utilities.IO.Pem;
 using Org.BouncyCastle.X509;
 using SharpSRTP.UDP;
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
+using System.Linq;
 using System.Net;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace Dtls13Test
 {
@@ -62,14 +67,7 @@ namespace Dtls13Test
                 {
                     if (clientHello.Extensions.OfType<CookieExtension>().FirstOrDefault() == null)
                     {
-                        const string HelloRetryRequestRandom = "CF21AD74E59A6111BE1D8C021E65B891C2A211167ABB8C5E079E09E2C8A8339C";
-                        var serverHelloRetry = new ServerHelloDatagram()
-                        {
-                            // the HelloRetryRequest message uses the same structure as the ServerHello, but with Random set to the special value
-                            ServerRandom = Convert.FromHexString(HelloRetryRequestRandom)
-                        };
-                        serverHelloRetry.Extensions.Add(new ServerSupportedVersions());
-                        serverHelloRetry.Extensions.Add(new CookieExtension(CryptoUtils.CreateCookie(((IPEndPoint)endpoint).Address.ToString(), ((IPEndPoint)endpoint).Port)));
+                        var serverHelloRetry = new HelloRetryRequest(((IPEndPoint)endpoint).Address.ToString(), ((IPEndPoint)endpoint).Port);                       
                         var serverHelloRetryBytes = serverHelloRetry.ToBytes();
                         ServerTransport.Send(endpoint, serverHelloRetryBytes);
                         return;
@@ -143,8 +141,6 @@ namespace Dtls13Test
                     Debug.WriteLine($"handshake_hash: {Convert.ToHexString(h).ToLowerInvariant()}");
 
                     byte[] toSign = Encoding.UTF8.GetBytes("                                                                TLS 1.3, server CertificateVerify\0").Concat(h).ToArray();
-
-
                     PemObject pemPrivateKey = new PemReader(new StringReader(_serverCertificatePrivateKey)).ReadPemObject();
                     string type = pemPrivateKey.Type.Substring(0, pemPrivateKey.Type.Length - "PRIVATE KEY".Length).Trim();
                     Asn1Sequence seq = Asn1Sequence.GetInstance(pemPrivateKey.Content);
@@ -232,7 +228,6 @@ namespace Dtls13Test
 
                 Debug.WriteLine($"Client verify successful!");
 
-                //session.HandshakeMessages.Add(encryptedFinishedDatagram);
                 session.ServerHandshakeKeys.ClientKeyUseCounter++;
 
                 var clientHello = session.HandshakeMessages.OfType<ClientHelloDatagram>().Last();
