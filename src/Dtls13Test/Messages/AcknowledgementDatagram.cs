@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace Dtls13Test.Messages
 {
-    public class AckDatagram : IDatagram
+    public class AcknowledgementDatagram : IDatagram
     {
         public long RecordEpoch { get; set; } = 2;
         public long RecordNumber { get; set; } = 0;

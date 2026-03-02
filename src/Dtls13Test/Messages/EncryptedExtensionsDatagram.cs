@@ -5,13 +5,13 @@ using System.Linq;
 
 namespace Dtls13Test.Messages
 {
-    public class ExtensionsDatagram : IDatagram
+    public class EncryptedExtensionsDatagram : IDatagram
     {
         public List<ITlsExtension> Extensions { get; private set; } = new List<ITlsExtension>();
         public int SequenceNumber { get; set; } = 1;
         public byte[] Bytes { get; private set; }
 
-        public ExtensionsDatagram()
+        public EncryptedExtensionsDatagram()
         {
             Extensions = new List<ITlsExtension>(GetDefaultExtensions());
         }

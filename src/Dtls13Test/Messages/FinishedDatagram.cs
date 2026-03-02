@@ -4,26 +4,17 @@ using System.Linq;
 
 namespace Dtls13Test.Messages
 {
-    public class CertVerifyDatagram : IDatagram
+    public class FinishedDatagram : IDatagram
     {
-        public int SequenceNumber { get; set; } = 3;
-        public uint SignatureType { get; set; } = 0x0804; // assigned value for RSA-PSS-RSAE-SHA256 signature
-        public byte[] Signature { get; set; } = null;
+        public int SequenceNumber { get; set; } = 4;
+        public byte[] VerifyData { get; set; }
         public byte[] Bytes { get; private set; }
-
-        public CertVerifyDatagram()
-        {  }
-
-        public CertVerifyDatagram(byte[] signature)
-        {
-            this.Signature = signature;
-        }
 
         public void FromBytes(byte[] bytes)
         {
             if (bytes == null) throw new ArgumentNullException(nameof(bytes));
             if (bytes.Length < 14) throw new ArgumentException("Buffer too small to be a valid ServerExtensions message.");
-            if (bytes[0] != 0x0f) throw new InvalidDataException("Not an EncryptedExtensions handshake message.");
+            if (bytes[0] != 0x14) throw new InvalidDataException("Not an EncryptedExtensions handshake message.");
 
             Bytes = bytes.ToArray();
 
@@ -34,20 +25,15 @@ namespace Dtls13Test.Messages
             int fragmentOffset = (bytes[6] << 16) | (bytes[7] << 8) | bytes[8];
             int fragmentLength = (bytes[9] << 16) | (bytes[10] << 8) | bytes[11];
 
-            this.SignatureType = (uint)(bytes[12] << 8 | bytes[13]);
-
-            // signature length
-            int signatureLength = (bytes[14] << 8) | bytes[15];
-
-            this.Signature = new byte[signatureLength];
-            Buffer.BlockCopy(bytes, 16, this.Signature, 0, signatureLength);
+            this.VerifyData = new byte[length];
+            Buffer.BlockCopy(bytes, 12, this.VerifyData, 0, length);
         }
 
         public byte[] ToBytes()
         {
             byte[] data = new byte[2048];
 
-            data[0] = 0x0f; // handshake message type (certificate verify)
+            data[0] = 0x14; // handshake message type (finished)
 
             int length = 0;
             data[1] = (byte)((length >> 16) & 0xFF);
@@ -66,23 +52,12 @@ namespace Dtls13Test.Messages
             data[10] = 0;
             data[11] = 0;
 
-            // reserved value for RSA-PSS-RSAE-SHA256 signature
-            data[12] = (byte)(this.SignatureType >> 8 & 0xFF);
-            data[13] = (byte)(this.SignatureType & 0xFF); 
+            Buffer.BlockCopy(this.VerifyData, 0, data, 12, this.VerifyData.Length);
+            length = 12 + this.VerifyData.Length;
 
-            // signaure length (2 bytes)
-            int signatureLength = this.Signature.Length;
-            data[14] = (byte)((signatureLength >> 8) & 0xFF);
-            data[15] = (byte)(signatureLength & 0xFF);
-
-            Buffer.BlockCopy(this.Signature, 0, data, 16, this.Signature.Length);
-
-            length = 16 + this.Signature.Length;
-
-            // type is 22 (handshake record)
+            // (handshake record)
             data[length] = 0x16;
-
-            length = length + 1;
+            length += 1;
 
             // fill in lengths
             length = length - 13;

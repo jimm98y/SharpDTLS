@@ -111,7 +111,7 @@ namespace Dtls13Test
                     // from now on the connection is encrypted
                     session.Epoch = 2;
 
-                    ServerEncryptedDatagram encryptedExtensionsDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new ExtensionsDatagram())
+                    ServerEncryptedDatagram encryptedExtensionsDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new EncryptedExtensionsDatagram())
                     {
                         Epoch = session.Epoch,
                         RecordNumber = session.RecordNumber++
@@ -168,7 +168,7 @@ namespace Dtls13Test
                     byte[] signature = signer.GenerateSignature();
                     Debug.WriteLine($"signature: {Convert.ToHexString(signature).ToLowerInvariant()}");
 
-                    ServerEncryptedDatagram encryptedCertVerifyDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new CertVerifyDatagram(signature))
+                    ServerEncryptedDatagram encryptedCertVerifyDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new CertificateVerifyDatagram(signature))
                     {
                         Epoch = session.Epoch,
                         RecordNumber = session.RecordNumber++,
@@ -190,7 +190,7 @@ namespace Dtls13Test
                     Debug.WriteLine("finished handshake hash:" + Convert.ToHexString(finishedHash));                    
                     byte[] verifyServerData = CryptoUtils.CalculateHmac(finishedServerKey, finishedHash);
 
-                    ServerEncryptedDatagram encryptedFinishedDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new HandshakeFinishedDatagram() { VerifyData = verifyServerData })
+                    ServerEncryptedDatagram encryptedFinishedDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new FinishedDatagram() { VerifyData = verifyServerData })
                     {
                         Epoch = session.Epoch,
                         RecordNumber = session.RecordNumber++,
@@ -210,7 +210,7 @@ namespace Dtls13Test
                 // session was already added, we're waiting for Finished
                 ClientEncryptedDatagram encryptedFinishedDatagram = new ClientEncryptedDatagram(session.ServerHandshakeKeys);
                 encryptedFinishedDatagram.FromBytes(data);
-                var clientFinishedDatagram = encryptedFinishedDatagram.Datagram as HandshakeFinishedDatagram;
+                var clientFinishedDatagram = encryptedFinishedDatagram.Datagram as FinishedDatagram;
 
                 var crypto = new BcTlsCrypto();
                 var hashAlg = CryptoHashAlgorithm.sha256;
@@ -244,7 +244,7 @@ namespace Dtls13Test
                 session.Epoch = 3;
 
                 // send ack
-                var ack = new AckDatagram();
+                var ack = new AcknowledgementDatagram();
                 Debug.WriteLine($"ack: {Convert.ToHexString(ack.ToBytes()).ToLowerInvariant()}");
                 var serverAckDatagram = new ServerEncryptedDatagram(session.ServerApplicationKeys, ack) 
                 { 

@@ -62,16 +62,16 @@ namespace Dtls13Test.Messages
             {
                 this.Datagram = plaintext[0] switch
                 {
-                    0x08 => new ExtensionsDatagram(),
+                    0x08 => new EncryptedExtensionsDatagram(),
                     0x0b => new CertificateDatagram(),
-                    0x0f => new CertVerifyDatagram(),
-                    0x14 => new HandshakeFinishedDatagram(),
+                    0x0f => new CertificateVerifyDatagram(),
+                    0x14 => new FinishedDatagram(),
                     _ => throw new Exception("Unknown datagram type")
                 };
             }
             else if(plaintext[plaintext.Length - 1] == 0x1a)
             {
-                this.Datagram = new AckDatagram();
+                this.Datagram = new AcknowledgementDatagram();
             }
             else if (plaintext[plaintext.Length - 1] == 0x17)
             {

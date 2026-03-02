@@ -56,7 +56,7 @@ namespace Dtls13Test.Tests
         [TestMethod]
         public void TestServerExtensions(string serverExtensionsHex)
         {
-            var serverExtensions = new ExtensionsDatagram();
+            var serverExtensions = new EncryptedExtensionsDatagram();
             serverExtensions.FromBytes(Convert.FromHexString(serverExtensionsHex.Replace(" ", "")));
 
             string actual = Convert.ToHexString(serverExtensions.ToBytes()).ToLowerInvariant();

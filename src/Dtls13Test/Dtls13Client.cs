@@ -19,11 +19,11 @@ namespace Dtls13Test
         private string _publicKey = "358072d6365880d1aeea329adf9121383851ed21a28e3b75e965d0d2cd166254";
         private string _clientRandom = "e0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff";
 
-        private ExtensionsDatagram _serverExtensionsDatagram = null;
+        private EncryptedExtensionsDatagram _serverExtensionsDatagram = null;
         private CertificateDatagram _serverCertificateDatagram = null;
-        private CertVerifyDatagram _serverCertVerifyDatagram = null;
-        private HandshakeFinishedDatagram _serverFinishedDatagram = null;
-        private AckDatagram _serverAckDatagram = null;
+        private CertificateVerifyDatagram _serverCertVerifyDatagram = null;
+        private FinishedDatagram _serverFinishedDatagram = null;
+        private AcknowledgementDatagram _serverAckDatagram = null;
 
         public event EventHandler<EventArgs> HandshakeFinished;
 
@@ -96,7 +96,7 @@ namespace Dtls13Test
             {
                 ServerEncryptedDatagram encryptedExtensionsDatagram = new ServerEncryptedDatagram(Session.ServerHandshakeKeys);
                 encryptedExtensionsDatagram.FromBytes(data);
-                var serverExtensionsDatagram = encryptedExtensionsDatagram.Datagram as ExtensionsDatagram;
+                var serverExtensionsDatagram = encryptedExtensionsDatagram.Datagram as EncryptedExtensionsDatagram;
                 Session.HandshakeMessages.Add(encryptedExtensionsDatagram);
                 Session.ServerHandshakeKeys.ServerKeyUseCounter++;
 
@@ -118,7 +118,7 @@ namespace Dtls13Test
             {
                 ServerEncryptedDatagram encryptedCertVerifyDatagram = new ServerEncryptedDatagram(Session.ServerHandshakeKeys);
                 encryptedCertVerifyDatagram.FromBytes(data);
-                var serverCertVerifyDatagram = encryptedCertVerifyDatagram.Datagram as CertVerifyDatagram;
+                var serverCertVerifyDatagram = encryptedCertVerifyDatagram.Datagram as CertificateVerifyDatagram;
 
                 Debug.WriteLine($"Received server cert verify: {Convert.ToHexString(serverCertVerifyDatagram.Signature).ToLowerInvariant()}");
 
@@ -149,7 +149,7 @@ namespace Dtls13Test
             {
                 ServerEncryptedDatagram encryptedFinishedDatagram = new ServerEncryptedDatagram(Session.ServerHandshakeKeys);
                 encryptedFinishedDatagram.FromBytes(data);
-                var serverFinishedDatagram = encryptedFinishedDatagram.Datagram as HandshakeFinishedDatagram;
+                var serverFinishedDatagram = encryptedFinishedDatagram.Datagram as FinishedDatagram;
 
                 Debug.WriteLine($"Received server finished: {Convert.ToHexString(serverFinishedDatagram.VerifyData).ToLowerInvariant()}");
 
@@ -173,7 +173,7 @@ namespace Dtls13Test
                 var finishedClientKey = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, Session.ServerHandshakeKeys.ClientSecret), hashAlg, "finished", new byte[0], 32).Extract();
                 byte[] verifyClientData = CryptoUtils.CalculateHmac(finishedClientKey, finishedClientHash);
 
-                ClientEncryptedDatagram encryptedClientFinishedDatagram = new ClientEncryptedDatagram(Session.ServerHandshakeKeys, new HandshakeFinishedDatagram() { VerifyData = verifyClientData })
+                ClientEncryptedDatagram encryptedClientFinishedDatagram = new ClientEncryptedDatagram(Session.ServerHandshakeKeys, new FinishedDatagram() { VerifyData = verifyClientData })
                 {
                     Epoch = Session.Epoch,
                     RecordNumber = Session.RecordNumber++,
@@ -204,7 +204,7 @@ namespace Dtls13Test
 
                 ServerEncryptedDatagram encryptedServerAckDatagram = new ServerEncryptedDatagram(Session.ServerApplicationKeys);
                 encryptedServerAckDatagram.FromBytes(data);
-                var serverAckDatagram = encryptedServerAckDatagram.Datagram as AckDatagram;
+                var serverAckDatagram = encryptedServerAckDatagram.Datagram as AcknowledgementDatagram;
                 Session.ServerApplicationKeys.ServerKeyUseCounter++;
 
                 _serverAckDatagram = serverAckDatagram;
