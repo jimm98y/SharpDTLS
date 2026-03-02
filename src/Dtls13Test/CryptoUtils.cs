@@ -25,9 +25,8 @@ namespace Dtls13Test
             new SecureRandom().NextBytes(_privateKey);
         }
 
-        public static byte[] CreateCookie(string clientIP, int clientPort, int minuteTimeOffset = 0)
+        public static byte[] CreateCookie(DateTime timestamp, string clientIP, int clientPort, int minuteTimeOffset = 0)
         {
-            DateTime timestamp = DateTime.UtcNow;
             DateTime timestampRounded = new DateTime(timestamp.Year, timestamp.Month, timestamp.Day, timestamp.Hour, timestamp.Minute, 0, DateTimeKind.Utc);
             timestampRounded = timestampRounded.AddMinutes(minuteTimeOffset);
 
@@ -38,16 +37,16 @@ namespace Dtls13Test
             }
         }
 
-        public static bool ValidateCookie(string clientIP, int clientPort, byte[] cookie)
+        public static bool ValidateCookie(DateTime timestamp, string clientIP, int clientPort, byte[] cookie)
         {
-            byte[] expectedCookie = CreateCookie(clientIP, clientPort);
+            byte[] expectedCookie = CreateCookie(timestamp, clientIP, clientPort);
             if(expectedCookie.SequenceEqual(cookie))
             {
                 return true;
             }
             else
             {
-                expectedCookie = CreateCookie(clientIP, clientPort, -1);
+                expectedCookie = CreateCookie(timestamp, clientIP, clientPort, -1);
                 return expectedCookie.SequenceEqual(cookie);
             }
         }

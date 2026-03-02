@@ -116,7 +116,6 @@ namespace Dtls13Test.Tests
             Assert.AreEqual(serverFinishedHex.Replace(" ", ""), actual);
         }
 
-
         [DataRow("2f4a0200236929c19405bbd4f1ee3a57865cbf93cea0011aeb123c5f7735cdbe0d3e567f0e63721a", "ee52d3c840746dd3e4ac35ecc48a9ca6", "3a1c8c05aa56249f820b062f", "11df7004d9cd3385096afd93afa3a1d3", 1)]
         [DataRow("2f 31 50 00 23 ea 80 ab 8e 08 c9 38 95 41 8d 24 35 71 ea 6d e7 d8 63 ee 84 23 0b b6 04 3c b3 84 df 94 b6 da 28 5a 3b c4", "2b65fffbbc8189474aa2003c43c32d4d", "582f5a11bdaf973fe3ffeb4e", "57ba02596c6a1352d7fe8416c7e17d5a", 0)]
         [TestMethod]
@@ -133,10 +132,10 @@ namespace Dtls13Test.Tests
         [TestMethod]
         public void TestCookie()
         {
-            for (int i = 0; i < 2; i++)
-            {
-                Debug.WriteLine(Convert.ToHexString(CryptoUtils.CreateCookie("127.0.0.1", 65512)));
-            }            
+            var timestamp = DateTime.UtcNow;
+            var cookie1 = Convert.ToHexString(CryptoUtils.CreateCookie(timestamp, "127.0.0.1", 65512));
+            var cookie2 = Convert.ToHexString(CryptoUtils.CreateCookie(timestamp, "127.0.0.1", 65512));
+            Assert.AreEqual(cookie1, cookie2);
         }
     }
 }

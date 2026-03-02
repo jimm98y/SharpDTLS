@@ -9,10 +9,10 @@ namespace Dtls13Test.Messages
         public HelloRetryRequest()
         { }
 
-        public HelloRetryRequest(string clientIP, int clientPort)
+        public HelloRetryRequest(DateTime timestamp, string clientIP, int clientPort)
         {
             ServerRandom = Convert.FromHexString(HelloRetryRequestRandom);
-            Extensions = [.. GetDefaultExtensions(), new CookieExtension(CryptoUtils.CreateCookie(clientIP, clientPort))];
+            Extensions = [.. GetDefaultExtensions(), new CookieExtension(CryptoUtils.CreateCookie(timestamp, clientIP, clientPort))];
         }
 
         private static ITlsExtension[] GetDefaultExtensions()

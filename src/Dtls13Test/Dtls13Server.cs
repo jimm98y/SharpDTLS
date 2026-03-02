@@ -67,7 +67,7 @@ namespace Dtls13Test
                 {
                     if (clientHello.Extensions.OfType<CookieExtension>().FirstOrDefault() == null)
                     {
-                        var serverHelloRetry = new HelloRetryRequest(((IPEndPoint)endpoint).Address.ToString(), ((IPEndPoint)endpoint).Port);                       
+                        var serverHelloRetry = new HelloRetryRequest(DateTime.UtcNow, ((IPEndPoint)endpoint).Address.ToString(), ((IPEndPoint)endpoint).Port);                       
                         var serverHelloRetryBytes = serverHelloRetry.ToBytes();
                         ServerTransport.Send(endpoint, serverHelloRetryBytes);
                         return;
@@ -75,7 +75,7 @@ namespace Dtls13Test
                     else
                     {
                         // verify cookie
-                        if (!CryptoUtils.ValidateCookie(((IPEndPoint)endpoint).Address.ToString(), ((IPEndPoint)endpoint).Port, clientHello.Extensions.OfType<CookieExtension>().FirstOrDefault().Cookie))
+                        if (!CryptoUtils.ValidateCookie(DateTime.UtcNow, ((IPEndPoint)endpoint).Address.ToString(), ((IPEndPoint)endpoint).Port, clientHello.Extensions.OfType<CookieExtension>().FirstOrDefault().Cookie))
                         {
                             throw new Exception("Invalid cookie!");
                         }
