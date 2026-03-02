@@ -4,7 +4,18 @@ using System.Text;
 
 namespace Dtls13Test.Messages
 {
-    internal class NewSessionTicket
+    public class NewSessionTicketDatagram : IDatagram
     {
+        public byte[] Bytes => throw new NotImplementedException();
+
+        public void FromBytes(byte[] bytes)
+        {
+            throw new NotImplementedException();
+        }
+
+        public byte[] ToBytes()
+        {
+            throw new NotImplementedException();
+        }
     }
 }
