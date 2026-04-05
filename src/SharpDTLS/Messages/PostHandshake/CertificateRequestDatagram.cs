@@ -1,12 +1,15 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
 
-namespace Dtls13Test.Messages
+namespace SharpDTLS.Messages
 {
-    public class NewSessionTicketDatagram : IDatagram
+    public class CertificateRequestDatagram : IDatagram
     {
-        public byte[] Bytes => throw new NotImplementedException();
+        public byte[] Bytes { get; private set; }
+
+        public CertificateRequestDatagram()
+        {
+            throw new NotImplementedException();
+        }
 
         public void FromBytes(byte[] bytes)
         {

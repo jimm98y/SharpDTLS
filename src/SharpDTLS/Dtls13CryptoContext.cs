@@ -2,7 +2,7 @@
 using Org.BouncyCastle.Crypto.Modes;
 using System;
 
-namespace Dtls13Test
+namespace SharpDTLS
 {
     public class Dtls13CryptoContext
     {

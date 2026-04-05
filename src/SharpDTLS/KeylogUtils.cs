@@ -1,7 +1,7 @@
 ﻿using System.IO;
 using System.Text;
 
-namespace Dtls13Test
+namespace SharpDTLS
 {
     public static class KeylogUtils
     {

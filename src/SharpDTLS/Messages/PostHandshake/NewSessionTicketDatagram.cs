@@ -2,9 +2,9 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace Dtls13Test.Messages
+namespace SharpDTLS.Messages
 {
-    public class KeyUpdateDatagram : IDatagram
+    public class NewSessionTicketDatagram : IDatagram
     {
         public byte[] Bytes => throw new NotImplementedException();
 

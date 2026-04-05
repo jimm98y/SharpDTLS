@@ -3,7 +3,7 @@ using Org.BouncyCastle.Crypto.Parameters;
 using System;
 using System.Linq;
 
-namespace Dtls13Test.Messages
+namespace SharpDTLS.DTLS13
 {
     public class ClientEncryptedDatagram : IDatagram
     {

@@ -1,4 +1,4 @@
-﻿using Dtls13Test.Messages;
+﻿using SharpDTLS.DTLS13;
 using Org.BouncyCastle.Asn1;
 using Org.BouncyCastle.Asn1.Pkcs;
 using Org.BouncyCastle.Crypto;
@@ -18,7 +18,7 @@ using System.Net;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Dtls13Test
+namespace SharpDTLS
 {
     public class Dtls13Server
     {

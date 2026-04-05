@@ -1,4 +1,4 @@
-﻿using Dtls13Test.Messages;
+﻿using SharpDTLS.DTLS13;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Digests;
 using Org.BouncyCastle.Crypto.Generators;
@@ -13,7 +13,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
 
-namespace Dtls13Test
+namespace SharpDTLS
 {
     public static class CryptoUtils
     {

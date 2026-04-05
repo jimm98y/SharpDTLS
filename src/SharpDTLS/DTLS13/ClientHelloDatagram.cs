@@ -1,9 +1,10 @@
-﻿using System;
+﻿using SharpDTLS.Messages;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
-namespace Dtls13Test.Messages
+namespace SharpDTLS.DTLS13
 {
     public class ClientHelloDatagram : IDatagram
     {
@@ -33,7 +34,7 @@ namespace Dtls13Test.Messages
                 new ClientSupportedVersions(),
                 new ClientSignatureAlgorithms(new ushort[] { 0x0603, 0x0503, 0x0403, 0x0203, 0x0806, 0x080b, 0x0805, 0x080a, 0x0804, 0x0809, 0x0601, 0x0501, 0x0401, 0x0301, 0x0201 }),
                 new EncryptThenMac(),
-                new ClientSupportedGroups(new ushort[] { 0x001d }) // assigned value for the curve "x25519"
+                new SupportedGroups(new ushort[] { 0x001d }) // assigned value for the curve "x25519"
             };
         }
 
@@ -97,7 +98,7 @@ namespace Dtls13Test.Messages
                     0x002b => new ClientSupportedVersions(),
                     0x000d => new ClientSignatureAlgorithms(),
                     0x0016 => new EncryptThenMac(),
-                    0x000a => new ClientSupportedGroups(),
+                    0x000a => new SupportedGroups(),
                     0x002c => new CookieExtension(),
                     _ => throw new NotSupportedException()
                 };
@@ -453,21 +454,21 @@ namespace Dtls13Test.Messages
         }
     }
 
-    public class ClientSupportedGroups : ITlsExtension
+    public class SupportedGroups : ITlsExtension
     {
-        public ushort[] SupportedGroups { get; private set; }
+        public ushort[] Groups { get; private set; }
 
-        public ClientSupportedGroups()
+        public SupportedGroups()
         { }
 
-        public ClientSupportedGroups(ushort[] supportedGroups)
+        public SupportedGroups(ushort[] supportedGroups)
         {
-            this.SupportedGroups = supportedGroups;
+            this.Groups = supportedGroups;
         }
 
         public int CalculateLength()
         {
-            return 6 + 2 * this.SupportedGroups.Length;
+            return 6 + 2 * this.Groups.Length;
         }
 
         public int Read(int offset, byte[] source)
@@ -493,10 +494,10 @@ namespace Dtls13Test.Messages
                 throw new ArgumentException("Buffer too small to contain the declared supported groups.");
 
             int count = groupListLength / 2;
-            this.SupportedGroups = new ushort[count];
+            this.Groups = new ushort[count];
             for (int i = 0; i < count; i++)
             {
-                this.SupportedGroups[i] = (ushort)((source[offset + 6 + i * 2] << 8) | source[offset + 6 + i * 2 + 1]);
+                this.Groups[i] = (ushort)((source[offset + 6 + i * 2] << 8) | source[offset + 6 + i * 2 + 1]);
             }
 
             return 6 + groupListLength;
@@ -507,21 +508,21 @@ namespace Dtls13Test.Messages
             destination[offset] = 0x00;
             destination[offset + 1] = 0x0a; // extension type 0x000a (Supported Groups)
 
-            int extensionLength = 2 + 2 * this.SupportedGroups.Length;
+            int extensionLength = 2 + 2 * this.Groups.Length;
             destination[offset + 2] = (byte)((extensionLength >> 8) & 0xff); // extension length
             destination[offset + 3] = (byte)((extensionLength) & 0xff); // extension length
 
-            int groupListLength = 2 * this.SupportedGroups.Length;
+            int groupListLength = 2 * this.Groups.Length;
             destination[offset + 4] = (byte)((groupListLength >> 8) & 0xff); // group list length
             destination[offset + 5] = (byte)((groupListLength) & 0xff); // group list length
 
-            for (int i = 0; i < this.SupportedGroups.Length; i++)
+            for (int i = 0; i < this.Groups.Length; i++)
             {
-                destination[offset + 6 + i * 2] = (byte)((this.SupportedGroups[i] >> 8) & 0xff);
-                destination[offset + 7 + i * 2] = (byte)(this.SupportedGroups[i] & 0xff);
+                destination[offset + 6 + i * 2] = (byte)((this.Groups[i] >> 8) & 0xff);
+                destination[offset + 7 + i * 2] = (byte)(this.Groups[i] & 0xff);
             }
 
-            return 6 + 2 * this.SupportedGroups.Length;
+            return 6 + 2 * this.Groups.Length;
         }
     }
 }

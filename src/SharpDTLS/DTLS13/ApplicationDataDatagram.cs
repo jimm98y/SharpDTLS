@@ -2,7 +2,7 @@
 using System.IO;
 using System.Linq;
 
-namespace Dtls13Test.Messages
+namespace SharpDTLS.DTLS13
 {
     public class ApplicationDataDatagram : IDatagram
     {

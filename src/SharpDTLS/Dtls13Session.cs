@@ -1,7 +1,6 @@
-﻿using Dtls13Test.Messages;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
-namespace Dtls13Test
+namespace SharpDTLS
 {
     public class Dtls13Session
     {

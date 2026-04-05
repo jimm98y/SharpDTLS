@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
-namespace Dtls13Test.Messages
+namespace SharpDTLS.DTLS13
 {
     public class ServerHelloDatagram : IDatagram
     {
@@ -122,7 +122,8 @@ namespace Dtls13Test.Messages
 
         public byte[] ToBytes()
         {
-            byte[] serverHello = new byte[2048];
+            int extensionsLength = Extensions.Select(x => x.CalculateLength()).Sum();
+            byte[] serverHello = new byte[65 + extensionsLength];
 
             // DTLS record header
             serverHello[0] = 0x16; // TLS record type 22 (Handshake)
@@ -172,7 +173,6 @@ namespace Dtls13Test.Messages
             serverHello[62] = 0x00; // Compression method (null) - DTLS1.3 does not support compression
 
             // Extensions 
-            int extensionsLength = Extensions.Select(x => x.CalculateLength()).Sum();
             serverHello[63] = (byte)((extensionsLength >> 8) & 0xff); // Extensions length in bytes (placeholder)
             serverHello[64] = (byte)(extensionsLength & 0xff); // Extensions length in bytes (placeholder)
             int nextExtensionOffset = 65; // Starting offset for extensions
@@ -197,7 +197,7 @@ namespace Dtls13Test.Messages
             serverHello[23] = (byte)((fragmentLength >> 8) & 0xff);
             serverHello[24] = (byte)(fragmentLength & 0xff);
 
-            Bytes = serverHello.Take(nextExtensionOffset).ToArray();
+            Bytes = serverHello;
 
             return Bytes;
         }

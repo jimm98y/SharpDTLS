@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
-namespace Dtls13Test.Messages
+namespace SharpDTLS.DTLS13
 {
     public class EncryptedExtensionsDatagram : IDatagram
     {
@@ -20,7 +20,7 @@ namespace Dtls13Test.Messages
         {
             return new ITlsExtension[]
             {
-                new ClientSupportedGroups(new ushort[] { 0x0017, 0x001d, 0x0018, 0x0019, 0x0100 }) // assigned value for the curve "x25519"
+                new SupportedGroups(new ushort[] { 0x0017, 0x001d, 0x0018, 0x0019, 0x0100 }) // assigned value for the curve "x25519"
             };
         }
 
@@ -56,7 +56,7 @@ namespace Dtls13Test.Messages
 
                 ITlsExtension matching = extType switch
                 {
-                    0x000a => new ClientSupportedGroups(),
+                    0x000a => new SupportedGroups(),
                     _ => null
                 };
 

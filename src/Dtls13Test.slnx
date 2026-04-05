@@ -1,4 +1,5 @@
 <Solution>
   <Project Path="Dtls13Test.Tests/Dtls13Test.Tests.csproj" Id="9d511f45-8a39-492f-a6f1-3f8df39d02fe" />
   <Project Path="Dtls13Test/Dtls13Test.csproj" />
+  <Project Path="SharpDTLS/SharpDTLS.csproj" Id="4aa57d3b-1b2a-45be-84c1-a2a612fa62ec" />
 </Solution>

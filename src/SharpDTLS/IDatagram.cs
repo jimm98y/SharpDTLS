@@ -1,4 +1,4 @@
-﻿namespace Dtls13Test.Messages
+﻿namespace SharpDTLS
 {
     public interface IDatagram
     {

@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace Dtls13Test.Messages
+namespace SharpDTLS.DTLS13
 {
     public class HelloRetryRequest : ServerHelloDatagram
     {

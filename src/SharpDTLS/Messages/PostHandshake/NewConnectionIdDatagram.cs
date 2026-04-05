@@ -2,9 +2,9 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace Dtls13Test.Messages
+namespace SharpDTLS.Messages
 {
-    public class RequestConnectionIdDatagram : IDatagram
+    public class NewConnectionIdDatagram : IDatagram
     {
         public byte[] Bytes => throw new NotImplementedException();
 
