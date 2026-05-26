@@ -1,5 +1,4 @@
-﻿using SharpDTLS.Messages;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -100,6 +99,7 @@ namespace SharpDTLS.DTLS13
                     0x0016 => new EncryptThenMac(),
                     0x000a => new SupportedGroups(),
                     0x002c => new CookieExtension(),
+                    0x000f => new UseSrtpExtension(),
                     _ => throw new NotSupportedException()
                 };
 
@@ -523,6 +523,105 @@ namespace SharpDTLS.DTLS13
             }
 
             return 6 + 2 * this.Groups.Length;
+        }
+    }
+
+    public class UseSrtpExtension : ITlsExtension
+    {
+        public ushort[] SrtpProtectionProfiles { get; private set; }
+        public byte[] MasterKeyIdentifier { get; private set; }
+
+        public UseSrtpExtension()
+        {
+            SrtpProtectionProfiles = new ushort[] { 0x0001, 0x0007 }; // SRTP_AES128_CM_HMAC_SHA1_80, SRTP_AEAD_AES_128_GCM
+            MasterKeyIdentifier = new byte[0]; // Empty MKI
+        }
+
+        public UseSrtpExtension(ushort[] srtpProtectionProfiles, byte[] masterKeyIdentifier = null)
+        {
+            this.SrtpProtectionProfiles = srtpProtectionProfiles;
+            this.MasterKeyIdentifier = masterKeyIdentifier ?? new byte[0];
+        }
+
+        public int CalculateLength()
+        {
+            // 4 (extension header) + 2 (profile list length) + 2*profiles + 1 (mki length) + mki data
+            return 4 + 2 + 2 * this.SrtpProtectionProfiles.Length + 1 + this.MasterKeyIdentifier.Length;
+        }
+
+        public int Read(int offset, byte[] source)
+        {
+            if (source == null) throw new ArgumentNullException(nameof(source));
+            if (offset < 0) throw new ArgumentOutOfRangeException(nameof(offset));
+            if (source.Length < offset + 6) throw new ArgumentException("Not enough data for UseSrtp extension header.");
+
+            ushort extType = (ushort)((source[offset] << 8) | source[offset + 1]);
+            if (extType != 0x000f) throw new InvalidDataException($"Unexpected extension type: 0x{extType:X4}");
+
+            ushort extensionLength = (ushort)((source[offset + 2] << 8) | source[offset + 3]);
+            ushort profileListLength = (ushort)((source[offset + 4] << 8) | source[offset + 5]);
+
+            if ((profileListLength & 1) != 0)
+                throw new InvalidDataException("Profile list length must be even (each profile is 2 bytes).");
+
+            if (source.Length < offset + 6 + profileListLength + 1)
+                throw new ArgumentException("Buffer too small to contain the declared SRTP profiles.");
+
+            int profileCount = profileListLength / 2;
+            this.SrtpProtectionProfiles = new ushort[profileCount];
+            for (int i = 0; i < profileCount; i++)
+            {
+                SrtpProtectionProfiles[i] = (ushort)((source[offset + 6 + i * 2] << 8) | source[offset + 6 + i * 2 + 1]);
+            }
+
+            int mkiLengthOffset = offset + 6 + profileListLength;
+            byte mkiLength = source[mkiLengthOffset];
+
+            if (source.Length < mkiLengthOffset + 1 + mkiLength)
+                throw new ArgumentException("Buffer too small to contain the declared MKI.");
+
+            this.MasterKeyIdentifier = new byte[mkiLength];
+            if (mkiLength > 0)
+            {
+                Buffer.BlockCopy(source, mkiLengthOffset + 1, this.MasterKeyIdentifier, 0, mkiLength);
+            }
+
+            // Validate extension length matches
+            int expectedExtensionLength = 2 + profileListLength + 1 + mkiLength;
+            if (extensionLength != expectedExtensionLength)
+                throw new InvalidDataException("Inconsistent extension length for UseSrtp extension.");
+
+            return 4 + expectedExtensionLength;
+        }
+
+        public int Write(int offset, byte[] destination)
+        {
+            destination[offset] = 0x00;
+            destination[offset + 1] = 0x0f; // extension type 0x000f (Use SRTP)
+
+            int extensionLength = 2 + 2 * this.SrtpProtectionProfiles.Length + 1 + this.MasterKeyIdentifier.Length;
+            destination[offset + 2] = (byte)((extensionLength >> 8) & 0xff); // extension length
+            destination[offset + 3] = (byte)(extensionLength & 0xff); // extension length
+
+            int profileListLength = 2 * this.SrtpProtectionProfiles.Length;
+            destination[offset + 4] = (byte)((profileListLength >> 8) & 0xff); // profile list length
+            destination[offset + 5] = (byte)(profileListLength & 0xff); // profile list length
+
+            for (int i = 0; i < this.SrtpProtectionProfiles.Length; i++)
+            {
+                destination[offset + 6 + i * 2] = (byte)((this.SrtpProtectionProfiles[i] >> 8) & 0xff);
+                destination[offset + 7 + i * 2] = (byte)(this.SrtpProtectionProfiles[i] & 0xff);
+            }
+
+            int mkiLengthOffset = offset + 6 + profileListLength;
+            destination[mkiLengthOffset] = (byte)this.MasterKeyIdentifier.Length;
+
+            if (this.MasterKeyIdentifier.Length > 0)
+            {
+                Buffer.BlockCopy(this.MasterKeyIdentifier, 0, destination, mkiLengthOffset + 1, this.MasterKeyIdentifier.Length);
+            }
+
+            return 4 + extensionLength;
         }
     }
 }

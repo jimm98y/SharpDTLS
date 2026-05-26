@@ -240,7 +240,8 @@ namespace SharpDTLS
             var clientHello = new ClientHelloDatagram(Session.PublicKey) 
             { 
                 ClientRandom = Convert.FromHexString(_clientRandom) 
-            };                     
+            };
+            clientHello.Extensions.Add(new UseSrtpExtension());
 
             Session.HandshakeMessages.Add(clientHello);
             ClientTransport.Send(clientHello.ToBytes());

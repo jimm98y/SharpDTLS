@@ -92,7 +92,8 @@ namespace SharpDTLS.DTLS13
                 {
                     0x0033 => new ServerKeyShareExtension(),
                     0x002b => new ServerSupportedVersions(),
-                    0x002c => new CookieExtension(),    
+                    0x002c => new CookieExtension(),
+                    0x000f => new UseSrtpExtension(),
                     _ => throw new NotSupportedException()
                 };
 
@@ -351,6 +352,83 @@ namespace SharpDTLS.DTLS13
             destination[offset + 5] = (byte)(this.Cookie.Length & 0xff); // Cookie length
             Buffer.BlockCopy(this.Cookie, 0, destination, offset + 6, this.Cookie.Length);
             return 6 + this.Cookie.Length; // total length of the extension data
+        }
+    }
+
+    public class ServerUseSrtpExtension : ITlsExtension
+    {
+        public ushort SelectedSrtpProfile { get; set; }
+        public byte[] MasterKeyIdentifier { get; set; }
+
+        public ServerUseSrtpExtension()
+        {
+            SelectedSrtpProfile = 0x0001; // SRTP_AES128_CM_HMAC_SHA1_80
+            MasterKeyIdentifier = new byte[0]; // Empty MKI
+        }
+
+        public ServerUseSrtpExtension(ushort selectedSrtpProfile, byte[] masterKeyIdentifier = null)
+        {
+            this.SelectedSrtpProfile = selectedSrtpProfile;
+            this.MasterKeyIdentifier = masterKeyIdentifier ?? new byte[0];
+        }
+
+        public int CalculateLength()
+        {
+            // 4 (extension header) + 2 (selected profile) + 1 (mki length) + mki data
+            return 4 + 2 + 1 + this.MasterKeyIdentifier.Length;
+        }
+
+        public int Read(int offset, byte[] source)
+        {
+            if (source == null) throw new ArgumentNullException(nameof(source));
+            if (offset < 0) throw new ArgumentOutOfRangeException(nameof(offset));
+            if (source.Length < offset + 7) throw new ArgumentException("Not enough data for ServerUseSrtp extension header.");
+
+            ushort extType = (ushort)((source[offset] << 8) | source[offset + 1]);
+            if (extType != 0x000f) throw new InvalidDataException($"Unexpected extension type: 0x{extType:X4}");
+
+            ushort extensionLength = (ushort)((source[offset + 2] << 8) | source[offset + 3]);
+            this.SelectedSrtpProfile = (ushort)((source[offset + 4] << 8) | source[offset + 5]);
+
+            byte mkiLength = source[offset + 6];
+
+            if (source.Length < offset + 7 + mkiLength)
+                throw new ArgumentException("Buffer too small to contain the declared MKI.");
+
+            this.MasterKeyIdentifier = new byte[mkiLength];
+            if (mkiLength > 0)
+            {
+                Buffer.BlockCopy(source, offset + 7, this.MasterKeyIdentifier, 0, mkiLength);
+            }
+
+            // Validate extension length matches
+            int expectedExtensionLength = 2 + 1 + mkiLength;
+            if (extensionLength != expectedExtensionLength)
+                throw new InvalidDataException("Inconsistent extension length for ServerUseSrtp extension.");
+
+            return 4 + expectedExtensionLength;
+        }
+
+        public int Write(int offset, byte[] destination)
+        {
+            destination[offset] = 0x00;
+            destination[offset + 1] = 0x0f; // extension type 0x000f (Use SRTP)
+
+            int extensionLength = 2 + 1 + this.MasterKeyIdentifier.Length;
+            destination[offset + 2] = (byte)((extensionLength >> 8) & 0xff); // extension length
+            destination[offset + 3] = (byte)(extensionLength & 0xff); // extension length
+
+            destination[offset + 4] = (byte)((this.SelectedSrtpProfile >> 8) & 0xff); // selected profile
+            destination[offset + 5] = (byte)(this.SelectedSrtpProfile & 0xff); // selected profile
+
+            destination[offset + 6] = (byte)this.MasterKeyIdentifier.Length; // mki length
+
+            if (this.MasterKeyIdentifier.Length > 0)
+            {
+                Buffer.BlockCopy(this.MasterKeyIdentifier, 0, destination, offset + 7, this.MasterKeyIdentifier.Length);
+            }
+
+            return 4 + extensionLength;
         }
     }
 }
