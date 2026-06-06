@@ -1,53 +1,56 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Linq;
 
-namespace SharpDTLS.DTLS13.PostHandshake
+namespace SharpDTLS.DTLS10
 {
-    public class KeyUpdateDatagram : IDatagram
+    public class HelloVerifyDatagram : IDatagram
     {
-        // Handshake type for KeyUpdate per TLS 1.3 post-handshake
-        public byte HandshakeType { get; set; } = 0x1b;
-
+        public byte[] Cookie { get; set; } = new byte[0];
         public int SequenceNumber { get; set; } = 0;
-        public byte UpdateRequest { get; set; } = 0x00; // 0x00 = update_not_requested, 0x01 = update_requested
-
         public byte[] Bytes { get; private set; }
 
-        public KeyUpdateDatagram()
+        public HelloVerifyDatagram()
         {
         }
 
-        public KeyUpdateDatagram(byte updateRequest)
+        public HelloVerifyDatagram(byte[] cookie)
         {
-            UpdateRequest = updateRequest;
+            Cookie = cookie ?? new byte[0];
         }
 
         public void FromBytes(byte[] bytes)
         {
             if (bytes == null) throw new ArgumentNullException(nameof(bytes));
-            if (bytes.Length < 13 + 1) throw new ArgumentException("Buffer too small to be a KeyUpdate.");
+            if (bytes.Length < 14) throw new ArgumentException("Buffer too small for HelloVerify.");
 
             Bytes = bytes.ToArray();
 
-            if (bytes[0] != HandshakeType) throw new InvalidDataException("Not a KeyUpdate handshake message.");
+            if (bytes[0] != 0x03) throw new InvalidDataException("Not a HelloVerify handshake message.");
 
             int length = (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
             SequenceNumber = (bytes[4] << 8) | bytes[5];
 
             int pos = 12;
 
-            if (bytes.Length < pos + 1) throw new ArgumentException("Buffer truncated before update_request.");
-            UpdateRequest = bytes[pos++];
+            // Skip version (2 bytes)
+            if (bytes.Length < pos + 2) throw new ArgumentException("Buffer truncated before version.");
+            pos += 2;
 
-            // optional trailing extensions or record type; be tolerant
+            if (bytes.Length < pos + 1) throw new ArgumentException("Buffer truncated before cookie length.");
+            int cookieLen = bytes[pos++];
+
+            if (bytes.Length < pos + cookieLen) throw new ArgumentException("Buffer truncated for cookie.");
+            Cookie = new byte[cookieLen];
+            if (cookieLen > 0) Buffer.BlockCopy(bytes, pos, Cookie, 0, cookieLen);
         }
 
         public byte[] ToBytes()
         {
-            byte[] data = new byte[64];
+            byte[] data = new byte[512];
 
-            data[0] = HandshakeType;
+            data[0] = 0x03; // HelloVerify
+
             int length = 0;
             data[1] = (byte)((length >> 16) & 0xFF);
             data[2] = (byte)((length >> 8) & 0xFF);
@@ -60,11 +63,24 @@ namespace SharpDTLS.DTLS13.PostHandshake
             data[9] = 0; data[10] = 0; data[11] = 0;
 
             int pos = 12;
-            data[pos++] = UpdateRequest;
 
-            // no extensions, add a trailing record type for parity
+            // Version (DTLS 1.0: 0xFF 0xFE)
+            data[pos++] = 0xFF;
+            data[pos++] = 0xFE;
+
+            int cookieLen = Cookie?.Length ?? 0;
+            data[pos++] = (byte)cookieLen;
+
+            if (cookieLen > 0)
+            {
+                Buffer.BlockCopy(Cookie, 0, data, pos, cookieLen);
+                pos += cookieLen;
+            }
+
+            // record type
             data[pos++] = 0x16;
 
+            // fill in length
             length = pos - 13;
             data[1] = (byte)((length >> 16) & 0xFF);
             data[2] = (byte)((length >> 8) & 0xFF);

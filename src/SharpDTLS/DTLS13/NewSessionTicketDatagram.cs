@@ -2,7 +2,7 @@
 using System.IO;
 using System.Linq;
 
-namespace SharpDTLS.DTLS13.PostHandshake
+namespace SharpDTLS.DTLS13
 {
     public class NewSessionTicketDatagram : IDatagram
     {
