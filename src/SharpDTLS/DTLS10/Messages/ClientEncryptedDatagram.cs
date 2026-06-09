@@ -1,0 +1,146 @@
+using Org.BouncyCastle.Crypto.Engines;
+using Org.BouncyCastle.Crypto.Modes;
+using Org.BouncyCastle.Crypto.Parameters;
+using System;
+using System.Linq;
+
+namespace SharpDTLS.DTLS10.Messages
+{
+    // Wraps a client-sent DTLS 1.0 record encrypted with AES-128-CBC + HMAC-SHA1 (uses client write keys).
+    public class ClientEncryptedDatagram : IDatagram
+    {
+        private readonly Dtls10CryptoContext _ctx;
+
+        public IDatagram Datagram    { get; set; }
+        public byte      ContentType { get; set; } = 0x16;
+        public ushort    Epoch       { get; set; } = 1;
+        public ulong     SequenceNumber { get; set; }
+        public byte[]    Bytes { get; private set; }
+
+        public ClientEncryptedDatagram(Dtls10CryptoContext ctx)
+        {
+            _ctx = ctx ?? throw new ArgumentNullException(nameof(ctx));
+        }
+
+        public ClientEncryptedDatagram(Dtls10CryptoContext ctx, IDatagram datagram, byte contentType = 0x16)
+            : this(ctx)
+        {
+            Datagram    = datagram;
+            ContentType = contentType;
+        }
+
+        public void FromBytes(byte[] bytes)
+        {
+            if (bytes == null) throw new ArgumentNullException(nameof(bytes));
+            Bytes = bytes.ToArray();
+
+            ContentType = bytes[0];
+            Epoch = (ushort)((bytes[3] << 8) | bytes[4]);
+            ulong seq = 0;
+            for (int i = 5; i <= 10; i++) seq = (seq << 8) | bytes[i];
+            SequenceNumber = seq;
+
+            ushort recordLen = (ushort)((bytes[11] << 8) | bytes[12]);
+
+            byte[] iv = new byte[16];
+            Buffer.BlockCopy(bytes, 13, iv, 0, 16);
+
+            byte[] ciphertext = new byte[recordLen - 16];
+            Buffer.BlockCopy(bytes, 29, ciphertext, 0, ciphertext.Length);
+
+            byte[] decrypted = CbcDecrypt(_ctx.ClientKey, iv, ciphertext);
+
+            int padLen      = decrypted[decrypted.Length - 1] + 1;
+            int macLen      = 20;
+            int fragmentLen = decrypted.Length - padLen - macLen;
+
+            byte[] fragment    = decrypted.Take(fragmentLen).ToArray();
+            byte[] receivedMac = decrypted.Skip(fragmentLen).Take(macLen).ToArray();
+            byte[] expectedMac = ServerEncryptedDatagram.ComputeMac(_ctx.ClientMacKey, Epoch, SequenceNumber, ContentType, fragment);
+
+            if (!receivedMac.SequenceEqual(expectedMac))
+                throw new Exception("MAC verification failed on client record.");
+
+            if (ContentType == 0x16)
+            {
+                Datagram = fragment[0] switch
+                {
+                    0x14 => new FinishedDatagram(),
+                    _ => throw new NotSupportedException($"Unknown handshake type 0x{fragment[0]:X2}")
+                };
+            }
+            else if (ContentType == 0x17)
+            {
+                Datagram = new ApplicationDataDatagram();
+            }
+            else
+            {
+                throw new NotSupportedException($"Unsupported content type 0x{ContentType:X2}");
+            }
+
+            Datagram.FromBytes(fragment);
+        }
+
+        public byte[] ToBytes()
+        {
+            byte[] fragment    = Datagram.ToBytes();
+            int    fragmentLen = fragment.Length;
+
+            byte[] mac    = ServerEncryptedDatagram.ComputeMac(_ctx.ClientMacKey, Epoch, SequenceNumber, ContentType, fragment);
+            int    padLen = 16 - ((fragmentLen + 20) % 16);
+            if (padLen == 0) padLen = 16;
+            byte   padByte = (byte)(padLen - 1);
+
+            byte[] toEncrypt = new byte[fragmentLen + 20 + padLen];
+            Buffer.BlockCopy(fragment, 0, toEncrypt, 0, fragmentLen);
+            Buffer.BlockCopy(mac,      0, toEncrypt, fragmentLen, 20);
+            for (int i = 0; i < padLen; i++)
+                toEncrypt[fragmentLen + 20 + i] = padByte;
+
+            byte[] iv         = CryptoUtils.GenerateRandom(16);
+            byte[] ciphertext = CbcEncrypt(_ctx.ClientKey, iv, toEncrypt);
+
+            int    recordBodyLen = 16 + ciphertext.Length;
+            byte[] buf = new byte[13 + recordBodyLen];
+
+            buf[0] = ContentType;
+            buf[1] = 0xFE; buf[2] = 0xFF;
+            buf[3] = (byte)((Epoch >> 8) & 0xFF);
+            buf[4] = (byte)(Epoch & 0xFF);
+            buf[5]  = (byte)((SequenceNumber >> 40) & 0xFF);
+            buf[6]  = (byte)((SequenceNumber >> 32) & 0xFF);
+            buf[7]  = (byte)((SequenceNumber >> 24) & 0xFF);
+            buf[8]  = (byte)((SequenceNumber >> 16) & 0xFF);
+            buf[9]  = (byte)((SequenceNumber >> 8) & 0xFF);
+            buf[10] = (byte)(SequenceNumber & 0xFF);
+            buf[11] = (byte)((recordBodyLen >> 8) & 0xFF);
+            buf[12] = (byte)( recordBodyLen        & 0xFF);
+
+            Buffer.BlockCopy(iv,         0, buf, 13, 16);
+            Buffer.BlockCopy(ciphertext, 0, buf, 29, ciphertext.Length);
+
+            Bytes = buf;
+            return Bytes;
+        }
+
+        private static byte[] CbcEncrypt(byte[] key, byte[] iv, byte[] data)
+        {
+            var cipher = new CbcBlockCipher(new AesEngine());
+            cipher.Init(true, new ParametersWithIV(new KeyParameter(key), iv));
+            byte[] result = new byte[data.Length];
+            for (int i = 0; i < data.Length; i += 16)
+                cipher.ProcessBlock(data, i, result, i);
+            return result;
+        }
+
+        private static byte[] CbcDecrypt(byte[] key, byte[] iv, byte[] data)
+        {
+            var cipher = new CbcBlockCipher(new AesEngine());
+            cipher.Init(false, new ParametersWithIV(new KeyParameter(key), iv));
+            byte[] result = new byte[data.Length];
+            for (int i = 0; i < data.Length; i += 16)
+                cipher.ProcessBlock(data, i, result, i);
+            return result;
+        }
+    }
+}
