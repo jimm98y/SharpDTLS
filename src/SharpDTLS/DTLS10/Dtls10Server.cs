@@ -8,6 +8,7 @@ using Org.BouncyCastle.X509;
 using SharpDTLS.DTLS10.Messages;
 using SharpDTLS.DTLS13;
 using SharpSRTP.UDP;
+using SharpDTLS;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -25,6 +26,7 @@ namespace SharpDTLS.DTLS10
     //   - SHA1WITHRSA signature on ServerKeyExchange
     public class Dtls10Server
     {
+        private const int MaxHandshakeBodyPerRecord = 1167;
         private readonly string _serverCertificatePrivateKey = "-----BEGIN RSA PRIVATE KEY-----\r\nMIIEowIBAAKCAQEAxIA2BrrnR2sIlATsp7aRBD/3krwZ7vt9dNeoDQAee0s6SuYP\r\n6MBx/HPnAkwNvPS90R05a7pwRkoT6Ur4PfPhCVlUe8lV+0Eto3ZSEeHz3HdsqlM3\r\nbso67L7Dqrc7MdVstlKcgJi8yeAoGOIL9/igOv0XBFCeznm9nznx6mnsR5cugw+1\r\nypXelaHmBCLV7r5SeVSh57+KhvZGbQ2fFpUaTPegRpJZXBNS8lSeWvtOv9d6N5UB\r\nROTAJodMZT5AfX0jB0QB9IT/0I96H6BSENH08NXOeXApMuLKvnAf361rS7cRAfRL\r\nrWZqERMP4u6Cnk0Cnckc3WcW27kGGIbtwbqUIQIDAQABAoIBAGF7OVIdZp8Hejn0\r\nN3L8HvT8xtUEe9kS6ioM0lGgvX5s035Uo4/T6LhUx0VcdXRH9eLHnLTUyN4V4cra\r\nZkxVsE3zAvZl60G6E+oDyLMWZOP6Wu4kWlub9597A5atT7BpMIVCdmFVZFLB4SJ3\r\nAXkC3nplFAYP+Lh1rJxRIrIn2g+pEeBboWbYA++oDNuMQffDZaokTkJ8Bn1JZYh0\r\nxEXKY8Bi2Egd5NMeZa1UFO6y8tUbZfwgVs6Enq5uOgtfayq79vZwyjj1kd29MBUD\r\n8g8byV053ZKxbUOiOuUts97eb+fN3DIDRTcT2c+lXt/4C54M1FclJAbtYRK/qwsl\r\npYWKQAECgYEA4ZUbqQnTo1ICvj81ifGrz+H4LKQqe92Hbf/W51D/Umk2kP702W22\r\nHP4CvrJRtALThJIG9m2TwUjl/WAuZIBrhSAbIvc3Fcoa2HjdRp+sO5U1ueDq7d/S\r\nZ+PxRI8cbLbRpEdIaoR46qr/2uWZ943PHMv9h4VHPYn1w8b94hwD6vkCgYEA3v87\r\nmFLzyM9ercnEv9zHMRlMZFQhlcUGQZvfb8BuJYl/WogyT6vRrUuM0QXULNEPlrin\r\nmBQTqc1nCYbgkFFsD2VVt1qIyiAJsB9MD1LNV6YuvE7T2KOSadmsA4fa9PUqbr71\r\nhf3lTTq+LeR09LebO7WgSGYY+5YKVOEGpYMR1GkCgYEAxPVQmk3HKHEhjgRYdaG5\r\nlp9A9ZE8uruYVJWtiHgzBTxx9TV2iST+fd/We7PsHFTfY3+wbpcMDBXfIVRKDVwH\r\nBMwchXH9+Ztlxx34bYJaegd0SmA0Hw9ugWEHNgoSEmWpM1s9wir5/ELjc7dGsFtz\r\nuzvsl9fpdLSxDYgAAdzeGtkCgYBAzKIgrVox7DBzB8KojhtD5ToRnXD0+H/M6OKQ\r\nsrZPKhlb0V/tTtxrIx0UUEFLlKSXA6mPw6XDHfDnD86JoV9pSeUSlrhRI+Ysy6tq\r\neIE7CwthpPZiaYXORHZ7wCqcK/HcpJjsCs9rFbrV0yE5S3FMdIbTAvgXg44VBB7O\r\nUbwIoQKBgDuY8gSrA5/A747wjjmsdRWK4DMTMEV4eCW1BEP7Tg7Cxd5n3xPJiYhr\r\nnhLGN+mMnVIcv2zEMS0/eNZr1j/0BtEdx+3IC6Eq+ONY0anZ4Irt57/5QeKgKn/L\r\nJPhfPySIPG4UmwE4gW8t79vfOKxnUu2fDD1ZXUYopan6EckACNH/\r\n-----END RSA PRIVATE KEY-----";
         private readonly string _serverCertificate = "-----BEGIN CERTIFICATE-----\r\nMIIDITCCAgmgAwIBAgIIFVqSrcIEj5AwDQYJKoZIhvcNAQELBQAwIjELMAkGA1UE\r\nBhMCVVMxEzARBgNVBAoTCkV4YW1wbGUgQ0EwHhcNMTgxMDA1MDEzODE3WhcNMTkx\r\nMDA1MDEzODE3WjArMQswCQYDVQQGEwJVUzEcMBoGA1UEAxMTZXhhbXBsZS51bGZo\r\nZWltLm5ldDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMSANga650dr\r\nCJQE7Ke2kQQ/95K8Ge77fXTXqA0AHntLOkrmD+jAcfxz5wJMDbz0vdEdOWu6cEZK\r\nE+lK+D3z4QlZVHvJVftBLaN2UhHh89x3bKpTN27KOuy+w6q3OzHVbLZSnICYvMng\r\nKBjiC/f4oDr9FwRQns55vZ858epp7EeXLoMPtcqV3pWh5gQi1e6+UnlUoee/iob2\r\nRm0NnxaVGkz3oEaSWVwTUvJUnlr7Tr/XejeVAUTkwCaHTGU+QH19IwdEAfSE/9CP\r\neh+gUhDR9PDVznlwKTLiyr5wH9+ta0u3EQH0S61mahETD+Lugp5NAp3JHN1nFtu5\r\nBhiG7cG6lCECAwEAAaNSMFAwDgYDVR0PAQH/BAQDAgWgMB0GA1UdJQQWMBQGCCsG\r\nAQUFBwMCBggrBgEFBQcDATAfBgNVHSMEGDAWgBSJT95bzGniUs8+owDfsZe4HeHB\r\nRjANBgkqhkiG9w0BAQsFAAOCAQEAWRZFppouN3nk9t0nGrocC/1s11WZtefDblM+\r\n/zZZCEMkyeelBAedOeDUKYf/4+vdCcHPHZFEVYcLVx3Rm98dJPi7mhH+gP1ZK6A5\r\njN4R4mUeYYzlmPqW5Tcu7z0kiv3hdGPrv6u45NGrUCpU7ABk6S94GWYNPyfPIJ5m\r\nf85a4uSsmcfJOBj4slEHIt/tl/MuPpNJ1MZsnqY5bXREYqBrQsbVumiOrDoBe938\r\njiz8rSfLadPM3KKAQURl0640jODzSrL7nGGDcTErGRBBZBwjfxGl1lyETwQEhJk4\r\ncSuVntaFvFxd1kXtGZCUc0ApJty0DjRpoVlB6OLMqEu2CEY2oA==\r\n-----END CERTIFICATE-----";
 
@@ -157,7 +159,7 @@ namespace SharpDTLS.DTLS10
             };
             session.HandshakeMessages.Add(clientHello);
             session.HandshakeMessages.Add(serverHello);
-            ServerTransport.Send(endpoint, serverHello.ToBytes());
+            SendUnencryptedHandshake(endpoint, session, serverHello.ToBytes());
 
             X509Certificate cert = new X509CertificateParser().ReadCertificate(Encoding.UTF8.GetBytes(_serverCertificate));
             byte[] derCert = cert.GetEncoded();
@@ -168,7 +170,7 @@ namespace SharpDTLS.DTLS10
                 MessageSequenceNumber = session.MessageSequenceNumber++,
             };
             session.HandshakeMessages.Add(certificate);
-            ServerTransport.Send(endpoint, certificate.ToBytes());
+            SendUnencryptedHandshake(endpoint, session, certificate.ToBytes());
 
             byte[] ecParams = BuildEcParams(serverPubKey);
             byte[] toSign   = session.ClientRandom.Concat(session.ServerRandom).Concat(ecParams).ToArray();
@@ -185,7 +187,7 @@ namespace SharpDTLS.DTLS10
                 MessageSequenceNumber = session.MessageSequenceNumber++,
             };
             session.HandshakeMessages.Add(serverKeyExchange);
-            ServerTransport.Send(endpoint, serverKeyExchange.ToBytes());
+            SendUnencryptedHandshake(endpoint, session, serverKeyExchange.ToBytes());
 
             var serverHelloDone = new ServerHelloDoneDatagram
             {
@@ -193,7 +195,7 @@ namespace SharpDTLS.DTLS10
                 MessageSequenceNumber = session.MessageSequenceNumber++,
             };
             session.HandshakeMessages.Add(serverHelloDone);
-            ServerTransport.Send(endpoint, serverHelloDone.ToBytes());
+            SendUnencryptedHandshake(endpoint, session, serverHelloDone.ToBytes());
 
             _sessions[key] = session;
             _states[key]   = HandshakeState.WaitingForClientKeyExchange;
@@ -283,6 +285,20 @@ namespace SharpDTLS.DTLS10
                 SequenceNumber = session.CryptoContext.ServerSequenceNumber++,
             };
             ServerTransport.Send(endpoint, reply.ToBytes());
+        }
+
+        private void SendUnencryptedHandshake(EndPoint endpoint, Dtls10Session session, byte[] record)
+        {
+            long startSeq = 0;
+            for (int i = 5; i <= 10; i++) startSeq = (startSeq << 8) | record[i];
+
+            int seq = (int)startSeq;
+            var fragments = HandshakeFragmenter.FragmentUnencryptedRecord(record, MaxHandshakeBodyPerRecord, ref seq);
+            if (seq > session.RecordSequenceNumber)
+                session.RecordSequenceNumber = (ushort)seq;
+
+            foreach (var fragment in fragments)
+                ServerTransport.Send(endpoint, fragment);
         }
 
         private static byte[] BuildEcParams(byte[] publicKey)

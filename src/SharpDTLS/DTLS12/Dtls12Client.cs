@@ -4,6 +4,7 @@ using Org.BouncyCastle.X509;
 using SharpDTLS.DTLS12.Messages;
 using SharpDTLS.DTLS13;
 using SharpSRTP.UDP;
+using SharpDTLS;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -34,7 +35,8 @@ namespace SharpDTLS.DTLS12
         private bool                      _handshakeComplete;
 
         private int _expectedServerMsgSeq = 0;
-        private readonly SortedDictionary<int, byte[]> _handshakeReorderBuffer = new();
+        private readonly SortedDictionary<int, List<byte[]>> _handshakeReorderBuffer = new();
+        private readonly HandshakeReassembler _reassembler = new();
 
         public Dtls12Client(ClientTransport clientTransport)
         {
@@ -119,18 +121,35 @@ namespace SharpDTLS.DTLS12
 
             if (msgSeq > _expectedServerMsgSeq)
             {
-                _handshakeReorderBuffer[msgSeq] = data;
+                if (!_handshakeReorderBuffer.TryGetValue(msgSeq, out var list))
+                    _handshakeReorderBuffer[msgSeq] = list = new List<byte[]>();
+                list.Add(data);
                 Debug.WriteLine($"[DTLS12 Client] Buffered out-of-order msg_seq={msgSeq}, expected={_expectedServerMsgSeq}");
                 return;
             }
 
-            DispatchHandshakeMessage(data);
-            _expectedServerMsgSeq++;
+            if (!_reassembler.TryAddUnencryptedFragment(data, out byte[] complete))
+                return;
 
-            while (_handshakeReorderBuffer.TryGetValue(_expectedServerMsgSeq, out var buffered))
+            byte hsType = complete[13];
+            DispatchHandshakeMessage(complete);
+            // HelloVerifyRequest causes SendClientHello to reset _expectedServerMsgSeq to 0;
+            // incrementing here would skip msg_seq=0 (ServerHello) in the subsequent flight.
+            if (hsType != 0x03)
+                _expectedServerMsgSeq++;
+
+            while (_handshakeReorderBuffer.TryGetValue(_expectedServerMsgSeq, out var bufferedList))
             {
+                byte[] completeMsg = null;
+                foreach (var fragment in bufferedList)
+                {
+                    if (_reassembler.TryAddUnencryptedFragment(fragment, out completeMsg))
+                        break;
+                }
+                if (completeMsg == null) break;
+
                 _handshakeReorderBuffer.Remove(_expectedServerMsgSeq);
-                DispatchHandshakeMessage(buffered);
+                DispatchHandshakeMessage(completeMsg);
                 _expectedServerMsgSeq++;
             }
         }
