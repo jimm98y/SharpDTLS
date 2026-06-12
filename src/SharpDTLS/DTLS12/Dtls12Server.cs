@@ -6,6 +6,7 @@ using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Utilities.IO.Pem;
 using Org.BouncyCastle.X509;
 using SharpDTLS.DTLS12.Messages;
+using SharpDTLS.DTLS13;
 using SharpSRTP.UDP;
 using System;
 using System.Collections.Generic;
@@ -132,7 +133,7 @@ namespace SharpDTLS.DTLS12
             }
 
             // Generate server EC key pair for ECDHE
-            var (privateX25519, publicX25519) = CryptoUtils.CreateX25519KeyPair();
+            var (privateX25519, publicX25519) = Dtls13CryptoUtils.CreateX25519KeyPair();
             byte[] serverPrivKey = privateX25519.GetEncoded();
             byte[] serverPubKey  = publicX25519.GetEncoded();
 
@@ -141,7 +142,7 @@ namespace SharpDTLS.DTLS12
                 PrivateKey   = serverPrivKey,
                 PublicKey    = serverPubKey,
                 ClientRandom = clientHello.ClientRandom,
-                ServerRandom = CryptoUtils.GenerateRandom(32),
+                ServerRandom = Dtls13CryptoUtils.GenerateRandom(32),
             };
 
             // Include SRTP extension in ServerHello if client offered it
@@ -216,7 +217,7 @@ namespace SharpDTLS.DTLS12
             session.HandshakeMessages.Add(cke);
 
             // Derive pre-master secret via ECDHE
-            byte[] preMaster = CryptoUtils.DeriveSharedSecretX25519(session.PrivateKey, cke.PublicKey);
+            byte[] preMaster = Dtls13CryptoUtils.DeriveSharedSecretX25519(session.PrivateKey, cke.PublicKey);
             byte[] master    = Dtls12CryptoUtils.CalculateMasterSecret(preMaster, session.ClientRandom, session.ServerRandom);
 
             session.CryptoContext = Dtls12CryptoUtils.DeriveKeys(master, session.ClientRandom, session.ServerRandom);

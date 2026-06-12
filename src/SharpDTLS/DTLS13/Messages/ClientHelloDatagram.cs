@@ -21,7 +21,7 @@ namespace SharpDTLS.DTLS13.Messages
         public ClientHelloDatagram(byte[] publicKey)
         {
             PublicKey = publicKey;
-            ClientRandom = CryptoUtils.GenerateRandom(32);
+            ClientRandom = Dtls13CryptoUtils.GenerateRandom(32);
             Extensions = new List<ITlsExtension>(GetDefaultExtensions(publicKey));
         }
 

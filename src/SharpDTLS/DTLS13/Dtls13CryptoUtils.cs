@@ -1,26 +1,29 @@
-﻿using SharpDTLS.DTLS13;
+﻿using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Digests;
 using Org.BouncyCastle.Crypto.Generators;
 using Org.BouncyCastle.Crypto.Macs;
+using Org.BouncyCastle.Crypto.Operators;
 using Org.BouncyCastle.Crypto.Parameters;
+using Org.BouncyCastle.Math;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Tls;
 using Org.BouncyCastle.Tls.Crypto;
 using Org.BouncyCastle.Tls.Crypto.Impl.BC;
+using Org.BouncyCastle.X509;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
 using SharpDTLS.DTLS13.Messages;
 
-namespace SharpDTLS
+namespace SharpDTLS.DTLS13
 {
-    public static class CryptoUtils
+    public static class Dtls13CryptoUtils
     {
         private static readonly byte[] _privateKey;
 
-        static CryptoUtils()
+        static Dtls13CryptoUtils()
         {
             _privateKey = new byte[32];
             new SecureRandom().NextBytes(_privateKey);
@@ -50,6 +53,24 @@ namespace SharpDTLS
                 expectedCookie = CreateCookie(timestamp, clientIP, clientPort, -1);
                 return expectedCookie.SequenceEqual(cookie);
             }
+        }
+
+        public static (AsymmetricCipherKeyPair keyPair, X509Certificate certificate) GenerateSelfSignedCertificate()
+        {
+            var rsaGenerator = new RsaKeyPairGenerator();
+            rsaGenerator.Init(new KeyGenerationParameters(new SecureRandom(), 2048));
+            var keyPair = rsaGenerator.GenerateKeyPair();
+
+            var certGenerator = new X509V3CertificateGenerator();
+            certGenerator.SetSerialNumber(BigInteger.ValueOf(1));
+            certGenerator.SetIssuerDN(new X509Name("CN=SharpDTLS Server"));
+            certGenerator.SetSubjectDN(new X509Name("CN=SharpDTLS Server"));
+            certGenerator.SetNotBefore(DateTime.UtcNow.AddDays(-1));
+            certGenerator.SetNotAfter(DateTime.UtcNow.AddYears(10));
+            certGenerator.SetPublicKey(keyPair.Public);
+            var certificate = certGenerator.Generate(new Asn1SignatureFactory("SHA256WITHRSA", keyPair.Private, new SecureRandom()));
+
+            return (keyPair, certificate);
         }
 
         public static (X25519PrivateKeyParameters privateX25519, X25519PublicKeyParameters publicX25519) CreateX25519KeyPair()

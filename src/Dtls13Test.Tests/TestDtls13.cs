@@ -1,5 +1,4 @@
-﻿using SharpDTLS;
-using SharpDTLS.DTLS13;
+﻿using SharpDTLS.DTLS13;
 using SharpDTLS.DTLS13.Messages;
 using System;
 using System.Diagnostics;
@@ -136,8 +135,8 @@ namespace Dtls13Test.Tests
         public void TestCookie()
         {
             var timestamp = DateTime.UtcNow;
-            var cookie1 = Convert.ToHexString(CryptoUtils.CreateCookie(timestamp, "127.0.0.1", 65512));
-            var cookie2 = Convert.ToHexString(CryptoUtils.CreateCookie(timestamp, "127.0.0.1", 65512));
+            var cookie1 = Convert.ToHexString(Dtls13CryptoUtils.CreateCookie(timestamp, "127.0.0.1", 65512));
+            var cookie2 = Convert.ToHexString(Dtls13CryptoUtils.CreateCookie(timestamp, "127.0.0.1", 65512));
             Assert.AreEqual(cookie1, cookie2);
         }
     }

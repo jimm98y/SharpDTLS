@@ -1,4 +1,4 @@
-using SharpDTLS;
+using SharpDTLS.DTLS13;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -24,7 +24,7 @@ namespace SharpDTLS.DTLS12.Messages
 
         public ClientHelloDatagram(bool includeSrtp = true)
         {
-            ClientRandom = CryptoUtils.GenerateRandom(32);
+            ClientRandom = Dtls13CryptoUtils.GenerateRandom(32);
             Extensions = new List<ITlsExtension>(GetDefaultExtensions(includeSrtp));
         }
 

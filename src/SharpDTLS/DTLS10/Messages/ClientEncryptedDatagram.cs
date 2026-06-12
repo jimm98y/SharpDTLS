@@ -1,6 +1,7 @@
 using Org.BouncyCastle.Crypto.Engines;
 using Org.BouncyCastle.Crypto.Modes;
 using Org.BouncyCastle.Crypto.Parameters;
+using SharpDTLS.DTLS13;
 using System;
 using System.Linq;
 
@@ -97,7 +98,7 @@ namespace SharpDTLS.DTLS10.Messages
             for (int i = 0; i < padLen; i++)
                 toEncrypt[fragmentLen + 20 + i] = padByte;
 
-            byte[] iv         = CryptoUtils.GenerateRandom(16);
+            byte[] iv         = Dtls13CryptoUtils.GenerateRandom(16);
             byte[] ciphertext = CbcEncrypt(_ctx.ClientKey, iv, toEncrypt);
 
             int    recordBodyLen = 16 + ciphertext.Length;

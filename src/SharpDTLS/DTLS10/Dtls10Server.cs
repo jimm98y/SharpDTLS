@@ -6,6 +6,7 @@ using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Utilities.IO.Pem;
 using Org.BouncyCastle.X509;
 using SharpDTLS.DTLS10.Messages;
+using SharpDTLS.DTLS13;
 using SharpSRTP.UDP;
 using System;
 using System.Collections.Generic;
@@ -126,7 +127,7 @@ namespace SharpDTLS.DTLS10
                     throw new Exception("Invalid cookie");
             }
 
-            var (privateX25519, publicX25519) = CryptoUtils.CreateX25519KeyPair();
+            var (privateX25519, publicX25519) = Dtls13CryptoUtils.CreateX25519KeyPair();
             byte[] serverPrivKey = privateX25519.GetEncoded();
             byte[] serverPubKey  = publicX25519.GetEncoded();
 
@@ -135,7 +136,7 @@ namespace SharpDTLS.DTLS10
                 PrivateKey   = serverPrivKey,
                 PublicKey    = serverPubKey,
                 ClientRandom = clientHello.ClientRandom,
-                ServerRandom = CryptoUtils.GenerateRandom(32),
+                ServerRandom = Dtls13CryptoUtils.GenerateRandom(32),
             };
 
             bool clientWantsSrtp = clientHello.Extensions
@@ -205,7 +206,7 @@ namespace SharpDTLS.DTLS10
             cke.FromBytes(data);
             session.HandshakeMessages.Add(cke);
 
-            byte[] preMaster = CryptoUtils.DeriveSharedSecretX25519(session.PrivateKey, cke.PublicKey);
+            byte[] preMaster = Dtls13CryptoUtils.DeriveSharedSecretX25519(session.PrivateKey, cke.PublicKey);
             byte[] master    = Dtls10CryptoUtils.CalculateMasterSecret(preMaster, session.ClientRandom, session.ServerRandom);
             session.CryptoContext = Dtls10CryptoUtils.DeriveKeys(master, session.ClientRandom, session.ServerRandom);
 

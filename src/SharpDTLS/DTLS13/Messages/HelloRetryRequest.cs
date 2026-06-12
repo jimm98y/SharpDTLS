@@ -12,7 +12,7 @@ namespace SharpDTLS.DTLS13.Messages
         public HelloRetryRequest(DateTime timestamp, string clientIP, int clientPort)
         {
             ServerRandom = Convert.FromHexString(HelloRetryRequestRandom);
-            Extensions = [.. GetDefaultExtensions(), new CookieExtension(CryptoUtils.CreateCookie(timestamp, clientIP, clientPort))];
+            Extensions = [.. GetDefaultExtensions(), new CookieExtension(Dtls13CryptoUtils.CreateCookie(timestamp, clientIP, clientPort))];
         }
 
         private static ITlsExtension[] GetDefaultExtensions()
