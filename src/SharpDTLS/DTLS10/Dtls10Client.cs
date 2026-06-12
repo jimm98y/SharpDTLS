@@ -32,6 +32,9 @@ namespace SharpDTLS.DTLS10
         private bool                      _changeCipherSpecReceived;
         private bool                      _handshakeComplete;
 
+        private int _expectedServerMsgSeq = 0;
+        private readonly SortedDictionary<int, byte[]> _handshakeReorderBuffer = new();
+
         public Dtls10Client(ClientTransport clientTransport)
         {
             ClientTransport = clientTransport;
@@ -50,6 +53,9 @@ namespace SharpDTLS.DTLS10
 
         private void SendClientHello(byte[] cookie)
         {
+            _expectedServerMsgSeq = 0;
+            _handshakeReorderBuffer.Clear();
+
             var ch = new ClientHelloDatagram(includeSrtp: true)
             {
                 ClientRandom          = Session.ClientRandom,
@@ -97,15 +103,39 @@ namespace SharpDTLS.DTLS10
         {
             if (_handshakeComplete) return;
 
-            // After CCS, the next 0x16 record is the encrypted Finished — IV is at data[13], not a handshake type byte.
+            // After CCS, the next 0x16 record is the encrypted Finished — data[13] is the nonce, not a handshake type.
             if (_changeCipherSpecReceived)
             {
                 HandleServerFinished(data);
                 return;
             }
 
-            byte hsType = data[13];
+            int msgSeq = (data[17] << 8) | data[18];
 
+            if (msgSeq < _expectedServerMsgSeq)
+                return; // duplicate
+
+            if (msgSeq > _expectedServerMsgSeq)
+            {
+                _handshakeReorderBuffer[msgSeq] = data;
+                Debug.WriteLine($"[DTLS10 Client] Buffered out-of-order msg_seq={msgSeq}, expected={_expectedServerMsgSeq}");
+                return;
+            }
+
+            DispatchHandshakeMessage(data);
+            _expectedServerMsgSeq++;
+
+            while (_handshakeReorderBuffer.TryGetValue(_expectedServerMsgSeq, out var buffered))
+            {
+                _handshakeReorderBuffer.Remove(_expectedServerMsgSeq);
+                DispatchHandshakeMessage(buffered);
+                _expectedServerMsgSeq++;
+            }
+        }
+
+        private void DispatchHandshakeMessage(byte[] data)
+        {
+            byte hsType = data[13];
             switch (hsType)
             {
                 case 0x03: HandleHelloVerifyRequest(data); break;

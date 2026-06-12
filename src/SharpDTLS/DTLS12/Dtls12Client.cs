@@ -26,12 +26,14 @@ namespace SharpDTLS.DTLS12
         public Dtls12Session Session { get; } = new Dtls12Session();
         public ClientTransport ClientTransport { get; }
 
-        // State tracking for the flight of server messages
         private ServerHelloDatagram       _serverHello;
         private ServerCertificateDatagram _serverCert;
         private ServerKeyExchangeDatagram _serverKex;
         private bool                      _changeCipherSpecReceived;
         private bool                      _handshakeComplete;
+
+        private int _expectedServerMsgSeq = 0;
+        private readonly SortedDictionary<int, byte[]> _handshakeReorderBuffer = new();
 
         public Dtls12Client(ClientTransport clientTransport)
         {
@@ -51,6 +53,9 @@ namespace SharpDTLS.DTLS12
 
         private void SendClientHello(byte[] cookie)
         {
+            _expectedServerMsgSeq = 0;
+            _handshakeReorderBuffer.Clear();
+
             var ch = new ClientHelloDatagram(includeSrtp: true)
             {
                 ClientRandom         = Session.ClientRandom,
@@ -99,38 +104,46 @@ namespace SharpDTLS.DTLS12
         {
             if (_handshakeComplete) return;
 
-            // After server CCS arrives the next 0x16 record is the encrypted Finished,
-            // not a plain handshake message — data[13] would be the explicit nonce, not a type byte.
+            // After server CCS the next 0x16 is the encrypted Finished — data[13] is the nonce, not a type byte.
             if (_changeCipherSpecReceived)
             {
                 HandleServerFinished(data);
                 return;
             }
 
-            byte hsType = data[13];
+            int msgSeq = (data[17] << 8) | data[18];
 
+            if (msgSeq < _expectedServerMsgSeq)
+                return; // duplicate
+
+            if (msgSeq > _expectedServerMsgSeq)
+            {
+                _handshakeReorderBuffer[msgSeq] = data;
+                Debug.WriteLine($"[DTLS12 Client] Buffered out-of-order msg_seq={msgSeq}, expected={_expectedServerMsgSeq}");
+                return;
+            }
+
+            DispatchHandshakeMessage(data);
+            _expectedServerMsgSeq++;
+
+            while (_handshakeReorderBuffer.TryGetValue(_expectedServerMsgSeq, out var buffered))
+            {
+                _handshakeReorderBuffer.Remove(_expectedServerMsgSeq);
+                DispatchHandshakeMessage(buffered);
+                _expectedServerMsgSeq++;
+            }
+        }
+
+        private void DispatchHandshakeMessage(byte[] data)
+        {
+            byte hsType = data[13];
             switch (hsType)
             {
-                case 0x03: // HelloVerifyRequest
-                    HandleHelloVerifyRequest(data);
-                    break;
-
-                case 0x02: // ServerHello
-                    HandleServerHello(data);
-                    break;
-
-                case 0x0B: // Certificate
-                    HandleServerCertificate(data);
-                    break;
-
-                case 0x0C: // ServerKeyExchange
-                    HandleServerKeyExchange(data);
-                    break;
-
-                case 0x0E: // ServerHelloDone
-                    HandleServerHelloDone(data);
-                    break;
-
+                case 0x03: HandleHelloVerifyRequest(data); break;
+                case 0x02: HandleServerHello(data);        break;
+                case 0x0B: HandleServerCertificate(data);  break;
+                case 0x0C: HandleServerKeyExchange(data);  break;
+                case 0x0E: HandleServerHelloDone(data);    break;
                 default:
                     Debug.WriteLine($"[DTLS12 Client] Unknown handshake type 0x{hsType:X2}");
                     break;

@@ -31,8 +31,9 @@ namespace SharpDTLS.DTLS10
         public event EventHandler<EventArgs> HandshakeFinished;
         public ServerTransport ServerTransport { get; }
 
-        private readonly Dictionary<string, Dtls10Session> _sessions = new();
-        private readonly Dictionary<string, HandshakeState> _states  = new();
+        private readonly Dictionary<string, Dtls10Session>  _sessions             = new();
+        private readonly Dictionary<string, HandshakeState> _states               = new();
+        private readonly Dictionary<string, List<byte[]>>   _pendingEpoch1Records = new();
 
         private enum HandshakeState
         {
@@ -75,6 +76,21 @@ namespace SharpDTLS.DTLS10
                     ccs.FromBytes(data);
                     Debug.WriteLine($"[DTLS10 Server] Received ChangeCipherSpec from {endpoint}");
                     _states[key] = HandshakeState.WaitingForFinished;
+
+                    if (_pendingEpoch1Records.TryGetValue(key, out var pending))
+                    {
+                        _pendingEpoch1Records.Remove(key);
+                        foreach (var pendingData in pending)
+                            HandleClientFinished(endpoint, key, session, pendingData);
+                    }
+                }
+                else if (state == HandshakeState.WaitingForChangeCipherSpec && recordType == 0x16)
+                {
+                    // Encrypted Finished arrived before CCS — buffer it.
+                    if (!_pendingEpoch1Records.TryGetValue(key, out var pending))
+                        _pendingEpoch1Records[key] = pending = new List<byte[]>();
+                    pending.Add(data);
+                    Debug.WriteLine($"[DTLS10 Server] Buffered encrypted Finished pending CCS from {endpoint}");
                 }
                 else if (state == HandshakeState.WaitingForFinished && recordType == 0x16)
                     HandleClientFinished(endpoint, key, session, data);

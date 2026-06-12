@@ -43,16 +43,12 @@ namespace SharpDTLS.DTLS13.Messages
             encrypted[1] = (byte)((this.RecordNumber >> 8) & 0xFF);
             encrypted[2] = (byte)(this.RecordNumber & 0xFF);
 
+            // RFC 9147 §4.2.3: nonce = static_iv XOR record_sequence_number (64-bit, big-endian).
+            // RecordNumber is the actual decoded value, not an independent counter.
             byte[] iv = new byte[_cryptoContext.ServerIv.Length];
             Buffer.BlockCopy(_cryptoContext.ServerIv, 0, iv, 0, _cryptoContext.ServerIv.Length);
-            iv[iv.Length - 8] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 56) & 0xFF);
-            iv[iv.Length - 7] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 48) & 0xFF);
-            iv[iv.Length - 6] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 40) & 0xFF);
-            iv[iv.Length - 5] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 32) & 0xFF);
-            iv[iv.Length - 4] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 24) & 0xFF);
-            iv[iv.Length - 3] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 16) & 0xFF);
-            iv[iv.Length - 2] ^= (byte)((_cryptoContext.ServerKeyUseCounter >> 8) & 0xFF);
-            iv[iv.Length - 1] ^= (byte)(_cryptoContext.ServerKeyUseCounter & 0xFF);
+            iv[iv.Length - 2] ^= (byte)((this.RecordNumber >> 8) & 0xFF);
+            iv[iv.Length - 1] ^= (byte)(this.RecordNumber & 0xFF);
 
             Encrypt(_cryptoContext.AeadEncryptEngine, false, encrypted, 5, encrypted.Length, iv, new KeyParameter(_cryptoContext.ServerKey), 16, encrypted.Take(5).ToArray());
 
@@ -122,6 +118,19 @@ namespace SharpDTLS.DTLS13.Messages
             Bytes = encrypted.Take(5 + plaintext.Length + 16).ToArray();
 
             return Bytes;
+        }
+
+        /// <summary>
+        /// Decodes only the record number from a protected header without performing AEAD decryption.
+        /// Safe to call before deciding whether to buffer or process a record.
+        /// </summary>
+        public static ushort PeekRecordNumber(byte[] data, Dtls13CryptoContext context)
+        {
+            byte[] sample = new byte[16];
+            Buffer.BlockCopy(data, 5, sample, 0, 16);
+            context.AesEngine.Init(true, new KeyParameter(context.ServerSnKey));
+            context.AesEngine.ProcessBlock(sample, 0, sample, 0);
+            return (ushort)(((data[1] ^ sample[0]) << 8) | (data[2] ^ sample[1]));
         }
 
         private byte[] GetHeaderEncryption(byte[] encrypted)

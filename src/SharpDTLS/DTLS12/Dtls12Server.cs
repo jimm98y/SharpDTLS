@@ -33,10 +33,9 @@ namespace SharpDTLS.DTLS12
 
         public ServerTransport ServerTransport { get; }
 
-        // Per-client state: tracks where each client is in the handshake
-        private readonly Dictionary<string, Dtls12Session> _sessions = new();
-        // Track whether we're waiting for ClientKeyExchange vs Finished
-        private readonly Dictionary<string, HandshakeState> _states = new();
+        private readonly Dictionary<string, Dtls12Session>  _sessions             = new();
+        private readonly Dictionary<string, HandshakeState> _states               = new();
+        private readonly Dictionary<string, List<byte[]>>   _pendingEpoch1Records = new();
 
         private enum HandshakeState { WaitingForClientKeyExchange, WaitingForChangeCipherSpec, WaitingForFinished, Complete }
 
@@ -71,11 +70,25 @@ namespace SharpDTLS.DTLS12
                 }
                 else if (state == HandshakeState.WaitingForChangeCipherSpec && recordType == 0x14)
                 {
-                    // ChangeCipherSpec received — switch to epoch 1 for client → server direction
                     var ccs = new ChangeCipherSpecDatagram();
                     ccs.FromBytes(data);
                     Debug.WriteLine($"[DTLS12 Server] Received ChangeCipherSpec from {endpoint}");
                     _states[key] = HandshakeState.WaitingForFinished;
+
+                    if (_pendingEpoch1Records.TryGetValue(key, out var pending))
+                    {
+                        _pendingEpoch1Records.Remove(key);
+                        foreach (var pendingData in pending)
+                            HandleClientFinished(endpoint, key, session, pendingData);
+                    }
+                }
+                else if (state == HandshakeState.WaitingForChangeCipherSpec && recordType == 0x16)
+                {
+                    // Encrypted Finished arrived before CCS — buffer it.
+                    if (!_pendingEpoch1Records.TryGetValue(key, out var pending))
+                        _pendingEpoch1Records[key] = pending = new List<byte[]>();
+                    pending.Add(data);
+                    Debug.WriteLine($"[DTLS12 Server] Buffered encrypted Finished pending CCS from {endpoint}");
                 }
                 else if (state == HandshakeState.WaitingForFinished && recordType == 0x16)
                 {

@@ -6,6 +6,7 @@ using Org.BouncyCastle.X509;
 using SharpDTLS.DTLS13.Messages;
 using SharpSRTP.UDP;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
@@ -24,6 +25,9 @@ namespace SharpDTLS.DTLS13
         private CertificateVerifyDatagram _serverCertVerifyDatagram = null;
         private FinishedDatagram _serverFinishedDatagram = null;
         private AcknowledgementDatagram _serverAckDatagram = null;
+
+        private int _expectedServerRecordNumber = 0;
+        private readonly SortedDictionary<int, byte[]> _handshakeReorderBuffer = new();
 
         public event EventHandler<EventArgs> HandshakeFinished;
 
@@ -92,66 +96,93 @@ namespace SharpDTLS.DTLS13
                 Session.Epoch = 2;
                 Session.RecordNumber = 0;
             }
-            else if (_serverExtensionsDatagram == null)
+            else
             {
-                ServerEncryptedDatagram encryptedExtensionsDatagram = new ServerEncryptedDatagram(Session.ServerHandshakeKeys);
-                encryptedExtensionsDatagram.FromBytes(data);
-                var serverExtensionsDatagram = encryptedExtensionsDatagram.Datagram as EncryptedExtensionsDatagram;
-                Session.HandshakeMessages.Add(encryptedExtensionsDatagram);
-                Session.ServerHandshakeKeys.ServerKeyUseCounter++;
+                int epoch = data[0] & 0x03;
 
-                Debug.WriteLine($"Received server extensions: {serverExtensionsDatagram.Extensions.Count}");
-                _serverExtensionsDatagram = serverExtensionsDatagram;
+                if (epoch == 2)
+                {
+                    // Handshake flight — buffer by record number so out-of-order packets are
+                    // held until all preceding records have been decrypted and processed.
+                    ushort recNum = ServerEncryptedDatagram.PeekRecordNumber(data, Session.ServerHandshakeKeys);
+
+                    if (recNum < _expectedServerRecordNumber)
+                        return; // duplicate
+
+                    if (recNum > _expectedServerRecordNumber)
+                    {
+                        _handshakeReorderBuffer[recNum] = data;
+                        Debug.WriteLine($"[DTLS13 Client] Buffered out-of-order record_number={recNum}, expected={_expectedServerRecordNumber}");
+                        return;
+                    }
+
+                    ProcessServerHandshakeRecord(data);
+                    _expectedServerRecordNumber++;
+
+                    while (_handshakeReorderBuffer.TryGetValue(_expectedServerRecordNumber, out var buffered))
+                    {
+                        _handshakeReorderBuffer.Remove(_expectedServerRecordNumber);
+                        ProcessServerHandshakeRecord(buffered);
+                        _expectedServerRecordNumber++;
+                    }
+                }
+                else
+                {
+                    await ProcessServerApplicationRecord(data);
+                }
+            }
+        }
+
+        private void ProcessServerHandshakeRecord(byte[] data)
+        {
+            if (_serverExtensionsDatagram == null)
+            {
+                var enc = new ServerEncryptedDatagram(Session.ServerHandshakeKeys);
+                enc.FromBytes(data);
+                var extensions = enc.Datagram as EncryptedExtensionsDatagram;
+                Session.HandshakeMessages.Add(enc);
+                Session.ServerHandshakeKeys.ServerKeyUseCounter++;
+                _serverExtensionsDatagram = extensions;
+                Debug.WriteLine($"Received server extensions: {extensions.Extensions.Count}");
             }
             else if (_serverCertificateDatagram == null)
             {
-                ServerEncryptedDatagram encryptedCertificateDatagram = new ServerEncryptedDatagram(Session.ServerHandshakeKeys);
-                encryptedCertificateDatagram.FromBytes(data);
-                var serverCertificateDatagram = encryptedCertificateDatagram.Datagram as CertificateDatagram;
-                Session.HandshakeMessages.Add(encryptedCertificateDatagram);
+                var enc = new ServerEncryptedDatagram(Session.ServerHandshakeKeys);
+                enc.FromBytes(data);
+                var cert = enc.Datagram as CertificateDatagram;
+                Session.HandshakeMessages.Add(enc);
                 Session.ServerHandshakeKeys.ServerKeyUseCounter++;
-
-                Debug.WriteLine($"Received server certificate: {Convert.ToHexString(serverCertificateDatagram.Certificate).ToLowerInvariant()}");
-                _serverCertificateDatagram = serverCertificateDatagram;
+                _serverCertificateDatagram = cert;
+                Debug.WriteLine($"Received server certificate: {Convert.ToHexString(cert.Certificate).ToLowerInvariant()}");
             }
-            else if(_serverCertVerifyDatagram == null)
+            else if (_serverCertVerifyDatagram == null)
             {
-                ServerEncryptedDatagram encryptedCertVerifyDatagram = new ServerEncryptedDatagram(Session.ServerHandshakeKeys);
-                encryptedCertVerifyDatagram.FromBytes(data);
-                var serverCertVerifyDatagram = encryptedCertVerifyDatagram.Datagram as CertificateVerifyDatagram;
-
-                Debug.WriteLine($"Received server cert verify: {Convert.ToHexString(serverCertVerifyDatagram.Signature).ToLowerInvariant()}");
+                var enc = new ServerEncryptedDatagram(Session.ServerHandshakeKeys);
+                enc.FromBytes(data);
+                var certVerify = enc.Datagram as CertificateVerifyDatagram;
 
                 byte[] h = CryptoUtils.HashAllMessages(Session.HandshakeMessages);
                 Debug.WriteLine($"handshake_hash: {Convert.ToHexString(h).ToLowerInvariant()}");
 
                 byte[] toSign = Encoding.UTF8.GetBytes("                                                                TLS 1.3, server CertificateVerify\0").Concat(h).ToArray();
-
                 X509Certificate serverCertificate = new X509CertificateParser().ReadCertificate(_serverCertificateDatagram.Certificate);
-                AsymmetricKeyParameter publicKey = serverCertificate.GetPublicKey();
-
                 ISigner signer = SignerUtilities.GetSigner("SHA256WITHRSA/PSS");
-                signer.Init(false, publicKey);
+                signer.Init(false, serverCertificate.GetPublicKey());
                 signer.BlockUpdate(toSign);
 
-                if(!signer.VerifySignature(serverCertVerifyDatagram.Signature))
-                {
+                if (!signer.VerifySignature(certVerify.Signature))
                     throw new Exception("Signature invalid!");
-                }
 
-                Session.HandshakeMessages.Add(encryptedCertVerifyDatagram);
+                Session.HandshakeMessages.Add(enc);
                 Session.ServerHandshakeKeys.ServerKeyUseCounter++;
-                _serverCertVerifyDatagram = serverCertVerifyDatagram;
-
-                Debug.WriteLine($"Signature verified");
+                _serverCertVerifyDatagram = certVerify;
+                Debug.WriteLine("Signature verified");
             }
-            else if(_serverFinishedDatagram == null)
+            else if (_serverFinishedDatagram == null)
             {
-                ServerEncryptedDatagram encryptedFinishedDatagram = new ServerEncryptedDatagram(Session.ServerHandshakeKeys);
-                encryptedFinishedDatagram.FromBytes(data);
-                var serverFinishedDatagram = encryptedFinishedDatagram.Datagram as FinishedDatagram;
-
-                Debug.WriteLine($"Received server finished: {Convert.ToHexString(serverFinishedDatagram.VerifyData).ToLowerInvariant()}");
+                var enc = new ServerEncryptedDatagram(Session.ServerHandshakeKeys);
+                enc.FromBytes(data);
+                var serverFinished = enc.Datagram as FinishedDatagram;
 
                 var crypto = new BcTlsCrypto();
                 var hashAlg = CryptoHashAlgorithm.sha256;
@@ -159,30 +190,25 @@ namespace SharpDTLS.DTLS13
                 byte[] finishedServerHash = CryptoUtils.HashAllMessages(Session.HandshakeMessages);
                 byte[] verifyServerData = CryptoUtils.CalculateHmac(finishedServerKey, finishedServerHash);
 
-                if (!verifyServerData.SequenceEqual(serverFinishedDatagram.VerifyData))
-                {
+                if (!verifyServerData.SequenceEqual(serverFinished.VerifyData))
                     throw new Exception("Server verify failed!");
-                }
 
-                Debug.WriteLine($"Server verify successful!");
-
-                Session.HandshakeMessages.Add(encryptedFinishedDatagram);
+                Debug.WriteLine("Server verify successful!");
+                Session.HandshakeMessages.Add(enc);
                 Session.ServerHandshakeKeys.ServerKeyUseCounter++;
-                byte[] finishedClientHash = CryptoUtils.HashAllMessages(Session.HandshakeMessages);
 
+                byte[] finishedClientHash = CryptoUtils.HashAllMessages(Session.HandshakeMessages);
                 var finishedClientKey = CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, Session.ServerHandshakeKeys.ClientSecret), hashAlg, "finished", new byte[0], 32).Extract();
                 byte[] verifyClientData = CryptoUtils.CalculateHmac(finishedClientKey, finishedClientHash);
 
-                ClientEncryptedDatagram encryptedClientFinishedDatagram = new ClientEncryptedDatagram(Session.ServerHandshakeKeys, new FinishedDatagram() { VerifyData = verifyClientData })
+                var encClientFinished = new ClientEncryptedDatagram(Session.ServerHandshakeKeys, new FinishedDatagram { VerifyData = verifyClientData })
                 {
                     Epoch = Session.Epoch,
                     RecordNumber = Session.RecordNumber++,
                 };
-                var encryptedClientFinishedDatagramBytes = encryptedClientFinishedDatagram.ToBytes();
-                ClientTransport.Send(encryptedClientFinishedDatagramBytes);
+                ClientTransport.Send(encClientFinished.ToBytes());
                 Session.ServerHandshakeKeys.ClientKeyUseCounter++;
 
-                // calculate application keys
                 byte[] allMessagesHash = CryptoUtils.HashAllMessages(Session.HandshakeMessages);
                 var clientHello = Session.HandshakeMessages.OfType<ClientHelloDatagram>().Last();
                 Session.ServerApplicationKeys = CryptoUtils.CalculateApplicationKeys(clientHello.ClientRandom, allMessagesHash, Session.ServerHandshakeKeys.Secret);
@@ -196,18 +222,24 @@ namespace SharpDTLS.DTLS13
                 Debug.WriteLine($"server_sn_key: {Convert.ToHexString(Session.ServerApplicationKeys.ServerSnKey).ToLowerInvariant()}");
                 Debug.WriteLine("------------------------");
 
-                _serverFinishedDatagram = serverFinishedDatagram;
+                _serverFinishedDatagram = serverFinished;
             }
-            else if(_serverAckDatagram == null)
+            else
             {
-                Debug.WriteLine($"Client received ACK: {Convert.ToHexString(data).ToLowerInvariant()}");
+                Debug.WriteLine("[DTLS13 Client] ProcessServerHandshakeRecord: unexpected record in epoch 2");
+            }
+        }
 
-                ServerEncryptedDatagram encryptedServerAckDatagram = new ServerEncryptedDatagram(Session.ServerApplicationKeys);
-                encryptedServerAckDatagram.FromBytes(data);
-                var serverAckDatagram = encryptedServerAckDatagram.Datagram as AcknowledgementDatagram;
+        private async Task ProcessServerApplicationRecord(byte[] data)
+        {
+            if (_serverAckDatagram == null)
+            {
+                Debug.WriteLine($"[DTLS13 Client] Received ACK: {Convert.ToHexString(data).ToLowerInvariant()}");
+                var enc = new ServerEncryptedDatagram(Session.ServerApplicationKeys);
+                enc.FromBytes(data);
+                var ack = enc.Datagram as AcknowledgementDatagram;
                 Session.ServerApplicationKeys.ServerKeyUseCounter++;
-
-                _serverAckDatagram = serverAckDatagram;
+                _serverAckDatagram = ack;
 
                 Session.Epoch = 3;
                 Session.RecordNumber = 0;
@@ -216,12 +248,12 @@ namespace SharpDTLS.DTLS13
             }
             else
             {
-                ServerEncryptedDatagram encryptedServerApplicationDatagram = new ServerEncryptedDatagram(Session.ServerApplicationKeys);
-                encryptedServerApplicationDatagram.FromBytes(data);
-                var serverApplicationDatagram = encryptedServerApplicationDatagram.Datagram as ApplicationDataDatagram;
+                var enc = new ServerEncryptedDatagram(Session.ServerApplicationKeys);
+                enc.FromBytes(data);
+                var appData = enc.Datagram as ApplicationDataDatagram;
                 Session.ServerApplicationKeys.ServerKeyUseCounter++;
 
-                Debug.WriteLine($"Received server application data: {Encoding.UTF8.GetString(serverApplicationDatagram.Data)}");
+                Debug.WriteLine($"Received server application data: {Encoding.UTF8.GetString(appData.Data)}");
 
                 await Task.Delay(1000);
 
