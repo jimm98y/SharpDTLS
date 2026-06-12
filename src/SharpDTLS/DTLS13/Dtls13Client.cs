@@ -37,7 +37,7 @@ namespace SharpDTLS.DTLS13
             ClientTransport.OnDataReceived += ClientTransport_OnDataReceived;
         }
 
-        private async void ClientTransport_OnDataReceived(object? sender, byte[] data)
+        private async void ClientTransport_OnDataReceived(object sender, byte[] data)
         {
             Console.WriteLine($"The client received: {Convert.ToHexString(data)}");
 

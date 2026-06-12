@@ -29,12 +29,12 @@ namespace Dtls13Test.Tests
             ch2.FromBytes(bytes);
 
             Assert.AreEqual(Convert.ToHexString(random), Convert.ToHexString(ch2.ClientRandom));
-            Assert.AreEqual(2,      ch2.CipherSuites.Count);
+            Assert.HasCount(2,      ch2.CipherSuites);
             Assert.AreEqual(0xC013, ch2.CipherSuites[0]);
             Assert.AreEqual(0xC014, ch2.CipherSuites[1]);
             Assert.AreEqual(5,      ch2.RecordSequenceNumber);
             Assert.AreEqual(2,      ch2.MessageSequenceNumber);
-            Assert.AreEqual(0,      ch2.Cookie.Length);
+            Assert.HasCount(0,      ch2.Cookie);
             Assert.AreEqual(Convert.ToHexString(bytes), Convert.ToHexString(ch2.ToBytes()));
         }
 
@@ -56,7 +56,7 @@ namespace Dtls13Test.Tests
             ch2.FromBytes(bytes);
 
             Assert.AreEqual(Convert.ToHexString(cookie), Convert.ToHexString(ch2.Cookie));
-            Assert.AreEqual(1,      ch2.CipherSuites.Count);
+            Assert.HasCount(1,      ch2.CipherSuites);
             Assert.AreEqual(0xC013, ch2.CipherSuites[0]);
             Assert.AreEqual(Convert.ToHexString(bytes), Convert.ToHexString(ch2.ToBytes()));
         }
@@ -191,7 +191,7 @@ namespace Dtls13Test.Tests
 
             byte[] output = Dtls10CryptoUtils.PRF(secret, "key expansion", seed, 72);
 
-            Assert.AreEqual(72, output.Length);
+            Assert.HasCount(72, output);
         }
 
         [TestMethod]
@@ -232,7 +232,7 @@ namespace Dtls13Test.Tests
             byte[] ms1 = Dtls10CryptoUtils.CalculateMasterSecret(preMaster, clientRandom, serverRandom);
             byte[] ms2 = Dtls10CryptoUtils.CalculateMasterSecret(preMaster, clientRandom, serverRandom);
 
-            Assert.AreEqual(48, ms1.Length);
+            Assert.HasCount(48, ms1);
             Assert.AreEqual(Convert.ToHexString(ms1), Convert.ToHexString(ms2));
         }
 
@@ -245,11 +245,11 @@ namespace Dtls13Test.Tests
 
             var ctx = Dtls10CryptoUtils.DeriveKeys(master, clientRandom, serverRandom);
 
-            Assert.AreEqual(48, ctx.MasterSecret.Length);
-            Assert.AreEqual(20, ctx.ClientMacKey.Length);
-            Assert.AreEqual(20, ctx.ServerMacKey.Length);
-            Assert.AreEqual(16, ctx.ClientKey.Length);
-            Assert.AreEqual(16, ctx.ServerKey.Length);
+            Assert.HasCount(48, ctx.MasterSecret);
+            Assert.HasCount(20, ctx.ClientMacKey);
+            Assert.HasCount(20, ctx.ServerMacKey);
+            Assert.HasCount(16, ctx.ClientKey);
+            Assert.HasCount(16, ctx.ServerKey);
         }
 
         [TestMethod]
@@ -293,7 +293,7 @@ namespace Dtls13Test.Tests
             byte[] v1 = Dtls10CryptoUtils.CalculateVerifyData(master, "client finished", hash);
             byte[] v2 = Dtls10CryptoUtils.CalculateVerifyData(master, "client finished", hash);
 
-            Assert.AreEqual(12, v1.Length);
+            Assert.HasCount(12, v1);
             Assert.AreEqual(Convert.ToHexString(v1), Convert.ToHexString(v2));
         }
 

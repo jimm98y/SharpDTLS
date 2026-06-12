@@ -2,9 +2,7 @@ using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.X509;
 using SharpDTLS.DTLS12.Messages;
-using SharpDTLS.DTLS13;
 using SharpSRTP.UDP;
-using SharpDTLS;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -46,10 +44,10 @@ namespace SharpDTLS.DTLS12
 
         public void BeginHandshake()
         {
-            var (priv, pub) = Dtls13CryptoUtils.CreateX25519KeyPair();
+            var (priv, pub) = Dtls12CryptoUtils.CreateX25519KeyPair();
             Session.PrivateKey   = priv.GetEncoded();
             Session.PublicKey    = pub.GetEncoded();
-            Session.ClientRandom = Dtls13CryptoUtils.GenerateRandom(32);
+            Session.ClientRandom = Dtls12CryptoUtils.GenerateRandom(32);
 
             SendClientHello(cookie: null);
         }
@@ -242,7 +240,7 @@ namespace SharpDTLS.DTLS12
             ClientTransport.Send(cke.ToBytes());
 
             // Derive keys
-            byte[] preMaster = Dtls13CryptoUtils.DeriveSharedSecretX25519(Session.PrivateKey, _serverKex.PublicKey);
+            byte[] preMaster = Dtls12CryptoUtils.DeriveSharedSecretX25519(Session.PrivateKey, _serverKex.PublicKey);
             byte[] master    = Dtls12CryptoUtils.CalculateMasterSecret(preMaster, Session.ClientRandom, Session.ServerRandom);
             Session.CryptoContext = Dtls12CryptoUtils.DeriveKeys(master, Session.ClientRandom, Session.ServerRandom);
 

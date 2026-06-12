@@ -171,8 +171,6 @@ namespace SharpSRTP.UDP
                 listenSocket.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.PacketInformation, true);
             }
 
-            const int RECEIVE_TIMEOUT = 0;
-            const int INACTIVE_SESSION_TIMEOUT = 60000;
             EndPoint localEndpoint = IPEndPoint.Parse("0.0.0.0:8888");
             EndPoint remoteEndpoint = new IPEndPoint(IPAddress.Any, 0);
             _activeSessions = new ConcurrentDictionary<string, UdpTransport>();
