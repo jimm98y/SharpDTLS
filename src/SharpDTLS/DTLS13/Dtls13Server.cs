@@ -17,6 +17,10 @@ namespace SharpDTLS.DTLS13
 {
     public class Dtls13Server
     {
+        // Maximum HS body bytes per encrypted fragment. Keeps each datagram under ~1200 bytes
+        // (5 B record header + 16 B AEAD tag + 12 B HS header + 1167 B body ≈ 1200 B).
+        private const int MaxHandshakeBodyPerRecord = 1167;
+
         private readonly AsymmetricCipherKeyPair _serverCertificateKeyPair;
         private readonly X509Certificate _serverX509Certificate;
         Dictionary<string, Dtls13Session> _sessions = new Dictionary<string, Dtls13Session>();
@@ -105,28 +109,11 @@ namespace SharpDTLS.DTLS13
                     // from now on the connection is encrypted
                     session.Epoch = 2;
 
-                    ServerEncryptedDatagram encryptedExtensionsDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new EncryptedExtensionsDatagram())
-                    {
-                        Epoch = session.Epoch,
-                        RecordNumber = session.RecordNumber++
-                    };
-                    var encryptedExtensionsDatagramBytes = encryptedExtensionsDatagram.ToBytes();
-                    session.HandshakeMessages.Add(encryptedExtensionsDatagram);
-                    ServerTransport.Send(endpoint, encryptedExtensionsDatagramBytes);
-                    session.ServerHandshakeKeys.ServerKeyUseCounter++;
+                    SendEncryptedHandshake(endpoint, session, new EncryptedExtensionsDatagram());
 
                     var derCertificate = _serverX509Certificate.GetEncoded();
 
-                    ServerEncryptedDatagram encryptedCertificateDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, 
-                        new CertificateDatagram(derCertificate))
-                    {
-                        Epoch = session.Epoch,
-                        RecordNumber = session.RecordNumber++,
-                    };
-                    var encryptedCertificateDatagramBytes = encryptedCertificateDatagram.ToBytes();
-                    session.HandshakeMessages.Add(encryptedCertificateDatagram);
-                    ServerTransport.Send(endpoint, encryptedCertificateDatagramBytes);
-                    session.ServerHandshakeKeys.ServerKeyUseCounter++;
+                    SendEncryptedHandshake(endpoint, session, new CertificateDatagram(derCertificate));
 
                     // find hash of all message up to this point
                     byte[] h = Dtls13CryptoUtils.HashAllMessages(session.HandshakeMessages);
@@ -141,16 +128,7 @@ namespace SharpDTLS.DTLS13
                     byte[] signature = signer.GenerateSignature();
                     Debug.WriteLine($"signature: {Convert.ToHexString(signature).ToLowerInvariant()}");
 
-                    ServerEncryptedDatagram encryptedCertVerifyDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new CertificateVerifyDatagram(signature))
-                    {
-                        Epoch = session.Epoch,
-                        RecordNumber = session.RecordNumber++,
-                    };
-
-                    var encryptedCertVerifyDatagramBytes = encryptedCertVerifyDatagram.ToBytes();
-                    session.HandshakeMessages.Add(encryptedCertVerifyDatagram);
-                    ServerTransport.Send(endpoint, encryptedCertVerifyDatagramBytes);
-                    session.ServerHandshakeKeys.ServerKeyUseCounter++;
+                    SendEncryptedHandshake(endpoint, session, new CertificateVerifyDatagram(signature));
 
                     var crypto = new BcTlsCrypto();
                     var hashAlg = CryptoHashAlgorithm.sha256;
@@ -159,15 +137,7 @@ namespace SharpDTLS.DTLS13
                     Debug.WriteLine("finished handshake hash:" + Convert.ToHexString(finishedHash));                    
                     byte[] verifyServerData = Dtls13CryptoUtils.CalculateHmac(finishedServerKey, finishedHash);
 
-                    ServerEncryptedDatagram encryptedFinishedDatagram = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new FinishedDatagram() { VerifyData = verifyServerData })
-                    {
-                        Epoch = session.Epoch,
-                        RecordNumber = session.RecordNumber++,
-                    };
-                    var encryptedFinishedDatagramBytes = encryptedFinishedDatagram.ToBytes();
-                    session.HandshakeMessages.Add(encryptedFinishedDatagram);
-                    ServerTransport.Send(endpoint, encryptedFinishedDatagramBytes);
-                    session.ServerHandshakeKeys.ServerKeyUseCounter++;
+                    SendEncryptedHandshake(endpoint, session, new FinishedDatagram() { VerifyData = verifyServerData });
                 }
                 else
                 {
@@ -252,6 +222,31 @@ namespace SharpDTLS.DTLS13
                 var bytes = encryptedDatagram.ToBytes();
                 session.ServerApplicationKeys.ServerKeyUseCounter++;
                 ServerTransport.Send(endpoint, bytes);
+            }
+        }
+        /// <summary>
+        /// Serialises <paramref name="datagram"/>, splits it into fragments if needed, encrypts and
+        /// sends each fragment as a separate DTLS record. Adds a single entry to
+        /// <see cref="Dtls13Session.HandshakeMessages"/> (using the original, defragmented datagram)
+        /// so the Finished transcript hash is computed correctly.
+        /// </summary>
+        private void SendEncryptedHandshake(System.Net.EndPoint endpoint, Dtls13Session session, IDatagram datagram)
+        {
+            byte[] fullPlaintext = datagram.ToBytes();
+
+            // Session entry for the transcript hash — uses datagram.Bytes set above.
+            var sessionEntry = new ServerEncryptedDatagram(session.ServerHandshakeKeys, datagram);
+            session.HandshakeMessages.Add(sessionEntry);
+
+            foreach (var fragment in HandshakeFragmenter.FragmentHandshakePlaintext(fullPlaintext, MaxHandshakeBodyPerRecord))
+            {
+                var fragEnc = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new RawPlaintextDatagram(fragment))
+                {
+                    Epoch = session.Epoch,
+                    RecordNumber = session.RecordNumber++,
+                };
+                ServerTransport.Send(endpoint, fragEnc.ToBytes());
+                session.ServerHandshakeKeys.ServerKeyUseCounter++;
             }
         }
     }

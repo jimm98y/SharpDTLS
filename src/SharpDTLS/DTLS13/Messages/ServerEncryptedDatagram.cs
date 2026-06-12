@@ -25,17 +25,24 @@ namespace SharpDTLS.DTLS13.Messages
 
         public void FromBytes(byte[] encrypted)
         {
+            byte[] plaintext = Decrypt(encrypted);
+            ParsePlaintext(plaintext);
+        }
+
+        /// <summary>
+        /// Decrypts the DTLS record and returns the raw handshake plaintext without parsing it.
+        /// Also sets <see cref="Bytes"/>, <see cref="Epoch"/>, and <see cref="RecordNumber"/>.
+        /// Call <see cref="ParsePlaintext"/> on the returned bytes (or on a reassembled message)
+        /// to populate <see cref="Datagram"/>.
+        /// </summary>
+        public byte[] Decrypt(byte[] encrypted)
+        {
             if ((encrypted[0] & 0x20) != 0x20)
                 throw new Exception("Wrong datagram");
 
             Bytes = encrypted.ToArray();
 
-            bool connectionIdPresent = (encrypted[0] & 0x10) == 0x10;
-            bool is16bitLength = (encrypted[0] & 0x08) == 0x08;
-            bool isLengthPresent = (encrypted[0] & 0x04) == 0x04;
             this.Epoch = encrypted[0] & 0x03;
-
-            ushort recordLength = (ushort)((encrypted[3] << 8) | encrypted[4]);
 
             byte[] headerEncryption = GetHeaderEncryption(encrypted);
 
@@ -52,8 +59,15 @@ namespace SharpDTLS.DTLS13.Messages
 
             Encrypt(_cryptoContext.AeadEncryptEngine, false, encrypted, 5, encrypted.Length, iv, new KeyParameter(_cryptoContext.ServerKey), 16, encrypted.Take(5).ToArray());
 
-            byte[] plaintext = encrypted.Skip(5).Take(encrypted.Length - 5 - 16).ToArray();
+            return encrypted.Skip(5).Take(encrypted.Length - 5 - 16).ToArray();
+        }
 
+        /// <summary>
+        /// Parses a decrypted (and optionally reassembled) handshake plaintext and populates
+        /// <see cref="Datagram"/>. Pair with <see cref="Decrypt"/> to support fragment reassembly.
+        /// </summary>
+        public void ParsePlaintext(byte[] plaintext)
+        {
             if (plaintext[plaintext.Length - 1] == 0x16)
             {
                 this.Datagram = plaintext[0] switch
@@ -65,7 +79,7 @@ namespace SharpDTLS.DTLS13.Messages
                     _ => throw new Exception("Unknown datagram type")
                 };
             }
-            else if(plaintext[plaintext.Length - 1] == 0x1a)
+            else if (plaintext[plaintext.Length - 1] == 0x1a)
             {
                 this.Datagram = new AcknowledgementDatagram();
             }
