@@ -22,7 +22,9 @@ namespace SharpDTLS.DTLS12
     //   7. Application data exchange
     public class Dtls12Client
     {
-        public event EventHandler<EventArgs> HandshakeFinished;
+        public event EventHandler<EventArgs>                    HandshakeFinished;
+        public event EventHandler<AlertDatagram>                AlertReceived;
+        public event EventHandler<NewSessionTicketDatagram>     NewSessionTicketReceived;
 
         public Dtls12Session Session { get; } = new Dtls12Session();
         public IClientTransport ClientTransport { get; }
@@ -100,6 +102,8 @@ namespace SharpDTLS.DTLS12
                     HandleChangeCipherSpec(data);
                 else if (recordType == 0x17) // ApplicationData (encrypted)
                     HandleApplicationData(data);
+                else if (recordType == 0x15) // Alert
+                    HandleAlert(data);
             }
             catch (Exception ex)
             {
@@ -109,7 +113,11 @@ namespace SharpDTLS.DTLS12
 
         private void HandleHandshakeRecord(byte[] data)
         {
-            if (_handshakeComplete) return;
+            if (_handshakeComplete)
+            {
+                HandlePostHandshakeRecord(data);
+                return;
+            }
 
             // After server CCS the next 0x16 is the encrypted Finished — data[13] is the nonce, not a type byte.
             if (_changeCipherSpecReceived)
@@ -377,12 +385,59 @@ namespace SharpDTLS.DTLS12
         {
             var enc = new ServerEncryptedDatagram(Session.CryptoContext)
             {
-                Epoch = 1,
+                Epoch          = 1,
                 SequenceNumber = Session.CryptoContext.ServerSequenceNumber++,
             };
             enc.FromBytes(data);
             var appData = enc.Datagram as ApplicationDataDatagram;
             Console.WriteLine($"[DTLS12 Client] AppData from server: {Encoding.UTF8.GetString(appData.Data)}");
+        }
+
+        private void HandlePostHandshakeRecord(byte[] data)
+        {
+            // Post-handshake 0x16 records are encrypted with epoch 1 keys.
+            var enc = new ServerEncryptedDatagram(Session.CryptoContext)
+            {
+                Epoch          = 1,
+                SequenceNumber = Session.CryptoContext.ServerSequenceNumber++,
+            };
+            enc.FromBytes(data);
+
+            switch (enc.Datagram)
+            {
+                case NewSessionTicketDatagram nst:
+                    Debug.WriteLine($"[DTLS12 Client] Received NewSessionTicket (lifetime={nst.TicketLifetimeHint}s)");
+                    NewSessionTicketReceived?.Invoke(this, nst);
+                    break;
+
+                default:
+                    Debug.WriteLine($"[DTLS12 Client] Received unknown post-handshake handshake record, ignoring");
+                    break;
+            }
+        }
+
+        private void HandleAlert(byte[] data)
+        {
+            AlertDatagram alert;
+
+            if (_handshakeComplete && Session.CryptoContext != null)
+            {
+                var enc = new ServerEncryptedDatagram(Session.CryptoContext)
+                {
+                    Epoch          = 1,
+                    SequenceNumber = Session.CryptoContext.ServerSequenceNumber++,
+                };
+                enc.FromBytes(data);
+                alert = enc.Datagram as AlertDatagram;
+            }
+            else
+            {
+                alert = new AlertDatagram();
+                alert.FromBytes(data);
+            }
+
+            Debug.WriteLine($"[DTLS12 Client] Received Alert level={alert.Level} desc={alert.Description}");
+            AlertReceived?.Invoke(this, alert);
         }
 
         public void SendApplicationData(byte[] data)

@@ -26,7 +26,8 @@ namespace SharpDTLS.DTLS10
 
         public bool ShouldSendHelloVerify { get; set; } = true;
         public bool RequireClientCertificate { get; set; } = false;
-        public event EventHandler<EventArgs> HandshakeFinished;
+        public event EventHandler<EventArgs>     HandshakeFinished;
+        public event EventHandler<AlertDatagram> AlertReceived;
         public IServerTransport ServerTransport { get; }
 
         private readonly Dictionary<string, Dtls10Session>  _sessions             = new();
@@ -111,6 +112,8 @@ namespace SharpDTLS.DTLS10
                     HandleClientFinished(endpoint, key, session, data);
                 else if (state == HandshakeState.Complete && recordType == 0x17)
                     HandleApplicationData(endpoint, key, session, data);
+                else if (state == HandshakeState.Complete && recordType == 0x15)
+                    HandleClientAlert(endpoint, session, data);
             }
             catch (Exception ex)
             {
@@ -360,6 +363,19 @@ namespace SharpDTLS.DTLS10
                 SequenceNumber = session.CryptoContext.ServerSequenceNumber++,
             };
             ServerTransport.Send(endpoint, reply.ToBytes());
+        }
+
+        private void HandleClientAlert(EndPoint endpoint, Dtls10Session session, byte[] data)
+        {
+            var enc = new ClientEncryptedDatagram(session.CryptoContext)
+            {
+                Epoch          = 1,
+                SequenceNumber = session.CryptoContext.ClientSequenceNumber++,
+            };
+            enc.FromBytes(data);
+            var alert = enc.Datagram as AlertDatagram;
+            Debug.WriteLine($"[DTLS10 Server] Received Alert from {endpoint}: level={alert.Level} desc={alert.Description}");
+            AlertReceived?.Invoke(this, alert);
         }
 
         private void SendUnencryptedHandshake(EndPoint endpoint, Dtls10Session session, byte[] record)

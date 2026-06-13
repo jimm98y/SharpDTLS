@@ -25,7 +25,8 @@ namespace SharpDTLS.DTLS13
         private readonly AsymmetricCipherKeyPair _serverCertificateKeyPair;
         private readonly X509Certificate _serverX509Certificate;
         Dictionary<string, Dtls13Session> _sessions = new Dictionary<string, Dtls13Session>();
-        public event EventHandler<EventArgs> HandshakeFinished;
+        public event EventHandler<EventArgs>                 HandshakeFinished;
+        public event EventHandler<KeyUpdateDatagram>        KeyUpdateReceived;
 
         public IServerTransport ServerTransport { get; }
         public bool ShouldSendHelloRetry { get; set; } = true;
@@ -253,23 +254,82 @@ namespace SharpDTLS.DTLS13
 
         private async Task HandleApplicationData(EndPoint endpoint, Dtls13Session session, byte[] data)
         {
-            var encryptedApplicationDatagram = new ClientEncryptedDatagram(session.ServerApplicationKeys);
-            encryptedApplicationDatagram.FromBytes(data);
-            var clientApplicationDatagram = encryptedApplicationDatagram.Datagram as ApplicationDataDatagram;
+            var enc = new ClientEncryptedDatagram(session.ServerApplicationKeys);
+            enc.FromBytes(data);
             session.ServerApplicationKeys.ClientKeyUseCounter++;
 
-            Debug.WriteLine($"Received server application data: {Encoding.UTF8.GetString(clientApplicationDatagram.Data)}");
-
-            await Task.Delay(1000);
-
-            var encryptedDatagram = new ServerEncryptedDatagram(session.ServerApplicationKeys, new ApplicationDataDatagram(Encoding.UTF8.GetBytes("Hello from server!")))
+            switch (enc.Datagram)
             {
-                Epoch = session.Epoch,
+                case ApplicationDataDatagram appData:
+                    Debug.WriteLine($"[DTLS13 Server] Received app data from {endpoint}: {Encoding.UTF8.GetString(appData.Data)}");
+                    await Task.Delay(1000);
+                    SendApplicationData(endpoint, session, Encoding.UTF8.GetBytes("Hello from server!"));
+                    break;
+
+                case KeyUpdateDatagram keyUpdate:
+                    Debug.WriteLine($"[DTLS13 Server] Received KeyUpdate from {endpoint} (update_request=0x{keyUpdate.UpdateRequest:X2})");
+                    session.ServerApplicationKeys = Dtls13CryptoUtils.UpdateClientTrafficSecret(session.ServerApplicationKeys);
+                    KeyUpdateReceived?.Invoke(this, keyUpdate);
+                    if (keyUpdate.UpdateRequest == 0x01)
+                        SendKeyUpdate(endpoint, session, requestUpdate: false);
+                    break;
+
+                default:
+                    Debug.WriteLine($"[DTLS13 Server] Received unknown post-handshake record from {endpoint}, ignoring");
+                    break;
+            }
+        }
+
+        // Sends an encrypted application-data record to the peer.
+        public void SendApplicationData(EndPoint endpoint, Dtls13Session session, byte[] data)
+        {
+            var enc = new ServerEncryptedDatagram(session.ServerApplicationKeys,
+                new ApplicationDataDatagram(data))
+            {
+                Epoch        = session.Epoch,
                 RecordNumber = session.RecordNumber++,
             };
-            var bytes = encryptedDatagram.ToBytes();
+            ServerTransport.Send(endpoint, enc.ToBytes());
             session.ServerApplicationKeys.ServerKeyUseCounter++;
-            ServerTransport.Send(endpoint, bytes);
+        }
+
+        // Sends a NewSessionTicket post-handshake message to the peer.
+        public void SendNewSessionTicket(EndPoint endpoint, Dtls13Session session,
+            byte[] ticket, byte[] nonce = null, uint lifetime = 7200, uint ageAdd = 0)
+        {
+            nonce ??= Dtls13CryptoUtils.GenerateRandom(8);
+            if (ageAdd == 0)
+            {
+                var rng = new byte[4];
+                System.Security.Cryptography.RandomNumberGenerator.Fill(rng);
+                ageAdd = (uint)((rng[0] << 24) | (rng[1] << 16) | (rng[2] << 8) | rng[3]);
+            }
+
+            var nst = new NewSessionTicketDatagram(ticket, nonce, lifetime, ageAdd);
+            var enc = new ServerEncryptedDatagram(session.ServerApplicationKeys, nst)
+            {
+                Epoch        = session.Epoch,
+                RecordNumber = session.RecordNumber++,
+            };
+            ServerTransport.Send(endpoint, enc.ToBytes());
+            session.ServerApplicationKeys.ServerKeyUseCounter++;
+            Debug.WriteLine($"[DTLS13 Server] Sent NewSessionTicket to {endpoint} (lifetime={lifetime}s)");
+        }
+
+        // Sends a KeyUpdate handshake message and updates the server write keys.
+        // Set requestUpdate=true to ask the peer to perform a key update as well.
+        public void SendKeyUpdate(EndPoint endpoint, Dtls13Session session, bool requestUpdate = false)
+        {
+            var keyUpdate = new KeyUpdateDatagram(requestUpdate ? (byte)0x01 : (byte)0x00);
+            var enc = new ServerEncryptedDatagram(session.ServerApplicationKeys, keyUpdate)
+            {
+                Epoch        = session.Epoch,
+                RecordNumber = session.RecordNumber++,
+            };
+            ServerTransport.Send(endpoint, enc.ToBytes());
+            session.ServerApplicationKeys.ServerKeyUseCounter++;
+            session.ServerApplicationKeys = Dtls13CryptoUtils.UpdateServerTrafficSecret(session.ServerApplicationKeys);
+            Debug.WriteLine($"[DTLS13 Server] Sent KeyUpdate to {endpoint} (update_request=0x{keyUpdate.UpdateRequest:X2}), rotated server write keys");
         }
 
         private void SendEncryptedHandshake(EndPoint endpoint, Dtls13Session session, IDatagram datagram)

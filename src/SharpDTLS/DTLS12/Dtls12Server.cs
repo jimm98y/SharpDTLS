@@ -28,7 +28,9 @@ namespace SharpDTLS.DTLS12
         private readonly X509Certificate _serverX509Certificate;
         public bool ShouldSendHelloVerify { get; set; } = true;
         public bool RequireClientCertificate { get; set; } = false;
-        public event EventHandler<EventArgs> HandshakeFinished;
+        public event EventHandler<EventArgs>                 HandshakeFinished;
+        public event EventHandler<AlertDatagram>             AlertReceived;
+        public event EventHandler<NewSessionTicketDatagram>  NewSessionTicketSent;
 
         public IServerTransport ServerTransport { get; }
 
@@ -123,6 +125,10 @@ namespace SharpDTLS.DTLS12
                 else if (state == HandshakeState.Complete && recordType == 0x17)
                 {
                     HandleApplicationData(endpoint, key, session, data);
+                }
+                else if (state == HandshakeState.Complete && recordType == 0x15)
+                {
+                    HandleClientAlert(endpoint, session, data);
                 }
             }
             catch (Exception ex)
@@ -374,6 +380,43 @@ namespace SharpDTLS.DTLS12
                 SequenceNumber = session.CryptoContext.ServerSequenceNumber++,
             };
             ServerTransport.Send(endpoint, reply.ToBytes());
+        }
+
+        private void HandleClientAlert(EndPoint endpoint, Dtls12Session session, byte[] data)
+        {
+            var enc = new ClientEncryptedDatagram(session.CryptoContext)
+            {
+                Epoch          = 1,
+                SequenceNumber = session.CryptoContext.ClientSequenceNumber++,
+            };
+            enc.FromBytes(data);
+            var alert = enc.Datagram as AlertDatagram;
+            Debug.WriteLine($"[DTLS12 Server] Received Alert from {endpoint}: level={alert.Level} desc={alert.Description}");
+            AlertReceived?.Invoke(this, alert);
+        }
+
+        // Sends a NewSessionTicket post-handshake message to the peer (RFC 5077).
+        public void SendNewSessionTicket(EndPoint endpoint, string sessionKey, byte[] ticket, uint lifetimeHint = 7200)
+        {
+            if (!_sessions.TryGetValue(sessionKey, out var session))
+                throw new InvalidOperationException($"No session for {sessionKey}");
+
+            var nst = new NewSessionTicketDatagram(ticket, lifetimeHint)
+            {
+                MessageSequenceNumber = session.MessageSequenceNumber++,
+                RecordSequenceNumber  = session.RecordSequenceNumber,
+            };
+
+            var enc = new ServerEncryptedDatagram(session.CryptoContext, nst)
+            {
+                Epoch          = 1,
+                SequenceNumber = session.CryptoContext.ServerSequenceNumber++,
+            };
+            ServerTransport.Send(endpoint, enc.ToBytes());
+            session.RecordSequenceNumber++;
+
+            Debug.WriteLine($"[DTLS12 Server] Sent NewSessionTicket to {endpoint} (lifetime={lifetimeHint}s)");
+            NewSessionTicketSent?.Invoke(this, nst);
         }
 
         private void SendUnencryptedHandshake(EndPoint endpoint, Dtls12Session session, byte[] record)

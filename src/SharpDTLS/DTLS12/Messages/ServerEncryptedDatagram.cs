@@ -88,12 +88,15 @@ namespace SharpDTLS.DTLS12.Messages
             Datagram = ContentType == 0x16
                 ? plaintext[0] switch
                 {
+                    0x04 => new NewSessionTicketDatagram(),
                     0x14 => new FinishedDatagram(),
                     _ => throw new NotSupportedException($"Unknown handshake type 0x{plaintext[0]:X2}")
                 }
                 : ContentType == 0x17
                     ? (IDatagram)new ApplicationDataDatagram()
-                    : throw new NotSupportedException($"Unsupported content type 0x{ContentType:X2}");
+                    : ContentType == 0x15
+                        ? (IDatagram)new AlertDatagram()
+                        : throw new NotSupportedException($"Unsupported content type 0x{ContentType:X2}");
 
             Datagram.FromBytes(plaintext);
         }

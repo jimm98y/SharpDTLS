@@ -81,7 +81,9 @@ namespace SharpDTLS.DTLS12.Messages
                 }
                 : ContentType == 0x17
                     ? (IDatagram)new ApplicationDataDatagram()
-                    : throw new NotSupportedException($"Unsupported content type 0x{ContentType:X2}");
+                    : ContentType == 0x15
+                        ? (IDatagram)new AlertDatagram()
+                        : throw new NotSupportedException($"Unsupported content type 0x{ContentType:X2}");
 
             Datagram.FromBytes(plaintext);
         }

@@ -18,9 +18,16 @@ namespace SharpDTLS.DTLS10.Messages
         public void FromBytes(byte[] bytes)
         {
             if (bytes == null) throw new ArgumentNullException(nameof(bytes));
-            if (bytes[0] != 0x15) throw new InvalidDataException("Not an Alert record.");
-
             Bytes = bytes.ToArray();
+
+            if (bytes.Length == 2)
+            {
+                Level       = bytes[0];
+                Description = bytes[1];
+                return;
+            }
+
+            if (bytes[0] != 0x15) throw new InvalidDataException("Not an Alert record.");
             Epoch = (bytes[3] << 8) | bytes[4];
             long seq = 0;
             for (int i = 5; i <= 10; i++) seq = (seq << 8) | bytes[i];

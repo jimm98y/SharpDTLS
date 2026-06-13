@@ -22,7 +22,8 @@ namespace SharpDTLS.DTLS10
     //   7. Application data exchange
     public class Dtls10Client
     {
-        public event EventHandler<EventArgs> HandshakeFinished;
+        public event EventHandler<EventArgs>     HandshakeFinished;
+        public event EventHandler<AlertDatagram> AlertReceived;
 
         public Dtls10Session Session { get; } = new Dtls10Session();
         public IClientTransport ClientTransport { get; }
@@ -99,6 +100,8 @@ namespace SharpDTLS.DTLS10
                     HandleChangeCipherSpec(data);
                 else if (recordType == 0x17)
                     HandleApplicationData(data);
+                else if (recordType == 0x15)
+                    HandleAlert(data);
             }
             catch (Exception ex)
             {
@@ -370,6 +373,30 @@ namespace SharpDTLS.DTLS10
             enc.FromBytes(data);
             var appData = enc.Datagram as ApplicationDataDatagram;
             Console.WriteLine($"[DTLS10 Client] AppData from server: {Encoding.UTF8.GetString(appData.Data)}");
+        }
+
+        private void HandleAlert(byte[] data)
+        {
+            AlertDatagram alert;
+
+            if (_handshakeComplete && Session.CryptoContext != null)
+            {
+                var enc = new ServerEncryptedDatagram(Session.CryptoContext)
+                {
+                    Epoch          = 1,
+                    SequenceNumber = Session.CryptoContext.ServerSequenceNumber++,
+                };
+                enc.FromBytes(data);
+                alert = enc.Datagram as AlertDatagram;
+            }
+            else
+            {
+                alert = new AlertDatagram();
+                alert.FromBytes(data);
+            }
+
+            Debug.WriteLine($"[DTLS10 Client] Received Alert level={alert.Level} desc={alert.Description}");
+            AlertReceived?.Invoke(this, alert);
         }
 
         public void SendApplicationData(byte[] data)

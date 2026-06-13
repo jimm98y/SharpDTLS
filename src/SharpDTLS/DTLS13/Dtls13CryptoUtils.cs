@@ -327,5 +327,43 @@ namespace SharpDTLS.DTLS13
             hmac.DoFinal(mac, 0);
             return mac;
         }
+
+        // RFC 8446 §7.2: application_traffic_secret_N+1 =
+        //   HKDF-Expand-Label(application_traffic_secret_N, "traffic upd", "", Hash.length)
+        public static Dtls13CryptoContext UpdateClientTrafficSecret(Dtls13CryptoContext current)
+        {
+            var crypto  = new BcTlsCrypto();
+            var hashAlg = CryptoHashAlgorithm.sha256;
+
+            var newClientSecret = HkdfExpandLabel(new BcTlsSecret(crypto, current.ClientSecret), hashAlg, "traffic upd", new byte[0], 32).Extract();
+            var newClientKey    = HkdfExpandLabel(new BcTlsSecret(crypto, newClientSecret),      hashAlg, "key",         new byte[0], 16).Extract();
+            var newClientIv     = HkdfExpandLabel(new BcTlsSecret(crypto, newClientSecret),      hashAlg, "iv",          new byte[0], 12).Extract();
+            var newClientSnKey  = HkdfExpandLabel(new BcTlsSecret(crypto, newClientSecret),      hashAlg, "sn",          new byte[0], 16).Extract();
+
+            return new Dtls13CryptoContext(
+                current.ClientRandom, current.Secret,
+                newClientSecret, current.ServerSecret,
+                newClientKey,    newClientIv,
+                current.ServerKey, current.ServerIv,
+                newClientSnKey,  current.ServerSnKey);
+        }
+
+        public static Dtls13CryptoContext UpdateServerTrafficSecret(Dtls13CryptoContext current)
+        {
+            var crypto  = new BcTlsCrypto();
+            var hashAlg = CryptoHashAlgorithm.sha256;
+
+            var newServerSecret = HkdfExpandLabel(new BcTlsSecret(crypto, current.ServerSecret), hashAlg, "traffic upd", new byte[0], 32).Extract();
+            var newServerKey    = HkdfExpandLabel(new BcTlsSecret(crypto, newServerSecret),      hashAlg, "key",         new byte[0], 16).Extract();
+            var newServerIv     = HkdfExpandLabel(new BcTlsSecret(crypto, newServerSecret),      hashAlg, "iv",          new byte[0], 12).Extract();
+            var newServerSnKey  = HkdfExpandLabel(new BcTlsSecret(crypto, newServerSecret),      hashAlg, "sn",          new byte[0], 16).Extract();
+
+            return new Dtls13CryptoContext(
+                current.ClientRandom, current.Secret,
+                current.ClientSecret, newServerSecret,
+                current.ClientKey,    current.ClientIv,
+                newServerKey,         newServerIv,
+                current.ClientSnKey,  newServerSnKey);
+        }
     }
 }

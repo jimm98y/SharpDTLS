@@ -84,6 +84,10 @@ namespace SharpDTLS.DTLS10.Messages
             {
                 Datagram = new ApplicationDataDatagram();
             }
+            else if (ContentType == 0x15)
+            {
+                Datagram = new AlertDatagram();
+            }
             else
             {
                 throw new NotSupportedException($"Unsupported content type 0x{ContentType:X2}");

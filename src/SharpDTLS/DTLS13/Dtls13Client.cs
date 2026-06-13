@@ -28,7 +28,9 @@ namespace SharpDTLS.DTLS13
         private readonly SortedDictionary<int, byte[]> _handshakeReorderBuffer = new();
         private readonly HandshakeReassembler _reassembler = new();
 
-        public event EventHandler<EventArgs> HandshakeFinished;
+        public event EventHandler<EventArgs>                 HandshakeFinished;
+        public event EventHandler<NewSessionTicketDatagram> NewSessionTicketReceived;
+        public event EventHandler<KeyUpdateDatagram>        KeyUpdateReceived;
 
         public Dtls13Session Session { get; } = new Dtls13Session();
         public IClientTransport ClientTransport { get; }
@@ -284,19 +286,37 @@ namespace SharpDTLS.DTLS13
                 Session.RecordNumber = 0;
 
                 HandshakeFinished?.Invoke(this, EventArgs.Empty);
+                return;
             }
-            else
+
+            var record = new ServerEncryptedDatagram(Session.ServerApplicationKeys);
+            record.FromBytes(data);
+            Session.ServerApplicationKeys.ServerKeyUseCounter++;
+
+            switch (record.Datagram)
             {
-                var enc = new ServerEncryptedDatagram(Session.ServerApplicationKeys);
-                enc.FromBytes(data);
-                var appData = enc.Datagram as ApplicationDataDatagram;
-                Session.ServerApplicationKeys.ServerKeyUseCounter++;
+                case ApplicationDataDatagram appData:
+                    Debug.WriteLine($"[DTLS13 Client] Received app data: {Encoding.UTF8.GetString(appData.Data)}");
+                    await Task.Delay(1000);
+                    SendApplicationData(Encoding.UTF8.GetBytes("Hello from client!"));
+                    break;
 
-                Debug.WriteLine($"Received server application data: {Encoding.UTF8.GetString(appData.Data)}");
+                case NewSessionTicketDatagram nst:
+                    Debug.WriteLine($"[DTLS13 Client] Received NewSessionTicket (lifetime={nst.TicketLifetime}s)");
+                    NewSessionTicketReceived?.Invoke(this, nst);
+                    break;
 
-                await Task.Delay(1000);
+                case KeyUpdateDatagram keyUpdate:
+                    Debug.WriteLine($"[DTLS13 Client] Received KeyUpdate (update_request=0x{keyUpdate.UpdateRequest:X2})");
+                    Session.ServerApplicationKeys = Dtls13CryptoUtils.UpdateServerTrafficSecret(Session.ServerApplicationKeys);
+                    KeyUpdateReceived?.Invoke(this, keyUpdate);
+                    if (keyUpdate.UpdateRequest == 0x01)
+                        SendKeyUpdate(requestUpdate: false);
+                    break;
 
-                SendApplicationData(Encoding.UTF8.GetBytes("Hello from client!"));
+                default:
+                    Debug.WriteLine($"[DTLS13 Client] Received unknown post-handshake record, ignoring");
+                    break;
             }
         }
 
@@ -323,6 +343,22 @@ namespace SharpDTLS.DTLS13
             var encryptedApplicationDataBytes = encryptedApplicationData.ToBytes();
             Session.ServerApplicationKeys.ClientKeyUseCounter++;
             ClientTransport.Send(encryptedApplicationDataBytes);
+        }
+
+        // Sends a KeyUpdate handshake message and updates the client write keys.
+        // Set requestUpdate=true to ask the peer to perform a key update as well.
+        public void SendKeyUpdate(bool requestUpdate = false)
+        {
+            var keyUpdate = new KeyUpdateDatagram(requestUpdate ? (byte)0x01 : (byte)0x00);
+            var enc = new ClientEncryptedDatagram(Session.ServerApplicationKeys, keyUpdate)
+            {
+                Epoch        = Session.Epoch,
+                RecordNumber = Session.RecordNumber++,
+            };
+            ClientTransport.Send(enc.ToBytes());
+            Session.ServerApplicationKeys.ClientKeyUseCounter++;
+            Session.ServerApplicationKeys = Dtls13CryptoUtils.UpdateClientTrafficSecret(Session.ServerApplicationKeys);
+            Debug.WriteLine($"[DTLS13 Client] Sent KeyUpdate (update_request=0x{keyUpdate.UpdateRequest:X2}), rotated client write keys");
         }
     }
 }
