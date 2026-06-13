@@ -152,9 +152,14 @@ namespace SharpDTLS.DTLS10
                 ? clientHello.Extensions.OfType<DTLS12.Messages.UseSrtpExtension>().First().ProtectionProfiles[0]
                 : (ushort)0;
 
-            ushort cipherSuite = clientHello.CipherSuites.Contains((ushort)0xC013)
-                ? (ushort)0xC013
-                : clientHello.CipherSuites.First();
+            // Prefer ECDSA suites when using an EC certificate; prefer 128-bit over 256-bit.
+            bool isEcKey = _serverCertificateKeyPair.Private is ECPrivateKeyParameters;
+            ushort[] preferred = isEcKey
+                ? new ushort[] { 0xC009, 0xC00A, 0xC013, 0xC014 }
+                : new ushort[] { 0xC013, 0xC014, 0xC009, 0xC00A };
+            ushort cipherSuite = preferred.FirstOrDefault(s => clientHello.CipherSuites.Contains(s));
+            if (cipherSuite == 0) cipherSuite = clientHello.CipherSuites.First();
+            session.CipherSuite = cipherSuite;
 
             var serverHello = new ServerHelloDatagram(cipherSuite, session.ServerRandom,
                 clientWantsSrtp, srtpProfile)
@@ -179,7 +184,6 @@ namespace SharpDTLS.DTLS10
             byte[] ecParams = BuildEcParams(serverPubKey);
             byte[] toSign   = session.ClientRandom.Concat(session.ServerRandom).Concat(ecParams).ToArray();
 
-            bool isEcKey = _serverCertificateKeyPair.Private is ECPrivateKeyParameters;
             ISigner signer = SignerUtilities.GetSigner(isEcKey ? "SHA256WITHECDSA" : "SHA1WITHRSA");
             signer.Init(true, _serverCertificateKeyPair.Private);
             signer.BlockUpdate(toSign, 0, toSign.Length);
@@ -216,7 +220,7 @@ namespace SharpDTLS.DTLS10
 
             byte[] preMaster = Dtls10CryptoUtils.DeriveSharedSecretX25519(session.PrivateKey, cke.PublicKey);
             byte[] master    = Dtls10CryptoUtils.CalculateMasterSecret(preMaster, session.ClientRandom, session.ServerRandom);
-            session.CryptoContext = Dtls10CryptoUtils.DeriveKeys(master, session.ClientRandom, session.ServerRandom);
+            session.CryptoContext = Dtls10CryptoUtils.DeriveKeys(master, session.ClientRandom, session.ServerRandom, session.CipherSuite);
 
             Debug.WriteLine($"[DTLS10 Server] master_secret: {Convert.ToHexString(master).ToLower()}");
             Debug.WriteLine($"[DTLS10 Server] client_key: {Convert.ToHexString(session.CryptoContext.ClientKey).ToLower()}");

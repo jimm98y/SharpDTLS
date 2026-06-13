@@ -158,9 +158,14 @@ namespace SharpDTLS.DTLS12
                 ? clientHello.Extensions.OfType<UseSrtpExtension>().First().ProtectionProfiles[0]
                 : (ushort)0;
 
-            ushort cipherSuite = clientHello.CipherSuites.Contains((ushort)0xC02F)
-                ? (ushort)0xC02F
-                : clientHello.CipherSuites.First();
+            // Prefer ECDSA suites when using an EC certificate; AES-128 over AES-256; GCM over ChaCha20.
+            bool isEcKey = _serverCertificateKeyPair.Private is ECPrivateKeyParameters;
+            ushort[] preferred = isEcKey
+                ? new ushort[] { 0xC02B, 0xC02C, 0xCCA9, 0xC02F, 0xC030, 0xCCA8 }
+                : new ushort[] { 0xC02F, 0xC030, 0xCCA8, 0xC02B, 0xC02C, 0xCCA9 };
+            ushort cipherSuite = preferred.FirstOrDefault(s => clientHello.CipherSuites.Contains(s));
+            if (cipherSuite == 0) cipherSuite = clientHello.CipherSuites.First();
+            session.CipherSuite = cipherSuite;
 
             // ServerHello
             var serverHello = new ServerHelloDatagram(cipherSuite, session.ServerRandom,
@@ -188,7 +193,6 @@ namespace SharpDTLS.DTLS12
             byte[] ecParams = BuildEcParams(serverPubKey);
             byte[] toSign   = session.ClientRandom.Concat(session.ServerRandom).Concat(ecParams).ToArray();
 
-            bool isEcKey = _serverCertificateKeyPair.Private is ECPrivateKeyParameters;
             ISigner signer = SignerUtilities.GetSigner(isEcKey ? "SHA256WITHECDSA" : "SHA256WITHRSA");
             signer.Init(true, _serverCertificateKeyPair.Private);
             signer.BlockUpdate(toSign, 0, toSign.Length);
@@ -225,9 +229,10 @@ namespace SharpDTLS.DTLS12
 
             // Derive pre-master secret via ECDHE
             byte[] preMaster = Dtls12CryptoUtils.DeriveSharedSecretX25519(session.PrivateKey, cke.PublicKey);
-            byte[] master    = Dtls12CryptoUtils.CalculateMasterSecret(preMaster, session.ClientRandom, session.ServerRandom);
+            bool   sha384    = session.CipherSuite == 0xC030 || session.CipherSuite == 0xC02C;
+            byte[] master    = Dtls12CryptoUtils.CalculateMasterSecret(preMaster, session.ClientRandom, session.ServerRandom, sha384);
 
-            session.CryptoContext = Dtls12CryptoUtils.DeriveKeys(master, session.ClientRandom, session.ServerRandom);
+            session.CryptoContext = Dtls12CryptoUtils.DeriveKeys(master, session.ClientRandom, session.ServerRandom, session.CipherSuite);
 
             Debug.WriteLine($"[DTLS12 Server] master_secret: {Convert.ToHexString(master).ToLower()}");
             Debug.WriteLine($"[DTLS12 Server] client_key: {Convert.ToHexString(session.CryptoContext.ClientKey).ToLower()}");
@@ -246,20 +251,18 @@ namespace SharpDTLS.DTLS12
             encFinished.FromBytes(data);
             var clientFinished = encFinished.Datagram as FinishedDatagram;
 
-            // Verify client Finished
-            byte[] transcriptHash = Dtls12CryptoUtils.HashTranscript(session.HandshakeMessages);
+            bool   sha384         = session.CryptoContext.UseSha384;
+            byte[] transcriptHash = Dtls12CryptoUtils.HashTranscript(session.HandshakeMessages, sha384);
             byte[] expectedVerify = Dtls12CryptoUtils.CalculateVerifyData(
-                session.CryptoContext.MasterSecret, "client finished", transcriptHash);
+                session.CryptoContext.MasterSecret, "client finished", transcriptHash, sha384);
 
             if (!expectedVerify.SequenceEqual(clientFinished.VerifyData))
                 throw new Exception("Client Finished verify_data mismatch!");
 
             Debug.WriteLine($"[DTLS12 Server] Client Finished verified");
 
-            // Include client Finished in transcript for server Finished computation
             session.HandshakeMessages.Add(encFinished);
 
-            // Send ChangeCipherSpec
             var ccs = new ChangeCipherSpecDatagram
             {
                 Epoch = 0,
@@ -267,10 +270,9 @@ namespace SharpDTLS.DTLS12
             };
             ServerTransport.Send(endpoint, ccs.ToBytes());
 
-            // Send server Finished (encrypted, epoch 1)
-            byte[] serverTranscriptHash = Dtls12CryptoUtils.HashTranscript(session.HandshakeMessages);
+            byte[] serverTranscriptHash = Dtls12CryptoUtils.HashTranscript(session.HandshakeMessages, sha384);
             byte[] serverVerify = Dtls12CryptoUtils.CalculateVerifyData(
-                session.CryptoContext.MasterSecret, "server finished", serverTranscriptHash);
+                session.CryptoContext.MasterSecret, "server finished", serverTranscriptHash, sha384);
 
             var finished = new FinishedDatagram(serverVerify, session.MessageSequenceNumber++);
             var encServerFinished = new ServerEncryptedDatagram(session.CryptoContext, finished)

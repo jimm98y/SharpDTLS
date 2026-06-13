@@ -13,5 +13,6 @@ namespace SharpDTLS.DTLS10
         public ushort Epoch { get; set; } = 0;
         public byte[] ClientRandom { get; set; }
         public byte[] ServerRandom { get; set; }
+        public ushort CipherSuite { get; set; } = 0xC013;
     }
 }

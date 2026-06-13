@@ -115,17 +115,20 @@ namespace SharpDTLS.DTLS10
             return PRF(preMasterSecret, "master secret", seed, 48);
         }
 
-        // For TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA:
-        //   clientMacKey(20) + serverMacKey(20) + clientKey(16) + serverKey(16) = 72 bytes
-        public static Dtls10CryptoContext DeriveKeys(byte[] masterSecret, byte[] clientRandom, byte[] serverRandom)
+        // Key block: clientMacKey(20) + serverMacKey(20) + clientKey(keyLen) + serverKey(keyLen)
+        // keyLen: 16 for AES-128 suites (0xC013, 0xC009), 32 for AES-256 (0xC014, 0xC00A)
+        public static Dtls10CryptoContext DeriveKeys(byte[] masterSecret, byte[] clientRandom, byte[] serverRandom, ushort cipherSuite = 0xC013)
         {
+            int keyLen = cipherSuite == 0xC014 || cipherSuite == 0xC00A ? 32 : 16;
+            int keyBlockLen = 20 + 20 + keyLen + keyLen;
+
             byte[] seed     = serverRandom.Concat(clientRandom).ToArray();
-            byte[] keyBlock = PRF(masterSecret, "key expansion", seed, 72);
+            byte[] keyBlock = PRF(masterSecret, "key expansion", seed, keyBlockLen);
 
             byte[] clientMacKey = keyBlock.Take(20).ToArray();
             byte[] serverMacKey = keyBlock.Skip(20).Take(20).ToArray();
-            byte[] clientKey    = keyBlock.Skip(40).Take(16).ToArray();
-            byte[] serverKey    = keyBlock.Skip(56).Take(16).ToArray();
+            byte[] clientKey    = keyBlock.Skip(40).Take(keyLen).ToArray();
+            byte[] serverKey    = keyBlock.Skip(40 + keyLen).Take(keyLen).ToArray();
 
             return new Dtls10CryptoContext(masterSecret, clientMacKey, serverMacKey, clientKey, serverKey);
         }

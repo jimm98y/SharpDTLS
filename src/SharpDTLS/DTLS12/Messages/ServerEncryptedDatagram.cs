@@ -1,3 +1,4 @@
+using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Modes;
 using Org.BouncyCastle.Crypto.Parameters;
 using System;
@@ -5,21 +6,24 @@ using System.Linq;
 
 namespace SharpDTLS.DTLS12.Messages
 {
-    // Wraps a server-sent DTLS 1.2 record encrypted with AES-128-GCM.
+    // Wraps a server-sent DTLS 1.2 encrypted record.
     //
-    // Wire format:
+    // AES-GCM wire format:
     //   DTLS record header (13 bytes): type | version(2) | epoch(2) | seq(6) | length(2)
-    //   explicit_nonce (8 bytes): epoch(2) || seq_num(6)   — prepended to ciphertext
+    //   explicit_nonce (8 bytes): epoch(2) || seq_num(6)
     //   ciphertext + GCM tag (16 bytes)
+    //   Nonce = server_write_IV(4) || explicit_nonce(8)
     //
-    // Nonce = server_write_IV(4) || explicit_nonce(8)    = 12 bytes
-    // AAD   = epoch(2) || seq(6) || content_type(1) || version(2) || plaintext_length(2)
+    // ChaCha20-Poly1305 wire format (RFC 7905):
+    //   DTLS record header (13 bytes)
+    //   ciphertext + Poly1305 tag (16 bytes)  — no explicit nonce field
+    //   Nonce = server_write_IV(12) XOR (0x00x4 || epoch(2) || seq(6))
     public class ServerEncryptedDatagram : IDatagram
     {
         private readonly Dtls12CryptoContext _ctx;
 
         public IDatagram Datagram { get; set; }
-        public byte ContentType { get; set; } = 0x16; // 0x16 = Handshake, 0x17 = ApplicationData
+        public byte ContentType { get; set; } = 0x16;
         public ushort Epoch { get; set; } = 1;
         public ulong SequenceNumber { get; set; }
         public byte[] Bytes { get; private set; }
@@ -39,7 +43,6 @@ namespace SharpDTLS.DTLS12.Messages
         public void FromBytes(byte[] bytes)
         {
             if (bytes == null) throw new ArgumentNullException(nameof(bytes));
-
             Bytes = bytes.ToArray();
 
             ContentType = bytes[0];
@@ -49,130 +52,150 @@ namespace SharpDTLS.DTLS12.Messages
             SequenceNumber = seq;
 
             ushort recordLen = (ushort)((bytes[11] << 8) | bytes[12]);
+            byte[] plaintext;
 
-            // explicit_nonce: bytes[13..20]
-            byte[] explicitNonce = new byte[8];
-            Buffer.BlockCopy(bytes, 13, explicitNonce, 0, 8);
-
-            // Build 12-byte GCM nonce
-            byte[] nonce = new byte[12];
-            Buffer.BlockCopy(_ctx.ServerIv, 0, nonce, 0, 4);
-            Buffer.BlockCopy(explicitNonce, 0, nonce, 4, 8);
-
-            int ciphertextLen = recordLen - 8; // subtract explicit_nonce
-            int plaintextLen  = ciphertextLen - 16; // subtract tag
-
-            // AAD = epoch(2) + seq(6) + contentType(1) + version(2) + plaintextLen(2)
-            byte[] aad = BuildAad(bytes, plaintextLen);
-
-            // Copy ciphertext+tag into work buffer (bytes[21..21+ciphertextLen-1])
-            byte[] work = new byte[ciphertextLen];
-            Buffer.BlockCopy(bytes, 21, work, 0, ciphertextLen);
-
-            Decrypt(_ctx.AeadDecryptEngine, work, 0, ciphertextLen, nonce, new KeyParameter(_ctx.ServerKey), 16, aad);
-
-            byte[] plaintext = work.Take(plaintextLen).ToArray();
-
-            // Dispatch based on content type and (for handshake) the first byte
-            if (ContentType == 0x16)
+            if (_ctx.IsChaCha20)
             {
-                Datagram = plaintext[0] switch
-                {
-                    0x14 => new FinishedDatagram(),
-                    _ => throw new NotSupportedException($"Unknown handshake type 0x{plaintext[0]:X2}")
-                };
-            }
-            else if (ContentType == 0x17)
-            {
-                Datagram = new ApplicationDataDatagram();
+                // No explicit nonce; ciphertext starts at offset 13
+                int ciphertextLen = recordLen;
+                int plaintextLen  = ciphertextLen - 16;
+                byte[] nonce = BuildChaCha20Nonce(_ctx.ServerIv, Epoch, SequenceNumber);
+                byte[] aad   = BuildAad(bytes, plaintextLen);
+
+                byte[] work = new byte[ciphertextLen];
+                Buffer.BlockCopy(bytes, 13, work, 0, ciphertextLen);
+                AeadProcess(false, _ctx.ChaChaDecryptEngine, work, 0, ciphertextLen, nonce, _ctx.ServerKey, 16, aad);
+                plaintext = work.Take(plaintextLen).ToArray();
             }
             else
             {
-                throw new NotSupportedException($"Unsupported content type 0x{ContentType:X2}");
+                // GCM: 8-byte explicit nonce precedes ciphertext
+                byte[] explicitNonce = new byte[8];
+                Buffer.BlockCopy(bytes, 13, explicitNonce, 0, 8);
+                byte[] nonce = new byte[12];
+                Buffer.BlockCopy(_ctx.ServerIv, 0, nonce, 0, 4);
+                Buffer.BlockCopy(explicitNonce, 0, nonce, 4, 8);
+
+                int ciphertextLen = recordLen - 8;
+                int plaintextLen  = ciphertextLen - 16;
+                byte[] aad  = BuildAad(bytes, plaintextLen);
+                byte[] work = new byte[ciphertextLen];
+                Buffer.BlockCopy(bytes, 21, work, 0, ciphertextLen);
+                AeadProcess(false, _ctx.AeadDecryptEngine, work, 0, ciphertextLen, nonce, _ctx.ServerKey, 16, aad);
+                plaintext = work.Take(plaintextLen).ToArray();
             }
+
+            Datagram = ContentType == 0x16
+                ? plaintext[0] switch
+                {
+                    0x14 => new FinishedDatagram(),
+                    _ => throw new NotSupportedException($"Unknown handshake type 0x{plaintext[0]:X2}")
+                }
+                : ContentType == 0x17
+                    ? (IDatagram)new ApplicationDataDatagram()
+                    : throw new NotSupportedException($"Unsupported content type 0x{ContentType:X2}");
 
             Datagram.FromBytes(plaintext);
         }
 
         public byte[] ToBytes()
         {
-            byte[] plaintext = Datagram.ToBytes();
-            int plaintextLen = plaintext.Length;
+            byte[] plaintext    = Datagram.ToBytes();
+            int    plaintextLen = plaintext.Length;
 
-            // explicit_nonce = epoch(2) || seq(6)
-            byte[] explicitNonce = new byte[8];
-            explicitNonce[0] = (byte)((Epoch >> 8) & 0xFF);
-            explicitNonce[1] = (byte)(Epoch & 0xFF);
-            explicitNonce[2] = (byte)((SequenceNumber >> 40) & 0xFF);
-            explicitNonce[3] = (byte)((SequenceNumber >> 32) & 0xFF);
-            explicitNonce[4] = (byte)((SequenceNumber >> 24) & 0xFF);
-            explicitNonce[5] = (byte)((SequenceNumber >> 16) & 0xFF);
-            explicitNonce[6] = (byte)((SequenceNumber >> 8) & 0xFF);
-            explicitNonce[7] = (byte)(SequenceNumber & 0xFF);
+            if (_ctx.IsChaCha20)
+            {
+                byte[] nonce = BuildChaCha20Nonce(_ctx.ServerIv, Epoch, SequenceNumber);
+                int recordBodyLen = plaintextLen + 16; // ciphertext + tag, no explicit nonce
+                byte[] buf = new byte[13 + recordBodyLen];
 
-            byte[] nonce = new byte[12];
-            Buffer.BlockCopy(_ctx.ServerIv, 0, nonce, 0, 4);
-            Buffer.BlockCopy(explicitNonce, 0, nonce, 4, 8);
+                WriteRecordHeader(buf, ContentType, Epoch, SequenceNumber, recordBodyLen);
+                Buffer.BlockCopy(plaintext, 0, buf, 13, plaintextLen);
 
-            int recordBodyLen = 8 + plaintextLen + 16; // nonce(8) + ciphertext + tag(16)
-            byte[] buf = new byte[13 + recordBodyLen];
+                byte[] aad = BuildAad(buf, plaintextLen);
+                AeadProcess(true, _ctx.ChaChaEncryptEngine, buf, 13, 13 + plaintextLen, nonce, _ctx.ServerKey, 16, aad);
 
-            // DTLS record header
-            buf[0] = ContentType;
-            buf[1] = 0xFE; buf[2] = 0xFD;
-            buf[3] = (byte)((Epoch >> 8) & 0xFF);
-            buf[4] = (byte)(Epoch & 0xFF);
-            buf[5]  = (byte)((SequenceNumber >> 40) & 0xFF);
-            buf[6]  = (byte)((SequenceNumber >> 32) & 0xFF);
-            buf[7]  = (byte)((SequenceNumber >> 24) & 0xFF);
-            buf[8]  = (byte)((SequenceNumber >> 16) & 0xFF);
-            buf[9]  = (byte)((SequenceNumber >> 8) & 0xFF);
-            buf[10] = (byte)(SequenceNumber & 0xFF);
-            buf[11] = (byte)((recordBodyLen >> 8) & 0xFF);
-            buf[12] = (byte)(recordBodyLen & 0xFF);
+                Bytes = buf;
+            }
+            else
+            {
+                byte[] explicitNonce = BuildExplicitNonce(Epoch, SequenceNumber);
+                byte[] nonce = new byte[12];
+                Buffer.BlockCopy(_ctx.ServerIv, 0, nonce, 0, 4);
+                Buffer.BlockCopy(explicitNonce, 0, nonce, 4, 8);
 
-            // explicit_nonce
-            Buffer.BlockCopy(explicitNonce, 0, buf, 13, 8);
+                int recordBodyLen = 8 + plaintextLen + 16;
+                byte[] buf = new byte[13 + recordBodyLen];
 
-            // plaintext → will become ciphertext+tag in place
-            Buffer.BlockCopy(plaintext, 0, buf, 21, plaintextLen);
+                WriteRecordHeader(buf, ContentType, Epoch, SequenceNumber, recordBodyLen);
+                Buffer.BlockCopy(explicitNonce, 0, buf, 13, 8);
+                Buffer.BlockCopy(plaintext, 0, buf, 21, plaintextLen);
 
-            byte[] aad = BuildAad(buf, plaintextLen);
-            Encrypt(_ctx.AeadEncryptEngine, buf, 21, 21 + plaintextLen, nonce, new KeyParameter(_ctx.ServerKey), 16, aad);
+                byte[] aad = BuildAad(buf, plaintextLen);
+                AeadProcess(true, _ctx.AeadEncryptEngine, buf, 21, 21 + plaintextLen, nonce, _ctx.ServerKey, 16, aad);
 
-            Bytes = buf;
+                Bytes = buf;
+            }
+
             return Bytes;
+        }
+
+        // Nonce for ChaCha20-Poly1305 = IV XOR (zeros(4) || epoch(2) || seq(6))
+        private static byte[] BuildChaCha20Nonce(byte[] iv, ushort epoch, ulong seq)
+        {
+            byte[] seqPadded = new byte[12];
+            seqPadded[4]  = (byte)((epoch >> 8) & 0xFF);
+            seqPadded[5]  = (byte)(epoch & 0xFF);
+            seqPadded[6]  = (byte)((seq >> 40) & 0xFF);
+            seqPadded[7]  = (byte)((seq >> 32) & 0xFF);
+            seqPadded[8]  = (byte)((seq >> 24) & 0xFF);
+            seqPadded[9]  = (byte)((seq >> 16) & 0xFF);
+            seqPadded[10] = (byte)((seq >> 8)  & 0xFF);
+            seqPadded[11] = (byte)(seq & 0xFF);
+            byte[] nonce = new byte[12];
+            for (int i = 0; i < 12; i++) nonce[i] = (byte)(iv[i] ^ seqPadded[i]);
+            return nonce;
+        }
+
+        private static byte[] BuildExplicitNonce(ushort epoch, ulong seq)
+        {
+            var n = new byte[8];
+            n[0] = (byte)((epoch >> 8) & 0xFF); n[1] = (byte)(epoch & 0xFF);
+            n[2] = (byte)((seq >> 40) & 0xFF);  n[3] = (byte)((seq >> 32) & 0xFF);
+            n[4] = (byte)((seq >> 24) & 0xFF);  n[5] = (byte)((seq >> 16) & 0xFF);
+            n[6] = (byte)((seq >> 8)  & 0xFF);  n[7] = (byte)(seq & 0xFF);
+            return n;
         }
 
         private static byte[] BuildAad(byte[] record, int plaintextLen)
         {
-            // epoch(2) + seq(6) + content_type(1) + version(2) + plaintext_length(2)
             byte[] aad = new byte[13];
-            Buffer.BlockCopy(record, 3, aad, 0, 8);  // epoch + seq
-            aad[8]  = record[0];                      // content_type
-            aad[9]  = record[1];                      // version MSB
-            aad[10] = record[2];                      // version LSB
+            Buffer.BlockCopy(record, 3, aad, 0, 8);
+            aad[8]  = record[0];
+            aad[9]  = record[1];
+            aad[10] = record[2];
             aad[11] = (byte)((plaintextLen >> 8) & 0xFF);
             aad[12] = (byte)(plaintextLen & 0xFF);
             return aad;
         }
 
-        private static void Encrypt(IAeadBlockCipher engine, byte[] buf, int offset, int end,
-            byte[] iv, KeyParameter key, int tagBytes, byte[] aad)
+        private static void WriteRecordHeader(byte[] buf, byte contentType, ushort epoch, ulong seq, int bodyLen)
         {
-            int len = end - offset;
-            var p = new AeadParameters(key, tagBytes << 3, iv, aad);
-            engine.Init(true, p);
-            int written = engine.ProcessBytes(buf, offset, len, buf, offset);
-            engine.DoFinal(buf, offset + written);
+            buf[0] = contentType;
+            buf[1] = 0xFE; buf[2] = 0xFD;
+            buf[3] = (byte)((epoch >> 8) & 0xFF); buf[4] = (byte)(epoch & 0xFF);
+            buf[5]  = (byte)((seq >> 40) & 0xFF); buf[6]  = (byte)((seq >> 32) & 0xFF);
+            buf[7]  = (byte)((seq >> 24) & 0xFF); buf[8]  = (byte)((seq >> 16) & 0xFF);
+            buf[9]  = (byte)((seq >> 8)  & 0xFF); buf[10] = (byte)(seq & 0xFF);
+            buf[11] = (byte)((bodyLen >> 8) & 0xFF); buf[12] = (byte)(bodyLen & 0xFF);
         }
 
-        private static void Decrypt(IAeadBlockCipher engine, byte[] buf, int offset, int end,
-            byte[] iv, KeyParameter key, int tagBytes, byte[] aad)
+        private static void AeadProcess(bool encrypt, IAeadCipher engine, byte[] buf, int offset, int end,
+            byte[] nonce, byte[] key, int tagBytes, byte[] aad)
         {
             int len = end - offset;
-            var p = new AeadParameters(key, tagBytes << 3, iv, aad);
-            engine.Init(false, p);
+            var p = new AeadParameters(new KeyParameter(key), tagBytes << 3, nonce, aad);
+            engine.Init(encrypt, p);
             int written = engine.ProcessBytes(buf, offset, len, buf, offset);
             engine.DoFinal(buf, offset + written);
         }

@@ -179,6 +179,7 @@ namespace SharpDTLS.DTLS10
             _serverHello = new ServerHelloDatagram();
             _serverHello.FromBytes(data);
             Session.ServerRandom = _serverHello.ServerRandom;
+            Session.CipherSuite  = _serverHello.SelectedCipherSuite;
             Session.HandshakeMessages.Add(_serverHello);
             Debug.WriteLine($"[DTLS10 Client] Received ServerHello, cipher=0x{_serverHello.SelectedCipherSuite:X4}");
         }
@@ -236,7 +237,7 @@ namespace SharpDTLS.DTLS10
 
             byte[] preMaster = Dtls10CryptoUtils.DeriveSharedSecretX25519(Session.PrivateKey, _serverKex.PublicKey);
             byte[] master    = Dtls10CryptoUtils.CalculateMasterSecret(preMaster, Session.ClientRandom, Session.ServerRandom);
-            Session.CryptoContext = Dtls10CryptoUtils.DeriveKeys(master, Session.ClientRandom, Session.ServerRandom);
+            Session.CryptoContext = Dtls10CryptoUtils.DeriveKeys(master, Session.ClientRandom, Session.ServerRandom, Session.CipherSuite);
 
             Debug.WriteLine($"[DTLS10 Client] master_secret: {Convert.ToHexString(master).ToLower()}");
             Debug.WriteLine($"[DTLS10 Client] client_key: {Convert.ToHexString(Session.CryptoContext.ClientKey).ToLower()}");

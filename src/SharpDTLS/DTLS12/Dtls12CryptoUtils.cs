@@ -27,20 +27,20 @@ namespace SharpDTLS.DTLS12
             new SecureRandom().NextBytes(_cookieKey);
         }
 
-        // TLS 1.2 PRF = P_SHA256
-        public static byte[] PRF(byte[] secret, string label, byte[] seed, int length)
+        // TLS 1.2 PRF: P_SHA256 by default; P_SHA384 for AES-256-GCM-SHA384 suites.
+        public static byte[] PRF(byte[] secret, string label, byte[] seed, int length, bool useSha384 = false)
         {
             byte[] labelBytes = Encoding.ASCII.GetBytes(label);
             byte[] fullSeed = labelBytes.Concat(seed).ToArray();
-            return P_SHA256(secret, fullSeed, length);
+            return useSha384 ? P_Hash(new Sha384Digest(), secret, fullSeed, length)
+                             : P_Hash(new Sha256Digest(), secret, fullSeed, length);
         }
 
-        private static byte[] P_SHA256(byte[] secret, byte[] seed, int length)
+        private static byte[] P_Hash(IDigest digest, byte[] secret, byte[] seed, int length)
         {
             var result = new List<byte>();
-            var hmac = new HMac(new Sha256Digest());
+            var hmac = new HMac(digest);
 
-            // A(1) = HMAC(secret, seed)
             hmac.Init(new KeyParameter(secret));
             hmac.BlockUpdate(seed, 0, seed.Length);
             byte[] a = new byte[hmac.GetMacSize()];
@@ -48,7 +48,6 @@ namespace SharpDTLS.DTLS12
 
             while (result.Count < length)
             {
-                // output_i = HMAC(secret, A(i) + seed)
                 hmac.Reset();
                 hmac.Init(new KeyParameter(secret));
                 hmac.BlockUpdate(a, 0, a.Length);
@@ -57,7 +56,6 @@ namespace SharpDTLS.DTLS12
                 hmac.DoFinal(output, 0);
                 result.AddRange(output);
 
-                // A(i+1) = HMAC(secret, A(i))
                 hmac.Reset();
                 hmac.Init(new KeyParameter(secret));
                 hmac.BlockUpdate(a, 0, a.Length);
@@ -69,38 +67,45 @@ namespace SharpDTLS.DTLS12
             return result.Take(length).ToArray();
         }
 
-        public static byte[] CalculateMasterSecret(byte[] preMasterSecret, byte[] clientRandom, byte[] serverRandom)
+        public static byte[] CalculateMasterSecret(byte[] preMasterSecret, byte[] clientRandom, byte[] serverRandom, bool useSha384 = false)
         {
             byte[] seed = clientRandom.Concat(serverRandom).ToArray();
-            return PRF(preMasterSecret, "master secret", seed, 48);
+            return PRF(preMasterSecret, "master secret", seed, 48, useSha384);
         }
 
-        // Derives keys for TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256:
-        // client_write_key(16) + server_write_key(16) + client_write_IV(4) + server_write_IV(4)
-        public static Dtls12CryptoContext DeriveKeys(byte[] masterSecret, byte[] clientRandom, byte[] serverRandom)
+        // Key block layout:
+        //   AES-128-GCM (0xC02F, 0xC02B):  clientKey(16)+serverKey(16)+clientIV(4)+serverIV(4)   = 40 bytes, P_SHA256
+        //   AES-256-GCM (0xC030, 0xC02C):  clientKey(32)+serverKey(32)+clientIV(4)+serverIV(4)   = 72 bytes, P_SHA384
+        //   ChaCha20    (0xCCA8, 0xCCA9):  clientKey(32)+serverKey(32)+clientIV(12)+serverIV(12) = 88 bytes, P_SHA256
+        public static Dtls12CryptoContext DeriveKeys(byte[] masterSecret, byte[] clientRandom, byte[] serverRandom, ushort cipherSuite = 0xC02F)
         {
-            byte[] seed = serverRandom.Concat(clientRandom).ToArray();
-            byte[] keyBlock = PRF(masterSecret, "key expansion", seed, 40);
+            bool isChaCha20 = cipherSuite == 0xCCA8 || cipherSuite == 0xCCA9;
+            bool useSha384  = cipherSuite == 0xC030 || cipherSuite == 0xC02C;
+            int  keyLen     = (cipherSuite == 0xC02F || cipherSuite == 0xC02B) ? 16 : 32;
+            int  ivLen      = isChaCha20 ? 12 : 4;
+            int  keyBlockLen = 2 * keyLen + 2 * ivLen;
 
-            byte[] clientKey = keyBlock.Take(16).ToArray();
-            byte[] serverKey = keyBlock.Skip(16).Take(16).ToArray();
-            byte[] clientIv  = keyBlock.Skip(32).Take(4).ToArray();
-            byte[] serverIv  = keyBlock.Skip(36).Take(4).ToArray();
+            byte[] seed     = serverRandom.Concat(clientRandom).ToArray();
+            byte[] keyBlock = PRF(masterSecret, "key expansion", seed, keyBlockLen, useSha384);
 
-            return new Dtls12CryptoContext(masterSecret, clientKey, serverKey, clientIv, serverIv);
+            byte[] clientKey = keyBlock.Take(keyLen).ToArray();
+            byte[] serverKey = keyBlock.Skip(keyLen).Take(keyLen).ToArray();
+            byte[] clientIv  = keyBlock.Skip(2 * keyLen).Take(ivLen).ToArray();
+            byte[] serverIv  = keyBlock.Skip(2 * keyLen + ivLen).Take(ivLen).ToArray();
+
+            return new Dtls12CryptoContext(masterSecret, clientKey, serverKey, clientIv, serverIv, cipherSuite);
         }
 
-        public static byte[] CalculateVerifyData(byte[] masterSecret, string label, byte[] transcriptHash)
+        public static byte[] CalculateVerifyData(byte[] masterSecret, string label, byte[] transcriptHash, bool useSha384 = false)
         {
-            return PRF(masterSecret, label, transcriptHash, 12);
+            return PRF(masterSecret, label, transcriptHash, 12, useSha384);
         }
 
-        // Hash the DTLS 1.2 handshake transcript using the TLS convention:
-        // each message contributes: msg_type(1) + length(3) + body
-        // (stripping the 13-byte DTLS record header and the 8-byte DTLS reconstruction fields)
-        public static byte[] HashTranscript(List<IDatagram> messages)
+        // Hash the DTLS 1.2 handshake transcript.
+        // SHA-384 is used for cipher suites whose PRF is P_SHA384 (AES-256-GCM-SHA384).
+        public static byte[] HashTranscript(List<IDatagram> messages, bool useSha384 = false)
         {
-            var hash = new Sha256Digest();
+            IDigest hash = useSha384 ? (IDigest)new Sha384Digest() : new Sha256Digest();
 
             foreach (var msg in messages)
             {
@@ -119,7 +124,6 @@ namespace SharpDTLS.DTLS12
                 }
 
                 byte[] bytes = msgToHash.Bytes;
-                // type(1) + length(3) — skip reconstruction fields (msg_seq + frag_offset + frag_len = 8 bytes)
                 byte[] contribution = bytes.Skip(skip).Take(4)
                     .Concat(bytes.Skip(skip + 4 + 8).Take(bytes.Length - skip - 4 - 8))
                     .ToArray();

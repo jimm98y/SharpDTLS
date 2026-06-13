@@ -184,6 +184,7 @@ namespace SharpDTLS.DTLS12
             _serverHello = new ServerHelloDatagram();
             _serverHello.FromBytes(data);
             Session.ServerRandom = _serverHello.ServerRandom;
+            Session.CipherSuite  = _serverHello.SelectedCipherSuite;
             Session.HandshakeMessages.Add(_serverHello);
             Debug.WriteLine($"[DTLS12 Client] Received ServerHello, cipher=0x{_serverHello.SelectedCipherSuite:X4}");
         }
@@ -243,8 +244,9 @@ namespace SharpDTLS.DTLS12
 
             // Derive keys
             byte[] preMaster = Dtls12CryptoUtils.DeriveSharedSecretX25519(Session.PrivateKey, _serverKex.PublicKey);
-            byte[] master    = Dtls12CryptoUtils.CalculateMasterSecret(preMaster, Session.ClientRandom, Session.ServerRandom);
-            Session.CryptoContext = Dtls12CryptoUtils.DeriveKeys(master, Session.ClientRandom, Session.ServerRandom);
+            bool   sha384    = Session.CipherSuite == 0xC030 || Session.CipherSuite == 0xC02C;
+            byte[] master    = Dtls12CryptoUtils.CalculateMasterSecret(preMaster, Session.ClientRandom, Session.ServerRandom, sha384);
+            Session.CryptoContext = Dtls12CryptoUtils.DeriveKeys(master, Session.ClientRandom, Session.ServerRandom, Session.CipherSuite);
 
             Debug.WriteLine($"[DTLS12 Client] master_secret: {Convert.ToHexString(master).ToLower()}");
             Debug.WriteLine($"[DTLS12 Client] client_key: {Convert.ToHexString(Session.CryptoContext.ClientKey).ToLower()}");
@@ -259,9 +261,9 @@ namespace SharpDTLS.DTLS12
             ClientTransport.Send(ccs.ToBytes());
 
             // Finished (encrypted, epoch 1)
-            byte[] transcriptHash = Dtls12CryptoUtils.HashTranscript(Session.HandshakeMessages);
+            byte[] transcriptHash = Dtls12CryptoUtils.HashTranscript(Session.HandshakeMessages, sha384);
             byte[] verifyData = Dtls12CryptoUtils.CalculateVerifyData(
-                Session.CryptoContext.MasterSecret, "client finished", transcriptHash);
+                Session.CryptoContext.MasterSecret, "client finished", transcriptHash, sha384);
 
             var finished = new FinishedDatagram(verifyData, Session.MessageSequenceNumber++);
             var encFinished = new ClientEncryptedDatagram(Session.CryptoContext, finished)
@@ -292,48 +294,23 @@ namespace SharpDTLS.DTLS12
             enc.FromBytes(data);
             var serverFinished = enc.Datagram as FinishedDatagram;
 
-            // At this point session.HandshakeMessages doesn't include client Finished yet
-            // — server Finished is computed over transcript up to and including client Finished
-            // We need to reconstruct that transcript.
-            // The server computed: Hash(ClientHello ... ClientFinished)
-            // We already added client messages; we need to add client Finished too.
-            // For simplicity: rebuild transcript hash as the server would have seen it.
-            // (We track the encrypted Finished we sent as part of the transcript.)
-            // Actually we stored HandshakeMessages without the client Finished above.
-            // Let's compute the hash the same way the server did.
+            bool sha384 = Session.CryptoContext.UseSha384;
 
-            // Build the transcript hash the server used (includes client Finished)
-            // We need to add a synthetic finished to the list temporarily.
-            byte[] transcriptHash = Dtls12CryptoUtils.HashTranscript(Session.HandshakeMessages);
-            // The hash above is without client Finished; we need to add it.
-            // The server re-computed after adding client Finished, so we need the same.
-            // Recompute by adding client Finished contribution manually.
-            byte[] serverExpectedVerify = Dtls12CryptoUtils.CalculateVerifyData(
-                Session.CryptoContext.MasterSecret, "server finished", transcriptHash);
+            // Reconstruct the transcript hash the server used, which includes the client Finished.
+            byte[] transcriptHash = Dtls12CryptoUtils.HashTranscript(Session.HandshakeMessages, sha384);
+            byte[] clientVerify   = Dtls12CryptoUtils.CalculateVerifyData(
+                Session.CryptoContext.MasterSecret, "client finished", transcriptHash, sha384);
 
-            // Hmm — the above is the hash WITHOUT client Finished. Let me correct this.
-            // The server's transcript hash INCLUDES client Finished.
-            // We sent clientFinished but didn't store it in HandshakeMessages.
-            // Rebuild what the server sees: current session messages + client Finished bytes.
-
-            // Since we don't have client Finished stored, compute the client finished data again:
-            byte[] clientVerify = Dtls12CryptoUtils.CalculateVerifyData(
-                Session.CryptoContext.MasterSecret, "client finished", transcriptHash);
-
-            // Now build the full transcript hash including the clientFinished contribution:
-            var allMessages = new List<IDatagram>(Session.HandshakeMessages);
-            var tempFinished = new FinishedDatagram(clientVerify,
-                (ushort)(Session.MessageSequenceNumber - 1));
-            tempFinished.ToBytes(); // populate Bytes
-            // wrap in ClientEncryptedDatagram so HashTranscript knows to skip to inner datagram
+            var allMessages  = new List<IDatagram>(Session.HandshakeMessages);
+            var tempFinished = new FinishedDatagram(clientVerify, (ushort)(Session.MessageSequenceNumber - 1));
+            tempFinished.ToBytes();
             var tempEnc = new ClientEncryptedDatagram(Session.CryptoContext, tempFinished);
             tempEnc.Datagram = tempFinished;
-            // We need Bytes set on the outer; simulate by using inner directly:
             allMessages.Add(tempEnc);
 
-            byte[] fullTranscriptHash = Dtls12CryptoUtils.HashTranscript(allMessages);
+            byte[] fullTranscriptHash = Dtls12CryptoUtils.HashTranscript(allMessages, sha384);
             byte[] expectedVerify = Dtls12CryptoUtils.CalculateVerifyData(
-                Session.CryptoContext.MasterSecret, "server finished", fullTranscriptHash);
+                Session.CryptoContext.MasterSecret, "server finished", fullTranscriptHash, sha384);
 
             if (!expectedVerify.SequenceEqual(serverFinished.VerifyData))
                 throw new Exception("Server Finished verify_data mismatch!");

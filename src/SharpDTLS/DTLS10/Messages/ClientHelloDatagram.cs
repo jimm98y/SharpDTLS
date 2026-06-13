@@ -13,7 +13,8 @@ namespace SharpDTLS.DTLS10.Messages
     public class ClientHelloDatagram : IDatagram
     {
         // TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA, TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA
-        public List<ushort> CipherSuites { get; set; } = new List<ushort> { 0xC013, 0xC014 };
+        // TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA, TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA
+        public List<ushort> CipherSuites { get; set; } = new List<ushort> { 0xC013, 0xC014, 0xC009, 0xC00A };
         public List<ITlsExtension> Extensions { get; private set; } = new List<ITlsExtension>();
         public byte[] ClientRandom { get; set; }
         public byte[] Cookie { get; set; } = Array.Empty<byte>();
