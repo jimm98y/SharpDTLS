@@ -25,8 +25,9 @@ namespace SharpDTLS.DTLS10
         private readonly X509Certificate _serverX509Certificate;
 
         public bool ShouldSendHelloVerify { get; set; } = true;
+        public bool RequireClientCertificate { get; set; } = false;
         public event EventHandler<EventArgs> HandshakeFinished;
-        public ServerTransport ServerTransport { get; }
+        public IServerTransport ServerTransport { get; }
 
         private readonly Dictionary<string, Dtls10Session>  _sessions             = new();
         private readonly Dictionary<string, HandshakeState> _states               = new();
@@ -34,13 +35,15 @@ namespace SharpDTLS.DTLS10
 
         private enum HandshakeState
         {
+            WaitingForClientCertificate,
             WaitingForClientKeyExchange,
+            WaitingForCertificateVerify,
             WaitingForChangeCipherSpec,
             WaitingForFinished,
             Complete
         }
 
-        public Dtls10Server(ServerTransport serverTransport)
+        public Dtls10Server(IServerTransport serverTransport)
         {
             (_serverCertificateKeyPair, _serverX509Certificate) = Dtls10CryptoUtils.GenerateSelfSignedCertificate();
 
@@ -48,7 +51,7 @@ namespace SharpDTLS.DTLS10
             ServerTransport.OnDataReceived += OnDataReceived;
         }
 
-        public Dtls10Server(ServerTransport serverTransport, AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
+        public Dtls10Server(IServerTransport serverTransport, AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
         {
             _serverCertificateKeyPair = keyPair;
             _serverX509Certificate = certificate;
@@ -76,8 +79,12 @@ namespace SharpDTLS.DTLS10
 
                 var state = _states[key];
 
-                if (state == HandshakeState.WaitingForClientKeyExchange && recordType == 0x16)
+                if (state == HandshakeState.WaitingForClientCertificate && recordType == 0x16)
+                    HandleClientCertificate(endpoint, key, session, data);
+                else if (state == HandshakeState.WaitingForClientKeyExchange && recordType == 0x16)
                     HandleClientKeyExchange(endpoint, key, session, data);
+                else if (state == HandshakeState.WaitingForCertificateVerify && recordType == 0x16)
+                    HandleCertificateVerify(endpoint, key, session, data);
                 else if (state == HandshakeState.WaitingForChangeCipherSpec && recordType == 0x14)
                 {
                     var ccs = new ChangeCipherSpecDatagram();
@@ -146,6 +153,13 @@ namespace SharpDTLS.DTLS10
                 ServerRandom = Dtls10CryptoUtils.GenerateRandom(32),
             };
 
+            // Register the session BEFORE sending any messages so that client responses
+            // that arrive synchronously (e.g. in mock/test transports) are routed correctly.
+            _sessions[key] = session;
+            _states[key]   = RequireClientCertificate
+                ? HandshakeState.WaitingForClientCertificate
+                : HandshakeState.WaitingForClientKeyExchange;
+
             bool clientWantsSrtp = clientHello.Extensions
                 .OfType<DTLS12.Messages.UseSrtpExtension>().Any();
             ushort srtpProfile = clientWantsSrtp
@@ -199,6 +213,18 @@ namespace SharpDTLS.DTLS10
             session.HandshakeMessages.Add(serverKeyExchange);
             SendUnencryptedHandshake(endpoint, session, serverKeyExchange.ToBytes());
 
+            if (RequireClientCertificate)
+            {
+                var certRequest = new CertificateRequestDatagram
+                {
+                    RecordSequenceNumber  = session.RecordSequenceNumber++,
+                    MessageSequenceNumber = session.MessageSequenceNumber++,
+                };
+                session.HandshakeMessages.Add(certRequest);
+                SendUnencryptedHandshake(endpoint, session, certRequest.ToBytes());
+                Debug.WriteLine($"[DTLS10 Server] Sent CertificateRequest to {endpoint}");
+            }
+
             var serverHelloDone = new ServerHelloDoneDatagram
             {
                 RecordSequenceNumber  = session.RecordSequenceNumber++,
@@ -207,9 +233,21 @@ namespace SharpDTLS.DTLS10
             session.HandshakeMessages.Add(serverHelloDone);
             SendUnencryptedHandshake(endpoint, session, serverHelloDone.ToBytes());
 
-            _sessions[key] = session;
-            _states[key]   = HandshakeState.WaitingForClientKeyExchange;
             Debug.WriteLine($"[DTLS10 Server] ServerHello flight sent to {endpoint}");
+        }
+
+        private void HandleClientCertificate(EndPoint endpoint, string key, Dtls10Session session, byte[] data)
+        {
+            var cert = new ServerCertificateDatagram();
+            cert.FromBytes(data);
+            session.HandshakeMessages.Add(cert);
+
+            if (cert.Certificate == null || cert.Certificate.Length == 0)
+                throw new Exception("Client sent empty Certificate; RequireClientCertificate is set.");
+
+            session.ClientCertificateBytes = cert.Certificate;
+            _states[key] = HandshakeState.WaitingForClientKeyExchange;
+            Debug.WriteLine($"[DTLS10 Server] Received client Certificate ({cert.Certificate.Length} bytes) from {endpoint}");
         }
 
         private void HandleClientKeyExchange(EndPoint endpoint, string key, Dtls10Session session, byte[] data)
@@ -226,7 +264,34 @@ namespace SharpDTLS.DTLS10
             Debug.WriteLine($"[DTLS10 Server] client_key: {Convert.ToHexString(session.CryptoContext.ClientKey).ToLower()}");
             Debug.WriteLine($"[DTLS10 Server] server_key: {Convert.ToHexString(session.CryptoContext.ServerKey).ToLower()}");
 
+            // If client sent a non-empty certificate we still need CertificateVerify next.
+            _states[key] = session.ClientCertificateBytes != null
+                ? HandshakeState.WaitingForCertificateVerify
+                : HandshakeState.WaitingForChangeCipherSpec;
+        }
+
+        private void HandleCertificateVerify(EndPoint endpoint, string key, Dtls10Session session, byte[] data)
+        {
+            var certVerify = new CertificateVerifyDatagram();
+            certVerify.FromBytes(data);
+
+            // Verify the signature over the transcript up to (not including) CertificateVerify.
+            byte[] transcriptBytes = Dtls10CryptoUtils.GetTranscriptBytes(session.HandshakeMessages);
+
+            X509Certificate clientCert = new X509CertificateParser().ReadCertificate(session.ClientCertificateBytes);
+            AsymmetricKeyParameter pubKey = clientCert.GetPublicKey();
+            bool isEcKey = pubKey is ECPublicKeyParameters;
+
+            ISigner signer = SignerUtilities.GetSigner(isEcKey ? "SHA256WITHECDSA" : "SHA256WITHRSA");
+            signer.Init(false, pubKey);
+            signer.BlockUpdate(transcriptBytes, 0, transcriptBytes.Length);
+
+            if (!signer.VerifySignature(certVerify.Signature))
+                throw new Exception("Client CertificateVerify signature invalid!");
+
+            session.HandshakeMessages.Add(certVerify);
             _states[key] = HandshakeState.WaitingForChangeCipherSpec;
+            Debug.WriteLine($"[DTLS10 Server] Client CertificateVerify verified from {endpoint}");
         }
 
         private void HandleClientFinished(EndPoint endpoint, string key, Dtls10Session session, byte[] data)

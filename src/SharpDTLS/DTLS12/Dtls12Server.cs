@@ -15,8 +15,9 @@ namespace SharpDTLS.DTLS12
 {
     // DTLS 1.2 server handshake flow:
     //   1. Receive ClientHello (no cookie) → send HelloVerifyRequest
-    //   2. Receive ClientHello (with cookie) → validate, send ServerHello + Certificate + ServerKeyExchange + ServerHelloDone
-    //   3. Receive ClientKeyExchange → derive keys
+    //   2. Receive ClientHello (with cookie) → validate, send ServerHello + Certificate + ServerKeyExchange
+    //      + [CertificateRequest] + ServerHelloDone
+    //   3. Receive [Certificate] + ClientKeyExchange + [CertificateVerify] → derive keys, verify
     //   4. Receive ChangeCipherSpec → note epoch change
     //   5. Receive Finished (encrypted) → verify, send ChangeCipherSpec + Finished (encrypted)
     //   6. Application data exchange
@@ -26,17 +27,26 @@ namespace SharpDTLS.DTLS12
         private readonly AsymmetricCipherKeyPair _serverCertificateKeyPair;
         private readonly X509Certificate _serverX509Certificate;
         public bool ShouldSendHelloVerify { get; set; } = true;
+        public bool RequireClientCertificate { get; set; } = false;
         public event EventHandler<EventArgs> HandshakeFinished;
 
-        public ServerTransport ServerTransport { get; }
+        public IServerTransport ServerTransport { get; }
 
         private readonly Dictionary<string, Dtls12Session>  _sessions             = new();
         private readonly Dictionary<string, HandshakeState> _states               = new();
         private readonly Dictionary<string, List<byte[]>>   _pendingEpoch1Records = new();
 
-        private enum HandshakeState { WaitingForClientKeyExchange, WaitingForChangeCipherSpec, WaitingForFinished, Complete }
+        private enum HandshakeState
+        {
+            WaitingForClientCertificate,
+            WaitingForClientKeyExchange,
+            WaitingForCertificateVerify,
+            WaitingForChangeCipherSpec,
+            WaitingForFinished,
+            Complete
+        }
 
-        public Dtls12Server(ServerTransport serverTransport)
+        public Dtls12Server(IServerTransport serverTransport)
         {
             (_serverCertificateKeyPair, _serverX509Certificate) = Dtls12CryptoUtils.GenerateSelfSignedCertificate();
 
@@ -44,7 +54,7 @@ namespace SharpDTLS.DTLS12
             ServerTransport.OnDataReceived += OnDataReceived;
         }
 
-        public Dtls12Server(ServerTransport serverTransport, AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
+        public Dtls12Server(IServerTransport serverTransport, AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
         {
             _serverCertificateKeyPair = keyPair;
             _serverX509Certificate = certificate;
@@ -72,9 +82,17 @@ namespace SharpDTLS.DTLS12
 
                 var state = _states[key];
 
-                if (state == HandshakeState.WaitingForClientKeyExchange && recordType == 0x16)
+                if (state == HandshakeState.WaitingForClientCertificate && recordType == 0x16)
+                {
+                    HandleClientCertificate(endpoint, key, session, data);
+                }
+                else if (state == HandshakeState.WaitingForClientKeyExchange && recordType == 0x16)
                 {
                     HandleClientKeyExchange(endpoint, key, session, data);
+                }
+                else if (state == HandshakeState.WaitingForCertificateVerify && recordType == 0x16)
+                {
+                    HandleCertificateVerify(endpoint, key, session, data);
                 }
                 else if (state == HandshakeState.WaitingForChangeCipherSpec && recordType == 0x14)
                 {
@@ -139,7 +157,6 @@ namespace SharpDTLS.DTLS12
                 }
             }
 
-            // Generate server EC key pair for ECDHE
             var (privateX25519, publicX25519) = Dtls12CryptoUtils.CreateX25519KeyPair();
             byte[] serverPrivKey = privateX25519.GetEncoded();
             byte[] serverPubKey  = publicX25519.GetEncoded();
@@ -152,13 +169,17 @@ namespace SharpDTLS.DTLS12
                 ServerRandom = Dtls12CryptoUtils.GenerateRandom(32),
             };
 
-            // Include SRTP extension in ServerHello if client offered it
+            // Register session BEFORE sending so synchronous mock transport chains route correctly.
+            _sessions[key] = session;
+            _states[key]   = RequireClientCertificate
+                ? HandshakeState.WaitingForClientCertificate
+                : HandshakeState.WaitingForClientKeyExchange;
+
             bool clientWantsSrtp = clientHello.Extensions.OfType<UseSrtpExtension>().Any();
             ushort srtpProfile = clientWantsSrtp
                 ? clientHello.Extensions.OfType<UseSrtpExtension>().First().ProtectionProfiles[0]
                 : (ushort)0;
 
-            // Prefer ECDSA suites when using an EC certificate; AES-128 over AES-256; GCM over ChaCha20.
             bool isEcKey = _serverCertificateKeyPair.Private is ECPrivateKeyParameters;
             ushort[] preferred = isEcKey
                 ? new ushort[] { 0xC02B, 0xC02C, 0xCCA9, 0xC02F, 0xC030, 0xCCA8 }
@@ -167,7 +188,6 @@ namespace SharpDTLS.DTLS12
             if (cipherSuite == 0) cipherSuite = clientHello.CipherSuites.First();
             session.CipherSuite = cipherSuite;
 
-            // ServerHello
             var serverHello = new ServerHelloDatagram(cipherSuite, session.ServerRandom,
                 clientWantsSrtp, srtpProfile)
             {
@@ -178,7 +198,6 @@ namespace SharpDTLS.DTLS12
             session.HandshakeMessages.Add(serverHello);
             SendUnencryptedHandshake(endpoint, session, serverHello.ToBytes());
 
-            // Certificate
             byte[] derCert = _serverX509Certificate.GetEncoded();
 
             var certificate = new ServerCertificateDatagram(derCert)
@@ -189,7 +208,6 @@ namespace SharpDTLS.DTLS12
             session.HandshakeMessages.Add(certificate);
             SendUnencryptedHandshake(endpoint, session, certificate.ToBytes());
 
-            // ServerKeyExchange: sign (clientRandom + serverRandom + ECParams) with server private key
             byte[] ecParams = BuildEcParams(serverPubKey);
             byte[] toSign   = session.ClientRandom.Concat(session.ServerRandom).Concat(ecParams).ToArray();
 
@@ -197,7 +215,7 @@ namespace SharpDTLS.DTLS12
             signer.Init(true, _serverCertificateKeyPair.Private);
             signer.BlockUpdate(toSign, 0, toSign.Length);
             byte[] signature = signer.GenerateSignature();
-            byte sigAlg = isEcKey ? (byte)0x03 : (byte)0x01; // 0x03 = ECDSA, 0x01 = RSA
+            byte sigAlg = isEcKey ? (byte)0x03 : (byte)0x01;
 
             var serverKeyExchange = new ServerKeyExchangeDatagram(serverPubKey, signature, 0x04, sigAlg)
             {
@@ -207,7 +225,18 @@ namespace SharpDTLS.DTLS12
             session.HandshakeMessages.Add(serverKeyExchange);
             SendUnencryptedHandshake(endpoint, session, serverKeyExchange.ToBytes());
 
-            // ServerHelloDone
+            if (RequireClientCertificate)
+            {
+                var certRequest = new CertificateRequestDatagram
+                {
+                    RecordSequenceNumber  = session.RecordSequenceNumber++,
+                    MessageSequenceNumber = session.MessageSequenceNumber++,
+                };
+                session.HandshakeMessages.Add(certRequest);
+                SendUnencryptedHandshake(endpoint, session, certRequest.ToBytes());
+                Debug.WriteLine($"[DTLS12 Server] Sent CertificateRequest to {endpoint}");
+            }
+
             var serverHelloDone = new ServerHelloDoneDatagram
             {
                 RecordSequenceNumber = session.RecordSequenceNumber++,
@@ -216,9 +245,21 @@ namespace SharpDTLS.DTLS12
             session.HandshakeMessages.Add(serverHelloDone);
             SendUnencryptedHandshake(endpoint, session, serverHelloDone.ToBytes());
 
-            _sessions[key] = session;
-            _states[key]   = HandshakeState.WaitingForClientKeyExchange;
             Debug.WriteLine($"[DTLS12 Server] ServerHello flight sent to {endpoint}");
+        }
+
+        private void HandleClientCertificate(EndPoint endpoint, string key, Dtls12Session session, byte[] data)
+        {
+            var cert = new ServerCertificateDatagram();
+            cert.FromBytes(data);
+            session.HandshakeMessages.Add(cert);
+
+            if (cert.Certificate == null || cert.Certificate.Length == 0)
+                throw new Exception("Client sent empty Certificate; RequireClientCertificate is set.");
+
+            session.ClientCertificateBytes = cert.Certificate;
+            _states[key] = HandshakeState.WaitingForClientKeyExchange;
+            Debug.WriteLine($"[DTLS12 Server] Received client Certificate ({cert.Certificate.Length} bytes) from {endpoint}");
         }
 
         private void HandleClientKeyExchange(EndPoint endpoint, string key, Dtls12Session session, byte[] data)
@@ -227,7 +268,6 @@ namespace SharpDTLS.DTLS12
             cke.FromBytes(data);
             session.HandshakeMessages.Add(cke);
 
-            // Derive pre-master secret via ECDHE
             byte[] preMaster = Dtls12CryptoUtils.DeriveSharedSecretX25519(session.PrivateKey, cke.PublicKey);
             bool   sha384    = session.CipherSuite == 0xC030 || session.CipherSuite == 0xC02C;
             byte[] master    = Dtls12CryptoUtils.CalculateMasterSecret(preMaster, session.ClientRandom, session.ServerRandom, sha384);
@@ -238,7 +278,32 @@ namespace SharpDTLS.DTLS12
             Debug.WriteLine($"[DTLS12 Server] client_key: {Convert.ToHexString(session.CryptoContext.ClientKey).ToLower()}");
             Debug.WriteLine($"[DTLS12 Server] server_key: {Convert.ToHexString(session.CryptoContext.ServerKey).ToLower()}");
 
+            _states[key] = session.ClientCertificateBytes != null
+                ? HandshakeState.WaitingForCertificateVerify
+                : HandshakeState.WaitingForChangeCipherSpec;
+        }
+
+        private void HandleCertificateVerify(EndPoint endpoint, string key, Dtls12Session session, byte[] data)
+        {
+            var certVerify = new CertificateVerifyDatagram();
+            certVerify.FromBytes(data);
+
+            byte[] transcriptBytes = Dtls12CryptoUtils.GetTranscriptBytes(session.HandshakeMessages);
+
+            X509Certificate clientCert = new X509CertificateParser().ReadCertificate(session.ClientCertificateBytes);
+            AsymmetricKeyParameter pubKey = clientCert.GetPublicKey();
+            bool isEcKey = pubKey is ECPublicKeyParameters;
+
+            ISigner signer = SignerUtilities.GetSigner(isEcKey ? "SHA256WITHECDSA" : "SHA256WITHRSA");
+            signer.Init(false, pubKey);
+            signer.BlockUpdate(transcriptBytes, 0, transcriptBytes.Length);
+
+            if (!signer.VerifySignature(certVerify.Signature))
+                throw new Exception("Client CertificateVerify signature invalid!");
+
+            session.HandshakeMessages.Add(certVerify);
             _states[key] = HandshakeState.WaitingForChangeCipherSpec;
+            Debug.WriteLine($"[DTLS12 Server] Client CertificateVerify verified from {endpoint}");
         }
 
         private void HandleClientFinished(EndPoint endpoint, string key, Dtls12Session session, byte[] data)
@@ -283,7 +348,6 @@ namespace SharpDTLS.DTLS12
             ServerTransport.Send(endpoint, encServerFinished.ToBytes());
 
             _states[key] = HandshakeState.Complete;
-            // Reset epoch + sequence for application data
             session.Epoch = 1;
             session.RecordSequenceNumber = (ushort)(session.CryptoContext.ServerSequenceNumber);
 
@@ -326,11 +390,10 @@ namespace SharpDTLS.DTLS12
                 ServerTransport.Send(endpoint, fragment);
         }
 
-        // ECParams = curve_type(1) + named_curve(2) + point_length(1) + point(N)
         private static byte[] BuildEcParams(byte[] publicKey)
         {
             var result = new byte[1 + 2 + 1 + publicKey.Length];
-            result[0] = 0x03; // named_curve
+            result[0] = 0x03;
             result[1] = 0x00; result[2] = 0x1D; // x25519
             result[3] = (byte)publicKey.Length;
             Buffer.BlockCopy(publicKey, 0, result, 4, publicKey.Length);

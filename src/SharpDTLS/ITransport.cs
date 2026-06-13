@@ -152,7 +152,19 @@ namespace SharpSRTP.UDP
         }
     }
 
-    public class ServerTransport 
+    public interface IServerTransport
+    {
+        event EventHandler<byte[]> OnDataReceived;
+        void Send(EndPoint endpoint, byte[] buf);
+    }
+
+    public interface IClientTransport
+    {
+        event EventHandler<byte[]> OnDataReceived;
+        void Send(byte[] buf);
+    }
+
+    public class ServerTransport : IServerTransport
     {
         private readonly object _listening;
         private readonly ConcurrentDictionary<string, UdpTransport> _activeSessions;
@@ -256,7 +268,7 @@ namespace SharpSRTP.UDP
         }
     }
 
-    public class ClientTransport
+    public class ClientTransport : IClientTransport
     {
         private readonly UdpTransport _udpClientTransport;
         private readonly object _receiving;

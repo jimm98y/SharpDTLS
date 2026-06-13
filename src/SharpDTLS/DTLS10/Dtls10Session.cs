@@ -14,5 +14,6 @@ namespace SharpDTLS.DTLS10
         public byte[] ClientRandom { get; set; }
         public byte[] ServerRandom { get; set; }
         public ushort CipherSuite { get; set; } = 0xC013;
+        public byte[] ClientCertificateBytes { get; set; }
     }
 }

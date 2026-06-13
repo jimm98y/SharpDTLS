@@ -181,6 +181,28 @@ namespace SharpDTLS.DTLS10
             return md5Hash.Concat(sha1Hash).ToArray(); // 16 + 20 = 36 bytes
         }
 
+        // Returns the raw concatenation of all handshake message contributions (not hashed).
+        // Used for CertificateVerify signature input — each signer applies its own hash internally.
+        public static byte[] GetTranscriptBytes(List<IDatagram> messages)
+        {
+            var result = new List<byte>();
+            foreach (var msg in messages)
+            {
+                IDatagram m   = msg;
+                int        skip = 13;
+
+                if (msg is ClientEncryptedDatagram ce) { m = ce.Datagram; skip = 0; }
+                else if (msg is ServerEncryptedDatagram se) { m = se.Datagram; skip = 0; }
+
+                byte[] bytes = m.Bytes;
+                byte[] contribution = bytes.Skip(skip).Take(4)
+                    .Concat(bytes.Skip(skip + 4 + 8).Take(bytes.Length - skip - 4 - 8))
+                    .ToArray();
+                result.AddRange(contribution);
+            }
+            return result.ToArray();
+        }
+
         public static byte[] CreateCookie(DateTime timestamp, string clientIP, int clientPort, int minuteOffset = 0)
         {
             DateTime rounded = new DateTime(timestamp.Year, timestamp.Month, timestamp.Day,

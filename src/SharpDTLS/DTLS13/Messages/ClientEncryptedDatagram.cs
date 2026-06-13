@@ -62,6 +62,8 @@ namespace SharpDTLS.DTLS13.Messages
             {
                 this.Datagram = plaintext[0] switch
                 {
+                    0x0b => new CertificateDatagram(),
+                    0x0f => new CertificateVerifyDatagram(),
                     0x14 => new FinishedDatagram(),
                     _ => throw new Exception("Unknown datagram type")
                 };

@@ -74,6 +74,7 @@ namespace SharpDTLS.DTLS13.Messages
                 {
                     0x08 => new EncryptedExtensionsDatagram(),
                     0x0b => new CertificateDatagram(),
+                    0x0d => new CertificateRequestDatagram(),
                     0x0f => new CertificateVerifyDatagram(),
                     0x14 => new FinishedDatagram(),
                     _ => throw new Exception("Unknown datagram type")

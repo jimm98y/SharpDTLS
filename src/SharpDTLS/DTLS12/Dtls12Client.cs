@@ -15,8 +15,8 @@ namespace SharpDTLS.DTLS12
     // DTLS 1.2 client handshake flow:
     //   1. Send ClientHello (no cookie)
     //   2. Receive HelloVerifyRequest → re-send ClientHello with cookie
-    //   3. Receive ServerHello, Certificate, ServerKeyExchange, ServerHelloDone (one or more packets)
-    //   4. Send ClientKeyExchange + ChangeCipherSpec + Finished (encrypted)
+    //   3. Receive ServerHello, Certificate, ServerKeyExchange, [CertificateRequest,] ServerHelloDone
+    //   4. Send [Certificate,] ClientKeyExchange, [CertificateVerify,] ChangeCipherSpec + Finished (encrypted)
     //   5. Receive ChangeCipherSpec → switch to epoch 1
     //   6. Receive Finished (encrypted) → verify → handshake complete
     //   7. Application data exchange
@@ -25,11 +25,16 @@ namespace SharpDTLS.DTLS12
         public event EventHandler<EventArgs> HandshakeFinished;
 
         public Dtls12Session Session { get; } = new Dtls12Session();
-        public ClientTransport ClientTransport { get; }
+        public IClientTransport ClientTransport { get; }
+
+        // Set these before BeginHandshake to enable client authentication.
+        public AsymmetricCipherKeyPair ClientCertificateKeyPair { get; set; }
+        public X509Certificate ClientCertificate { get; set; }
 
         private ServerHelloDatagram       _serverHello;
         private ServerCertificateDatagram _serverCert;
         private ServerKeyExchangeDatagram _serverKex;
+        private bool                      _certRequested;
         private bool                      _changeCipherSpecReceived;
         private bool                      _handshakeComplete;
 
@@ -37,7 +42,7 @@ namespace SharpDTLS.DTLS12
         private readonly SortedDictionary<int, List<byte[]>> _handshakeReorderBuffer = new();
         private readonly HandshakeReassembler _reassembler = new();
 
-        public Dtls12Client(ClientTransport clientTransport)
+        public Dtls12Client(IClientTransport clientTransport)
         {
             ClientTransport = clientTransport;
             ClientTransport.OnDataReceived += OnDataReceived;
@@ -158,11 +163,12 @@ namespace SharpDTLS.DTLS12
             byte hsType = data[13];
             switch (hsType)
             {
-                case 0x03: HandleHelloVerifyRequest(data); break;
-                case 0x02: HandleServerHello(data);        break;
-                case 0x0B: HandleServerCertificate(data);  break;
-                case 0x0C: HandleServerKeyExchange(data);  break;
-                case 0x0E: HandleServerHelloDone(data);    break;
+                case 0x03: HandleHelloVerifyRequest(data);  break;
+                case 0x02: HandleServerHello(data);         break;
+                case 0x0B: HandleServerCertificate(data);   break;
+                case 0x0C: HandleServerKeyExchange(data);   break;
+                case 0x0D: HandleCertificateRequest(data);  break;
+                case 0x0E: HandleServerHelloDone(data);     break;
                 default:
                     Debug.WriteLine($"[DTLS12 Client] Unknown handshake type 0x{hsType:X2}");
                     break;
@@ -221,6 +227,15 @@ namespace SharpDTLS.DTLS12
             Debug.WriteLine($"[DTLS12 Client] Received ServerKeyExchange, signature verified");
         }
 
+        private void HandleCertificateRequest(byte[] data)
+        {
+            var certReq = new CertificateRequestDatagram();
+            certReq.FromBytes(data);
+            Session.HandshakeMessages.Add(certReq);
+            _certRequested = true;
+            Debug.WriteLine($"[DTLS12 Client] Received CertificateRequest");
+        }
+
         private void HandleServerHelloDone(byte[] data)
         {
             var done = new ServerHelloDoneDatagram();
@@ -228,15 +243,31 @@ namespace SharpDTLS.DTLS12
             Session.HandshakeMessages.Add(done);
             Debug.WriteLine($"[DTLS12 Client] Received ServerHelloDone");
 
-            SendClientKeyExchangeAndFinished();
+            SendClientFlightAndFinished();
         }
 
-        private void SendClientKeyExchangeAndFinished()
+        private void SendClientFlightAndFinished()
         {
-            // ClientKeyExchange — send our ECDHE public key
+            // ── Client Certificate (if requested) ──────────────────────────────
+            bool sendingCert = _certRequested && ClientCertificate != null;
+
+            if (_certRequested)
+            {
+                byte[] certDer = sendingCert ? ClientCertificate.GetEncoded() : Array.Empty<byte>();
+                var clientCert = new ServerCertificateDatagram(certDer)
+                {
+                    RecordSequenceNumber  = Session.RecordSequenceNumber++,
+                    MessageSequenceNumber = Session.MessageSequenceNumber++,
+                };
+                Session.HandshakeMessages.Add(clientCert);
+                ClientTransport.Send(clientCert.ToBytes());
+                Debug.WriteLine($"[DTLS12 Client] Sent Certificate (len={certDer.Length})");
+            }
+
+            // ── ClientKeyExchange ───────────────────────────────────────────────
             var cke = new ClientKeyExchangeDatagram(Session.PublicKey)
             {
-                RecordSequenceNumber = Session.RecordSequenceNumber++,
+                RecordSequenceNumber  = Session.RecordSequenceNumber++,
                 MessageSequenceNumber = Session.MessageSequenceNumber++,
             };
             Session.HandshakeMessages.Add(cke);
@@ -252,7 +283,29 @@ namespace SharpDTLS.DTLS12
             Debug.WriteLine($"[DTLS12 Client] client_key: {Convert.ToHexString(Session.CryptoContext.ClientKey).ToLower()}");
             Debug.WriteLine($"[DTLS12 Client] server_key: {Convert.ToHexString(Session.CryptoContext.ServerKey).ToLower()}");
 
-            // ChangeCipherSpec (epoch 0, increments receiver's epoch)
+            // ── CertificateVerify (only if we sent a non-empty cert) ────────────
+            if (sendingCert)
+            {
+                byte[] transcriptBytes = Dtls12CryptoUtils.GetTranscriptBytes(Session.HandshakeMessages);
+
+                bool isEcKey = ClientCertificateKeyPair.Private is ECPrivateKeyParameters;
+                ISigner signer = SignerUtilities.GetSigner(isEcKey ? "SHA256WITHECDSA" : "SHA256WITHRSA");
+                signer.Init(true, ClientCertificateKeyPair.Private);
+                signer.BlockUpdate(transcriptBytes, 0, transcriptBytes.Length);
+                byte[] signature = signer.GenerateSignature();
+
+                byte sigAlgByte = isEcKey ? (byte)0x03 : (byte)0x01;
+                var certVerify = new CertificateVerifyDatagram(signature, 0x04, sigAlgByte)
+                {
+                    RecordSequenceNumber  = Session.RecordSequenceNumber++,
+                    MessageSequenceNumber = Session.MessageSequenceNumber++,
+                };
+                Session.HandshakeMessages.Add(certVerify);
+                ClientTransport.Send(certVerify.ToBytes());
+                Debug.WriteLine($"[DTLS12 Client] Sent CertificateVerify");
+            }
+
+            // ── ChangeCipherSpec ────────────────────────────────────────────────
             var ccs = new ChangeCipherSpecDatagram
             {
                 Epoch = 0,
@@ -260,7 +313,7 @@ namespace SharpDTLS.DTLS12
             };
             ClientTransport.Send(ccs.ToBytes());
 
-            // Finished (encrypted, epoch 1)
+            // ── Finished (encrypted, epoch 1) ───────────────────────────────────
             byte[] transcriptHash = Dtls12CryptoUtils.HashTranscript(Session.HandshakeMessages, sha384);
             byte[] verifyData = Dtls12CryptoUtils.CalculateVerifyData(
                 Session.CryptoContext.MasterSecret, "client finished", transcriptHash, sha384);
@@ -268,12 +321,12 @@ namespace SharpDTLS.DTLS12
             var finished = new FinishedDatagram(verifyData, Session.MessageSequenceNumber++);
             var encFinished = new ClientEncryptedDatagram(Session.CryptoContext, finished)
             {
-                Epoch = 1,
+                Epoch          = 1,
                 SequenceNumber = Session.CryptoContext.ClientSequenceNumber++,
             };
             ClientTransport.Send(encFinished.ToBytes());
 
-            Debug.WriteLine($"[DTLS12 Client] Sent ClientKeyExchange + CCS + Finished");
+            Debug.WriteLine($"[DTLS12 Client] Sent [Certificate +] ClientKeyExchange + [CertVerify +] CCS + Finished");
         }
 
         private void HandleChangeCipherSpec(byte[] data)

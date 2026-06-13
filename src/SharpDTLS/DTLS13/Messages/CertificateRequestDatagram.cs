@@ -74,10 +74,22 @@ namespace SharpDTLS.DTLS13.Messages
             // request context
             data[pos++] = RequestContext;
 
-            // certificate request extensions
-            int extensionsLength = 0;
+            // certificate request extensions:
+            //   signature_algorithms (0x000D):
+            //     extension data length = 6 (2 for list length + 4 for two schemes)
+            //     signature_scheme_list length = 4
+            //     ecdsa_secp256r1_sha256 (0x0403)
+            //     rsa_pss_rsae_sha256 (0x0804)
+            int extensionsLength = 10; // type(2)+extLen(2)+listLen(2)+scheme1(2)+scheme2(2)
             data[pos++] = (byte)((extensionsLength >> 8) & 0xFF);
             data[pos++] = (byte)(extensionsLength & 0xFF);
+
+            // signature_algorithms extension
+            data[pos++] = 0x00; data[pos++] = 0x0D; // extension type
+            data[pos++] = 0x00; data[pos++] = 0x06; // extension data length = 6
+            data[pos++] = 0x00; data[pos++] = 0x04; // signature_scheme_list length = 4
+            data[pos++] = 0x04; data[pos++] = 0x03; // ecdsa_secp256r1_sha256
+            data[pos++] = 0x08; data[pos++] = 0x04; // rsa_pss_rsae_sha256
 
             // trailing record type for parity
             data[pos++] = 0x16;
