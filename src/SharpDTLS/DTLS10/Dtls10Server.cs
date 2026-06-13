@@ -1,4 +1,5 @@
 using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.X509;
 using SharpDTLS.DTLS10.Messages;
@@ -42,6 +43,15 @@ namespace SharpDTLS.DTLS10
         public Dtls10Server(ServerTransport serverTransport)
         {
             (_serverCertificateKeyPair, _serverX509Certificate) = Dtls10CryptoUtils.GenerateSelfSignedCertificate();
+
+            ServerTransport = serverTransport;
+            ServerTransport.OnDataReceived += OnDataReceived;
+        }
+
+        public Dtls10Server(ServerTransport serverTransport, AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
+        {
+            _serverCertificateKeyPair = keyPair;
+            _serverX509Certificate = certificate;
 
             ServerTransport = serverTransport;
             ServerTransport.OnDataReceived += OnDataReceived;
@@ -169,12 +179,15 @@ namespace SharpDTLS.DTLS10
             byte[] ecParams = BuildEcParams(serverPubKey);
             byte[] toSign   = session.ClientRandom.Concat(session.ServerRandom).Concat(ecParams).ToArray();
 
-            ISigner signer = SignerUtilities.GetSigner("SHA1WITHRSA");
+            bool isEcKey = _serverCertificateKeyPair.Private is ECPrivateKeyParameters;
+            ISigner signer = SignerUtilities.GetSigner(isEcKey ? "SHA256WITHECDSA" : "SHA1WITHRSA");
             signer.Init(true, _serverCertificateKeyPair.Private);
             signer.BlockUpdate(toSign, 0, toSign.Length);
             byte[] signature = signer.GenerateSignature();
+            byte hashAlg = isEcKey ? (byte)0x04 : (byte)0x02; // 0x04 = SHA256, 0x02 = SHA1
+            byte sigAlg  = isEcKey ? (byte)0x03 : (byte)0x01; // 0x03 = ECDSA,  0x01 = RSA
 
-            var serverKeyExchange = new ServerKeyExchangeDatagram(serverPubKey, signature)
+            var serverKeyExchange = new ServerKeyExchangeDatagram(serverPubKey, signature, hashAlg, sigAlg)
             {
                 RecordSequenceNumber  = session.RecordSequenceNumber++,
                 MessageSequenceNumber = session.MessageSequenceNumber++,

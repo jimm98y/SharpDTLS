@@ -1,4 +1,5 @@
 using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.X509;
 using SharpDTLS.DTLS12.Messages;
@@ -38,6 +39,15 @@ namespace SharpDTLS.DTLS12
         public Dtls12Server(ServerTransport serverTransport)
         {
             (_serverCertificateKeyPair, _serverX509Certificate) = Dtls12CryptoUtils.GenerateSelfSignedCertificate();
+
+            ServerTransport = serverTransport;
+            ServerTransport.OnDataReceived += OnDataReceived;
+        }
+
+        public Dtls12Server(ServerTransport serverTransport, AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
+        {
+            _serverCertificateKeyPair = keyPair;
+            _serverX509Certificate = certificate;
 
             ServerTransport = serverTransport;
             ServerTransport.OnDataReceived += OnDataReceived;
@@ -174,16 +184,18 @@ namespace SharpDTLS.DTLS12
             session.HandshakeMessages.Add(certificate);
             SendUnencryptedHandshake(endpoint, session, certificate.ToBytes());
 
-            // ServerKeyExchange: sign (clientRandom + serverRandom + ECParams) with RSA private key
+            // ServerKeyExchange: sign (clientRandom + serverRandom + ECParams) with server private key
             byte[] ecParams = BuildEcParams(serverPubKey);
             byte[] toSign   = session.ClientRandom.Concat(session.ServerRandom).Concat(ecParams).ToArray();
 
-            ISigner signer = SignerUtilities.GetSigner("SHA256WITHRSA");
+            bool isEcKey = _serverCertificateKeyPair.Private is ECPrivateKeyParameters;
+            ISigner signer = SignerUtilities.GetSigner(isEcKey ? "SHA256WITHECDSA" : "SHA256WITHRSA");
             signer.Init(true, _serverCertificateKeyPair.Private);
             signer.BlockUpdate(toSign, 0, toSign.Length);
             byte[] signature = signer.GenerateSignature();
+            byte sigAlg = isEcKey ? (byte)0x03 : (byte)0x01; // 0x03 = ECDSA, 0x01 = RSA
 
-            var serverKeyExchange = new ServerKeyExchangeDatagram(serverPubKey, signature)
+            var serverKeyExchange = new ServerKeyExchangeDatagram(serverPubKey, signature, 0x04, sigAlg)
             {
                 RecordSequenceNumber = session.RecordSequenceNumber++,
                 MessageSequenceNumber = session.MessageSequenceNumber++,

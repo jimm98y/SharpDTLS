@@ -1,4 +1,5 @@
 using Org.BouncyCastle.Asn1.X509;
+using Org.BouncyCastle.Asn1.X9;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Digests;
 using Org.BouncyCastle.Crypto.Generators;
@@ -241,6 +242,26 @@ namespace SharpDTLS.DTLS10
             certGenerator.SetNotAfter(DateTime.UtcNow.AddYears(10));
             certGenerator.SetPublicKey(keyPair.Public);
             var certificate = certGenerator.Generate(new Asn1SignatureFactory("SHA256WITHRSA", keyPair.Private, new SecureRandom()));
+
+            return (keyPair, certificate);
+        }
+
+        public static (AsymmetricCipherKeyPair keyPair, X509Certificate certificate) GenerateSelfSignedEcCertificate()
+        {
+            var ecCurve = ECNamedCurveTable.GetByName("P-256");
+            var domainParams = new ECDomainParameters(ecCurve.Curve, ecCurve.G, ecCurve.N, ecCurve.H);
+            var ecGenerator = new ECKeyPairGenerator();
+            ecGenerator.Init(new ECKeyGenerationParameters(domainParams, new SecureRandom()));
+            var keyPair = ecGenerator.GenerateKeyPair();
+
+            var certGenerator = new X509V3CertificateGenerator();
+            certGenerator.SetSerialNumber(BigInteger.ValueOf(1));
+            certGenerator.SetIssuerDN(new X509Name("CN=SharpDTLS Server"));
+            certGenerator.SetSubjectDN(new X509Name("CN=SharpDTLS Server"));
+            certGenerator.SetNotBefore(DateTime.UtcNow.AddDays(-1));
+            certGenerator.SetNotAfter(DateTime.UtcNow.AddYears(10));
+            certGenerator.SetPublicKey(keyPair.Public);
+            var certificate = certGenerator.Generate(new Asn1SignatureFactory("SHA256WITHECDSA", keyPair.Private, new SecureRandom()));
 
             return (keyPair, certificate);
         }

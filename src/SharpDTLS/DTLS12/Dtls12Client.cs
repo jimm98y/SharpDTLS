@@ -1,4 +1,5 @@
 using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.X509;
 using SharpDTLS.DTLS12.Messages;
@@ -207,7 +208,8 @@ namespace SharpDTLS.DTLS12
             X509Certificate cert = new X509CertificateParser().ReadCertificate(_serverCert.Certificate);
             AsymmetricKeyParameter pubKey = cert.GetPublicKey();
 
-            ISigner signer = SignerUtilities.GetSigner("SHA256WITHRSA");
+            bool isEcKey = pubKey is ECPublicKeyParameters;
+            ISigner signer = SignerUtilities.GetSigner(isEcKey ? "SHA256WITHECDSA" : "SHA256WITHRSA");
             signer.Init(false, pubKey);
             signer.BlockUpdate(toVerify, 0, toVerify.Length);
 

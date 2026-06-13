@@ -19,6 +19,12 @@ namespace SharpDTLS.DTLS13.Messages
             this.Signature = signature;
         }
 
+        public CertificateVerifyDatagram(byte[] signature, uint signatureType)
+        {
+            this.Signature = signature;
+            this.SignatureType = signatureType;
+        }
+
         public void FromBytes(byte[] bytes)
         {
             if (bytes == null) throw new ArgumentNullException(nameof(bytes));

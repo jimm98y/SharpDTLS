@@ -1,4 +1,5 @@
 ﻿using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Tls.Crypto;
 using Org.BouncyCastle.Tls.Crypto.Impl.BC;
@@ -32,6 +33,15 @@ namespace SharpDTLS.DTLS13
         public Dtls13Server(ServerTransport serverTransport)
         {
             (_serverCertificateKeyPair, _serverX509Certificate) = Dtls13CryptoUtils.GenerateSelfSignedCertificate();
+
+            ServerTransport = serverTransport;
+            ServerTransport.OnDataReceived += ServerTransport_OnDataReceived;
+        }
+
+        public Dtls13Server(ServerTransport serverTransport, AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
+        {
+            _serverCertificateKeyPair = keyPair;
+            _serverX509Certificate = certificate;
 
             ServerTransport = serverTransport;
             ServerTransport.OnDataReceived += ServerTransport_OnDataReceived;
@@ -121,14 +131,17 @@ namespace SharpDTLS.DTLS13
 
                     byte[] toSign = Encoding.UTF8.GetBytes("                                                                TLS 1.3, server CertificateVerify\0").Concat(h).ToArray();
 
-                    ISigner signer = SignerUtilities.GetSigner("SHA256WITHRSA/PSS");
+                    bool isEcKey = _serverCertificateKeyPair.Private is ECPrivateKeyParameters;
+                    ISigner signer = SignerUtilities.GetSigner(isEcKey ? "SHA256WITHECDSA" : "SHA256WITHRSA/PSS");
                     signer.Init(true, _serverCertificateKeyPair.Private);
                     signer.BlockUpdate(toSign);
 
                     byte[] signature = signer.GenerateSignature();
                     Debug.WriteLine($"signature: {Convert.ToHexString(signature).ToLowerInvariant()}");
 
-                    SendEncryptedHandshake(endpoint, session, new CertificateVerifyDatagram(signature));
+                    // 0x0403 = ecdsa_secp256r1_sha256, 0x0804 = rsa_pss_rsae_sha256
+                    uint sigType = isEcKey ? 0x0403u : 0x0804u;
+                    SendEncryptedHandshake(endpoint, session, new CertificateVerifyDatagram(signature, sigType));
 
                     var crypto = new BcTlsCrypto();
                     var hashAlg = CryptoHashAlgorithm.sha256;

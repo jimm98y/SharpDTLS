@@ -1,4 +1,5 @@
 ﻿using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Tls.Crypto;
 using Org.BouncyCastle.Tls.Crypto.Impl.BC;
@@ -167,8 +168,10 @@ namespace SharpDTLS.DTLS13
 
                 byte[] toSign = Encoding.UTF8.GetBytes("                                                                TLS 1.3, server CertificateVerify\0").Concat(h).ToArray();
                 X509Certificate serverCertificate = new X509CertificateParser().ReadCertificate(_serverCertificateDatagram.Certificate);
-                ISigner signer = SignerUtilities.GetSigner("SHA256WITHRSA/PSS");
-                signer.Init(false, serverCertificate.GetPublicKey());
+                AsymmetricKeyParameter pubKey = serverCertificate.GetPublicKey();
+                bool isEcKey = pubKey is ECPublicKeyParameters;
+                ISigner signer = SignerUtilities.GetSigner(isEcKey ? "SHA256WITHECDSA" : "SHA256WITHRSA/PSS");
+                signer.Init(false, pubKey);
                 signer.BlockUpdate(toSign);
 
                 if (!signer.VerifySignature(certVerify.Signature))
