@@ -80,6 +80,28 @@ namespace SharpDTLS.DTLS12
         /// </summary>
         protected virtual bool ResendFinalFlightOnPeerRetransmit => false;
 
+        private const byte Tls12Cid = 25;
+
+        /// <summary>The CID the peer puts in records it sends us (RFC 9146), or null / empty for none.</summary>
+        protected byte[] ReadConnectionId { get; set; }
+
+        /// <summary>The CID we put in records we send (the peer's choice), or null / empty for none.</summary>
+        protected byte[] WriteConnectionId { get; set; }
+
+        /// <summary>Our connection ID (RFC 9146): the peer sends it in every encrypted record. Null when not negotiated.</summary>
+        public byte[] ConnectionId => ReadConnectionId is { Length: > 0 } ? ReadConnectionId : null;
+
+        /// <summary>The peer's connection ID, sent in our encrypted records. Null when not negotiated.</summary>
+        public byte[] PeerConnectionId => WriteConnectionId is { Length: > 0 } ? WriteConnectionId : null;
+
+        protected override int ReceiveConnectionIdLength => ReadConnectionId?.Length ?? 0;
+
+        /// <summary>
+        /// An encrypted record authenticated and passed the replay window; <paramref name="withConnectionId"/> tells
+        /// whether it carried our CID. Used for peer address updates (RFC 9146 §6).
+        /// </summary>
+        protected virtual void OnRecordAuthenticated(ushort epoch, ulong sequenceNumber, bool withConnectionId) { }
+
         // ── Hooks for the handshake state machines ───────────────────────────────────────────
 
         /// <summary>Handles the next in-order handshake message. <paramref name="message"/> is the full DTLS form.</summary>
@@ -101,7 +123,26 @@ namespace SharpDTLS.DTLS12
             ulong sequenceNumber = 0;
             for (int i = 5; i < 11; i++)
                 sequenceNumber = (sequenceNumber << 8) | record[i];
-            byte[] fragment = record.AsSpan(13).ToArray();
+
+            // RFC 9146 §3: with a CID negotiated for this direction, encrypted records carry it in tls12_cid records;
+            // any other encrypted record is invalid. Plaintext records never carry one.
+            byte[] connectionId = null;
+            int headerLength = 13;
+            bool expectCid = ReadConnectionId is { Length: > 0 };
+            if (contentType == Tls12Cid)
+            {
+                if (!expectCid || epoch == 0 || record.Length < 13 + ReadConnectionId.Length)
+                    throw new DtlsRecordDiscardedException("Unexpected tls12_cid record");
+                connectionId = record.AsSpan(11, ReadConnectionId.Length).ToArray();
+                if (!connectionId.AsSpan().SequenceEqual(ReadConnectionId))
+                    throw new DtlsRecordDiscardedException("Record for another connection ID");
+                headerLength += connectionId.Length;
+            }
+            else if (expectCid && epoch > 0)
+            {
+                throw new DtlsRecordDiscardedException("Encrypted record without the connection ID");
+            }
+            byte[] fragment = record.AsSpan(headerLength).ToArray();
 
             if (epoch > _readEpoch)
             {
@@ -119,8 +160,24 @@ namespace SharpDTLS.DTLS12
                 throw new DtlsRecordDiscardedException($"Replayed record {epoch}:{sequenceNumber}");
 
             var cipher = _readCiphers[epoch];
-            byte[] plaintext = cipher == null ? fragment : cipher.Decrypt(contentType, recordVersion, epoch, sequenceNumber, fragment);
+            if (connectionId != null && cipher == null)
+                throw new DtlsRecordDiscardedException("tls12_cid record without keys");
+            byte[] plaintext = cipher == null ? fragment : cipher.Decrypt(contentType, recordVersion, epoch, sequenceNumber, fragment, connectionId);
             window.Mark(sequenceNumber);
+
+            if (connectionId != null)
+            {
+                // DTLSInnerPlaintext: content || real_type || zeros
+                int end = plaintext.Length;
+                while (end > 0 && plaintext[end - 1] == 0)
+                    end--;
+                if (end == 0)
+                    throw new DtlsException(AlertDescription.UnexpectedMessage, "tls12_cid record without a content type.");
+                contentType = plaintext[end - 1];
+                plaintext = plaintext.AsSpan(0, end - 1).ToArray();
+            }
+            if (cipher != null)
+                OnRecordAuthenticated(epoch, sequenceNumber, connectionId != null);
 
             switch (contentType)
             {
@@ -265,16 +322,33 @@ namespace SharpDTLS.DTLS12
                 throw new DtlsException(AlertDescription.InternalError, "Record sequence number space exhausted.");
 
             var cipher = _writeCiphers[epoch];
-            byte[] fragment = cipher == null ? plaintext : cipher.Encrypt(contentType, RecordVersion, epoch, seq, plaintext);
 
-            byte[] record = new byte[13 + fragment.Length];
+            // RFC 9146 §4: once encrypting, a peer that asked for a CID gets tls12_cid records with the real content
+            // type inside DTLSInnerPlaintext.
+            byte[] cid = cipher != null && WriteConnectionId is { Length: > 0 } ? WriteConnectionId : Array.Empty<byte>();
+            byte[] fragment;
+            if (cid.Length > 0)
+            {
+                byte[] inner = new byte[plaintext.Length + 1];
+                plaintext.CopyTo(inner, 0);
+                inner[^1] = contentType;
+                fragment = cipher.Encrypt(Tls12Cid, RecordVersion, epoch, seq, inner, cid);
+                contentType = Tls12Cid;
+            }
+            else
+            {
+                fragment = cipher == null ? plaintext : cipher.Encrypt(contentType, RecordVersion, epoch, seq, plaintext);
+            }
+
+            byte[] record = new byte[13 + cid.Length + fragment.Length];
             record[0] = contentType;
             BinaryPrimitives.WriteUInt16BigEndian(record.AsSpan(1), RecordVersion);
             BinaryPrimitives.WriteUInt16BigEndian(record.AsSpan(3), epoch);
             for (int i = 0; i < 6; i++)
                 record[10 - i] = (byte)(seq >> (8 * i));
-            BinaryPrimitives.WriteUInt16BigEndian(record.AsSpan(11), (ushort)fragment.Length);
-            Buffer.BlockCopy(fragment, 0, record, 13, fragment.Length);
+            cid.CopyTo(record, 11);
+            BinaryPrimitives.WriteUInt16BigEndian(record.AsSpan(11 + cid.Length), (ushort)fragment.Length);
+            Buffer.BlockCopy(fragment, 0, record, 13 + cid.Length, fragment.Length);
             return record;
         }
 

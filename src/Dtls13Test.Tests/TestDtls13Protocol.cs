@@ -30,6 +30,12 @@ namespace Dtls13Test.Tests
         public readonly List<byte[]> ClientSent = new();
         public readonly List<byte[]> ServerSent = new();
 
+        /// <summary>The address the client's datagrams arrive from (change it to simulate NAT rebinding).</summary>
+        public EndPoint ClientAddress = ClientEndpoint;
+
+        /// <summary>The address of every datagram the server sent.</summary>
+        public readonly List<EndPoint> ServerSentTo = new();
+
         public ScriptedTransportPair()
         {
             Server = new ServerSide(this);
@@ -44,12 +50,12 @@ namespace Dtls13Test.Tests
 
             public void Send(EndPoint endpoint, byte[] buf)
             {
-                lock (_pair.ServerSent) _pair.ServerSent.Add(buf);
+                lock (_pair.ServerSent) { _pair.ServerSent.Add(buf); _pair.ServerSentTo.Add(endpoint); }
                 foreach (var d in _pair.ServerToClient(buf).ToList())
                     _pair.Client.Deliver(d);
             }
 
-            public void Deliver(byte[] data) => OnDataReceived?.Invoke(ClientEndpoint, data);
+            public void Deliver(byte[] data) => OnDataReceived?.Invoke(_pair.ClientAddress, data);
 
             /// <summary>Delivers a datagram as if it came from another client (e.g. an attacker replaying one).</summary>
             public void Deliver(EndPoint from, byte[] data) => OnDataReceived?.Invoke(from, data);

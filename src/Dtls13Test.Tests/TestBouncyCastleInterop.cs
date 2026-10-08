@@ -136,6 +136,11 @@ namespace Dtls13Test.Tests
         }
 
         public override void NotifyClientCertificate(Certificate clientCertificate) { }
+
+        /// <summary>The CID this server asks clients to send (RFC 9146); null to not negotiate CIDs.</summary>
+        public byte[] ConnectionId { get; set; }
+
+        protected override byte[] GetNewConnectionID() => ConnectionId;
     }
 
     internal sealed class BcPskIdentityManager : TlsPskIdentityManager
@@ -275,6 +280,11 @@ namespace Dtls13Test.Tests
         protected override int[] GetSupportedCipherSuites() => _suites;
         public override TlsAuthentication GetAuthentication() => new Authentication(this);
 
+        /// <summary>The CID this client asks the server to send (RFC 9146); null to not offer CIDs.</summary>
+        public byte[] ConnectionId { get; set; }
+
+        protected override byte[] GetNewConnectionID() => ConnectionId;
+
         private sealed class Authentication(BcTestClient owner) : TlsAuthentication
         {
             public void NotifyServerCertificate(TlsServerCertificate serverCertificate) { }
@@ -317,6 +327,85 @@ namespace Dtls13Test.Tests
             var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
             socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
             return socket;
+        }
+
+        // ── Connection IDs (RFC 9146) ────────────────────────────────────────────────────────
+
+        [DataRow((ushort)0xC02F)] // AES-GCM
+        [DataRow((ushort)0xCCA8)] // ChaCha20-Poly1305
+        [DataRow((ushort)0xC027)] // CBC, encrypt-then-MAC
+        [DataRow((ushort)0xC013)] // CBC, SHA-1
+        [TestMethod]
+        public void ConnectionIds_SharpDtlsClient_To_BouncyCastleServer(ushort id)
+        {
+            var (suite, crypto, bcVersion, version) = Prepare(id);
+            var (keyPair, certificate) = TestCredentials.For(suite);
+            using var serverSocket = LoopbackSocket();
+            var bcServer = RunBlocking(() =>
+            {
+                var peer = new BcTestServer(crypto, id, bcVersion, keyPair.Private, certificate.GetEncoded()) { ConnectionId = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 } };
+                var dtls = new DtlsServerProtocol().Accept(peer, new BcUdpTransport(serverSocket));
+                byte[] buffer = new byte[2048];
+                int n = dtls.Receive(buffer, 0, buffer.Length, (int)Timeout.TotalMilliseconds);
+                byte[] reply = Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(buffer, 0, Math.Max(n, 0)));
+                dtls.Send(reply, 0, reply.Length);
+                return n;
+            });
+
+            using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, ((IPEndPoint)serverSocket.LocalEndPoint).Port));
+            var client = new Dtls12Client(transport)
+            {
+                MinimumVersion = version, MaximumVersion = version, CipherSuites = new List<ushort> { id }, UseConnectionId = true, ConnectionIdLength = 4,
+            };
+            var handshake = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            client.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
+            client.Failed += (_, ex) => handshake.TrySetException(ex);
+            client.ApplicationDataReceived += (_, d) => received.TrySetResult(Encoding.UTF8.GetString(d));
+            client.BeginHandshake();
+            Assert.IsTrue(handshake.Task.Wait(Timeout), "handshake did not complete: " + (bcServer.IsFaulted ? bcServer.Exception.GetBaseException().Message : ""));
+            CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 }, client.PeerConnectionId);
+            Assert.HasCount(4, client.ConnectionId);
+
+            client.SendApplicationData(Encoding.UTF8.GetBytes("ping"));
+            Assert.IsTrue(received.Task.Wait(Timeout), "no reply: " + (bcServer.IsFaulted ? bcServer.Exception.GetBaseException().Message : ""));
+            Assert.AreEqual("pong:ping", received.Task.Result);
+        }
+
+        [DataRow((ushort)0xC02F)]
+        [DataRow((ushort)0xCCA8)]
+        [DataRow((ushort)0xC027)]
+        [DataRow((ushort)0xC013)]
+        [TestMethod]
+        public void ConnectionIds_BouncyCastleClient_To_SharpDtlsServer(ushort id)
+        {
+            var (suite, crypto, bcVersion, version) = Prepare(id);
+            var (keyPair, certificate) = TestCredentials.For(suite);
+            using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
+            var server = new Dtls12Server(transport, keyPair, certificate)
+            {
+                MinimumVersion = DtlsVersion.Dtls10, CipherSuites = new List<ushort> { id }, UseConnectionIds = true,
+            };
+            server.ApplicationDataReceived += (_, e) => server.SendApplicationData(e.RemoteEndPoint, Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.Data)));
+
+            using var clientSocket = LoopbackSocket();
+            clientSocket.Connect(new IPEndPoint(IPAddress.Loopback, transport.LocalEndpoint.Port));
+            var bcClient = RunBlocking(() =>
+            {
+                var peer = new BcTestClient(crypto, id, bcVersion) { ConnectionId = new byte[] { 9, 8, 7, 6 } };
+                var dtls = new DtlsClientProtocol().Connect(peer, new BcUdpTransport(clientSocket));
+                byte[] ping = Encoding.UTF8.GetBytes("ping");
+                dtls.Send(ping, 0, ping.Length);
+                byte[] buffer = new byte[2048];
+                int n = dtls.Receive(buffer, 0, buffer.Length, (int)Timeout.TotalMilliseconds);
+                return n > 0 ? Encoding.UTF8.GetString(buffer, 0, n) : null;
+            });
+
+            Assert.IsTrue(bcClient.Wait(Timeout), "BouncyCastle client did not finish");
+            Assert.AreEqual("pong:ping", bcClient.Result);
+            var connection = server.Connections.Single();
+            Assert.HasCount(8, connection.ConnectionId);
+            CollectionAssert.AreEqual(new byte[] { 9, 8, 7, 6 }, connection.PeerConnectionId);
         }
 
         private static Task<T> RunBlocking<T>(Func<T> work)

@@ -10,8 +10,12 @@ namespace SharpDTLS
     public static class DtlsRecordSplitter
     {
         private const int PlaintextHeaderLength = 13;
+        private const byte Tls12Cid = 25;
 
-        /// <param name="connectionIdLength">Length of connection IDs the receiver expects in unified headers (DTLS 1.3).</param>
+        /// <param name="connectionIdLength">
+        /// Length of the connection IDs the receiver expects: in DTLS 1.3 unified headers and in DTLS 1.2 tls12_cid
+        /// records (RFC 9146), whose CID sits between the sequence number and the length.
+        /// </param>
         public static List<byte[]> Split(byte[] datagram, int connectionIdLength = 0)
         {
             var records = new List<byte[]>();
@@ -46,9 +50,10 @@ namespace SharpDTLS
                 }
                 else
                 {
-                    if (pos + PlaintextHeaderLength > datagram.Length)
+                    int cidLength = first == Tls12Cid ? connectionIdLength : 0;
+                    if (pos + PlaintextHeaderLength + cidLength > datagram.Length)
                         break;
-                    recordLength = PlaintextHeaderLength + ((datagram[pos + 11] << 8) | datagram[pos + 12]);
+                    recordLength = PlaintextHeaderLength + cidLength + ((datagram[pos + 11 + cidLength] << 8) | datagram[pos + 12 + cidLength]);
                 }
 
                 if (recordLength <= 0 || pos + recordLength > datagram.Length)

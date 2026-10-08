@@ -17,6 +17,7 @@ namespace SharpDTLS.DTLS12
     public abstract class Dtls12ServerBase
     {
         private readonly ConcurrentDictionary<string, Dtls12ServerConnection> _connections = new();
+        private readonly ConcurrentDictionary<string, Dtls12ServerConnection> _connectionsById = new();
         private readonly ClientHelloReassembler _clientHelloReassembler = new();
 
         protected Dtls12ServerBase(IServerTransport serverTransport, AsymmetricCipherKeyPair keyPair, X509Certificate certificate, ushort version)
@@ -60,6 +61,15 @@ namespace SharpDTLS.DTLS12
         /// Returning null uses the default certificate.
         /// </summary>
         public Func<string, ServerCredentials> CertificateSelector { get => Settings.CertificateSelector; set => Settings.CertificateSelector = value; }
+
+        /// <summary>
+        /// Negotiate connection IDs (RFC 9146) with clients that offer them, routing their records by CID so a client
+        /// can change address (see <see cref="Dtls12ServerConnection.PeerAddressChanged"/>).
+        /// </summary>
+        public bool UseConnectionIds { get => Settings.UseConnectionIds; set => Settings.UseConnectionIds = value; }
+
+        /// <summary>Length of the CIDs this server issues.</summary>
+        public int ConnectionIdLength { get => Settings.ConnectionIdLength; set => Settings.ConnectionIdLength = value; }
 
         /// <summary>Application protocols (ALPN, RFC 7301) in server preference order; null to ignore ALPN.</summary>
         public IList<string> ApplicationProtocols { get => Settings.ApplicationProtocols; set => Settings.ApplicationProtocols = value; }
@@ -129,9 +139,19 @@ namespace SharpDTLS.DTLS12
         private void OnDataReceived(object sender, byte[] datagram)
         {
             var endpoint = (EndPoint)sender;
+
+            // tls12_cid records name their connection, whatever address they come from (RFC 9146 §3).
+            int cidLength = Settings.ConnectionIdLength;
+            if (Settings.UseConnectionIds && datagram.Length >= 13 + cidLength && datagram[0] == 25
+                && _connectionsById.TryGetValue(Convert.ToHexString(datagram, 11, cidLength), out var byId))
+            {
+                byId.ProcessDatagram(datagram, endpoint);
+                return;
+            }
+
             if (_connections.TryGetValue(endpoint.ToString(), out var connection))
             {
-                connection.ProcessDatagram(datagram);
+                connection.ProcessDatagram(datagram, endpoint);
                 return;
             }
 
@@ -174,20 +194,31 @@ namespace SharpDTLS.DTLS12
                 return;
             }
 
-            var connection = new Dtls12ServerConnection(Settings, endpoint, data => ServerTransport.Send(endpoint, data));
+            // Replies go to the connection's current address, which moves with connection IDs.
+            Dtls12ServerConnection connection = null;
+            connection = new Dtls12ServerConnection(Settings, endpoint, data => ServerTransport.Send(connection.RemoteEndPoint, data));
             if (!_connections.TryAdd(endpoint.ToString(), connection))
                 return;
 
             connection.HandshakeFinished += (_, _) => OnConnectionEstablished(connection);
             connection.ApplicationDataReceived += (_, data) => OnApplicationData(connection, data);
             connection.AlertReceived += (_, alert) => OnAlert(connection, alert);
+            connection.PeerAddressChanged += (_, change) =>
+            {
+                _connections.TryRemove(new KeyValuePair<string, Dtls12ServerConnection>(change.Old.ToString(), connection));
+                _connections[change.New.ToString()] = connection;
+            };
             connection.Closed += (_, _) =>
             {
-                _connections.TryRemove(new KeyValuePair<string, Dtls12ServerConnection>(endpoint.ToString(), connection));
+                _connections.TryRemove(new KeyValuePair<string, Dtls12ServerConnection>(connection.RemoteEndPoint.ToString(), connection));
+                if (connection.ConnectionId != null)
+                    _connectionsById.TryRemove(new KeyValuePair<string, Dtls12ServerConnection>(Convert.ToHexString(connection.ConnectionId), connection));
                 OnConnectionClosed(connection);
             };
 
             connection.Start(clientHello, message, recordSeq + 1);
+            if (connection.ConnectionId != null && !connection.IsClosed)
+                _connectionsById[Convert.ToHexString(connection.ConnectionId)] = connection;
         }
 
         /// <summary>

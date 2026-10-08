@@ -65,6 +65,15 @@ namespace SharpDTLS.DTLS12
         /// <summary>Application protocols (ALPN, RFC 7301) in server preference order; null to ignore ALPN.</summary>
         public IList<string> ApplicationProtocols { get; set; }
 
+        /// <summary>
+        /// Negotiate connection IDs (RFC 9146) with clients that offer them: the client then sends our CID in every
+        /// encrypted record, so the association survives a change of its address (e.g. NAT rebinding).
+        /// </summary>
+        public bool UseConnectionIds { get; set; }
+
+        /// <summary>Length of the CIDs this server issues (fixed, so records can be routed by CID).</summary>
+        public int ConnectionIdLength { get; set; } = 8;
+
         /// <summary>Keys for RFC 5077 session tickets (random per server by default); null disables tickets.</summary>
         public SessionTicketKeys TicketKeys { get; set; } = new SessionTicketKeys();
     }
@@ -112,7 +121,36 @@ namespace SharpDTLS.DTLS12
             KeyLogWriter = settings.KeyLogWriter;
         }
 
-        public EndPoint RemoteEndPoint { get; }
+        public EndPoint RemoteEndPoint { get; private set; }
+
+        /// <summary>
+        /// The client's address moved (RFC 9146 §6): a record carrying our CID authenticated, was newer than any
+        /// before, and came from another address. Replies now go there; applications that guard against address
+        /// spoofing can verify the new path (e.g. with a request/response exchange).
+        /// </summary>
+        public event EventHandler<(EndPoint Old, EndPoint New)> PeerAddressChanged;
+
+        private ushort _newestEpoch;
+        private ulong _newestSequence;
+        private bool _anyAuthenticated;
+
+        protected override void OnRecordAuthenticated(ushort epoch, ulong sequenceNumber, bool withConnectionId)
+        {
+            bool newer = !_anyAuthenticated || epoch > _newestEpoch || (epoch == _newestEpoch && sequenceNumber > _newestSequence);
+            if (!newer)
+                return;
+            _anyAuthenticated = true;
+            (_newestEpoch, _newestSequence) = (epoch, sequenceNumber);
+
+            if (withConnectionId && DatagramSource != null && !DatagramSource.Equals(RemoteEndPoint))
+            {
+                var old = RemoteEndPoint;
+                RemoteEndPoint = DatagramSource;
+                Debug.WriteLine($"{LogPrefix} Peer address changed from {old} to {RemoteEndPoint}");
+                var change = (old, RemoteEndPoint);
+                RaiseEvent(() => PeerAddressChanged?.Invoke(this, change));
+            }
+        }
 
         /// <summary>The host name the client asked for in server_name, or null.</summary>
         public string ServerName { get; private set; }
@@ -189,6 +227,14 @@ namespace SharpDTLS.DTLS12
             (_keyPair, _certificate, _intermediates) = selected != null
                 ? (selected.KeyPair, selected.Certificate, selected.IntermediateCertificates)
                 : (_settings.KeyPair, _settings.Certificate, _settings.IntermediateCertificates);
+
+            // Connection IDs are negotiated afresh in every handshake, resumed ones included (RFC 9146 §3).
+            var offeredCid = ch.Extension<ConnectionIdExtension>();
+            if (_settings.UseConnectionIds && offeredCid != null)
+            {
+                WriteConnectionId = offeredCid.ConnectionId;
+                ReadConnectionId = Dtls12CryptoUtils.GenerateRandom(_settings.ConnectionIdLength);
+            }
 
             // ALPN is negotiated per connection, also when resuming (RFC 7301 §3.1).
             ApplicationProtocol = AlpnExtension.Select(_settings.ApplicationProtocols, ch.Extension<AlpnExtension>());
@@ -308,6 +354,8 @@ namespace SharpDTLS.DTLS12
                 sh.Extensions.Add(new ServerNameExtension());
             if (ApplicationProtocol != null)
                 sh.Extensions.Add(new AlpnExtension(new[] { ApplicationProtocol }));
+            if (ReadConnectionId != null)
+                sh.Extensions.Add(new ConnectionIdExtension(ReadConnectionId));
             SendHandshake(HandshakeType.ServerHello, sh.Encode());
 
             if (IsResumed)

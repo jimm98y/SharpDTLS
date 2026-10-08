@@ -29,6 +29,7 @@ namespace SharpDTLS.DTLS12
         {
             ServerNameExtension.Type => new ServerNameExtension(),
             AlpnExtension.Type => new AlpnExtension(),
+            ConnectionIdExtension.Type => new ConnectionIdExtension(),
             0x000a => new SupportedGroupsExtension(),
             0x000b => new EcPointFormatsExtension(),
             0x000d => new SignatureAlgorithmsExtension(),
@@ -47,6 +48,7 @@ namespace SharpDTLS.DTLS12
         {
             ServerNameExtension.Type => new ServerNameExtension(),
             AlpnExtension.Type => new AlpnExtension(),
+            ConnectionIdExtension.Type => new ConnectionIdExtension(),
             0x000b => new ServerEcPointFormatsExtension(),
             0x000e => new ServerUseSrtpExtension(),
             SessionTicketExtension.Type => new SessionTicketExtension(),

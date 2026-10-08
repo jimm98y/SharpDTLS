@@ -17,10 +17,11 @@ namespace SharpDTLS.DTLS12
     /// </summary>
     public interface IRecordCipher
     {
-        byte[] Encrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] plaintext);
+        /// <param name="connectionId">The CID of a tls12_cid record (RFC 9146), which changes the MAC / AEAD input; null otherwise.</param>
+        byte[] Encrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] plaintext, byte[] connectionId = null);
 
         /// <summary>Throws <see cref="DtlsRecordDiscardedException"/> when the record does not authenticate.</summary>
-        byte[] Decrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment);
+        byte[] Decrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment, byte[] connectionId = null);
     }
 
     public static class RecordCiphers
@@ -91,9 +92,26 @@ namespace SharpDTLS.DTLS12
             _ => null,
         };
 
-        /// <summary>seq_num(8) || type(1) || version(2) || length(2): the MAC / AEAD additional data prefix.</summary>
-        internal static byte[] AdditionalData(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, int length)
+        /// <summary>
+        /// seq_num(8) || type(1) || version(2) || length(2): the MAC / AEAD additional data prefix. With a CID
+        /// (RFC 9146 §5): seq_num_placeholder(8 × 0xff) || tls12_cid || cid_length || tls12_cid || version || epoch ||
+        /// sequence_number || cid || length.
+        /// </summary>
+        internal static byte[] AdditionalData(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, int length, byte[] connectionId = null)
         {
+            if (connectionId != null)
+            {
+                const byte Tls12Cid = 25;
+                return new TlsWriter()
+                    .WriteBytes(new byte[] { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff })
+                    .WriteUInt8(Tls12Cid).WriteUInt8((byte)connectionId.Length).WriteUInt8(Tls12Cid)
+                    .WriteUInt16(version).WriteUInt16(epoch)
+                    .WriteUInt16((int)(sequenceNumber >> 32)).WriteUInt32((uint)sequenceNumber)
+                    .WriteBytes(connectionId)
+                    .WriteUInt16(length)
+                    .ToArray();
+            }
+
             byte[] aad = new byte[13];
             BinaryPrimitives.WriteUInt64BigEndian(aad, ((ulong)epoch << 48) | (sequenceNumber & 0xFFFFFFFFFFFFUL));
             aad[8] = contentType;
@@ -132,7 +150,7 @@ namespace SharpDTLS.DTLS12
             _tagLength = tagLength;
         }
 
-        public byte[] Encrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] plaintext)
+        public byte[] Encrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] plaintext, byte[] connectionId = null)
         {
             byte[] output = new byte[ExplicitNonceLength + plaintext.Length + _tagLength];
             // The explicit nonce is the 64-bit record sequence number, which never repeats under one key.
@@ -140,13 +158,13 @@ namespace SharpDTLS.DTLS12
 
             var aead = _create();
             aead.Init(true, new AeadParameters(new KeyParameter(_key), _tagLength * 8, Nonce(output),
-                RecordCiphers.AdditionalData(contentType, version, epoch, sequenceNumber, plaintext.Length)));
+                RecordCiphers.AdditionalData(contentType, version, epoch, sequenceNumber, plaintext.Length, connectionId)));
             int written = aead.ProcessBytes(plaintext, 0, plaintext.Length, output, ExplicitNonceLength);
             aead.DoFinal(output, ExplicitNonceLength + written);
             return output;
         }
 
-        public byte[] Decrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment)
+        public byte[] Decrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment, byte[] connectionId = null)
         {
             int plaintextLength = fragment.Length - ExplicitNonceLength - _tagLength;
             if (plaintextLength < 0)
@@ -157,7 +175,7 @@ namespace SharpDTLS.DTLS12
             {
                 var aead = _create();
                 aead.Init(false, new AeadParameters(new KeyParameter(_key), _tagLength * 8, Nonce(fragment),
-                    RecordCiphers.AdditionalData(contentType, version, epoch, sequenceNumber, plaintextLength)));
+                    RecordCiphers.AdditionalData(contentType, version, epoch, sequenceNumber, plaintextLength, connectionId)));
                 int written = aead.ProcessBytes(fragment, ExplicitNonceLength, fragment.Length - ExplicitNonceLength, plaintext, 0);
                 aead.DoFinal(plaintext, written);
             }
@@ -189,32 +207,32 @@ namespace SharpDTLS.DTLS12
             _mac = mac;
         }
 
-        public byte[] Encrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] plaintext)
+        public byte[] Encrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] plaintext, byte[] connectionId = null)
         {
-            byte[] mac = ComputeMac(contentType, version, epoch, sequenceNumber, plaintext, plaintext.Length);
+            byte[] mac = ComputeMac(contentType, version, epoch, sequenceNumber, plaintext, plaintext.Length, connectionId);
             byte[] output = new byte[plaintext.Length + mac.Length];
             Buffer.BlockCopy(plaintext, 0, output, 0, plaintext.Length);
             Buffer.BlockCopy(mac, 0, output, plaintext.Length, mac.Length);
             return output;
         }
 
-        public byte[] Decrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment)
+        public byte[] Decrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment, byte[] connectionId = null)
         {
             int macLength = RecordCiphers.CreateHmac(_mac).GetMacSize();
             int length = fragment.Length - macLength;
             if (length < 0)
                 throw new DtlsRecordDiscardedException("Record too short");
-            byte[] expected = ComputeMac(contentType, version, epoch, sequenceNumber, fragment, length);
+            byte[] expected = ComputeMac(contentType, version, epoch, sequenceNumber, fragment, length, connectionId);
             if (!CryptographicOperations.FixedTimeEquals(expected, fragment.AsSpan(length, macLength)))
                 throw new DtlsRecordDiscardedException("Record failed authentication");
             return fragment.AsSpan(0, length).ToArray();
         }
 
-        private byte[] ComputeMac(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] data, int length)
+        private byte[] ComputeMac(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] data, int length, byte[] connectionId)
         {
             var hmac = RecordCiphers.CreateHmac(_mac);
             hmac.Init(new KeyParameter(_macKey));
-            byte[] header = RecordCiphers.AdditionalData(contentType, version, epoch, sequenceNumber, length);
+            byte[] header = RecordCiphers.AdditionalData(contentType, version, epoch, sequenceNumber, length, connectionId);
             hmac.BlockUpdate(header, 0, header.Length);
             hmac.BlockUpdate(data, 0, length);
             byte[] mac = new byte[hmac.GetMacSize()];
@@ -236,18 +254,18 @@ namespace SharpDTLS.DTLS12
             _iv = iv;
         }
 
-        public byte[] Encrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] plaintext)
+        public byte[] Encrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] plaintext, byte[] connectionId = null)
         {
             byte[] output = new byte[plaintext.Length + TagLength];
             var aead = new Org.BouncyCastle.Crypto.Modes.ChaCha20Poly1305();
             aead.Init(true, new AeadParameters(new KeyParameter(_key), TagLength * 8, Nonce(epoch, sequenceNumber),
-                RecordCiphers.AdditionalData(contentType, version, epoch, sequenceNumber, plaintext.Length)));
+                RecordCiphers.AdditionalData(contentType, version, epoch, sequenceNumber, plaintext.Length, connectionId)));
             int written = aead.ProcessBytes(plaintext, 0, plaintext.Length, output, 0);
             aead.DoFinal(output, written);
             return output;
         }
 
-        public byte[] Decrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment)
+        public byte[] Decrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment, byte[] connectionId = null)
         {
             int plaintextLength = fragment.Length - TagLength;
             if (plaintextLength < 0)
@@ -258,7 +276,7 @@ namespace SharpDTLS.DTLS12
             {
                 var aead = new Org.BouncyCastle.Crypto.Modes.ChaCha20Poly1305();
                 aead.Init(false, new AeadParameters(new KeyParameter(_key), TagLength * 8, Nonce(epoch, sequenceNumber),
-                    RecordCiphers.AdditionalData(contentType, version, epoch, sequenceNumber, plaintextLength)));
+                    RecordCiphers.AdditionalData(contentType, version, epoch, sequenceNumber, plaintextLength, connectionId)));
                 int written = aead.ProcessBytes(fragment, 0, fragment.Length, plaintext, 0);
                 aead.DoFinal(plaintext, written);
             }
@@ -305,7 +323,7 @@ namespace SharpDTLS.DTLS12
             _macLength = RecordCiphers.CreateHmac(mac).GetMacSize();
         }
 
-        public byte[] Encrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] plaintext)
+        public byte[] Encrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] plaintext, byte[] connectionId = null)
         {
             byte[] iv = new byte[_blockSize];
             _random.NextBytes(iv);
@@ -314,28 +332,28 @@ namespace SharpDTLS.DTLS12
             {
                 byte[] ciphertext = CbcProcess(true, iv, Pad(plaintext, plaintext.Length));
                 byte[] ivAndCiphertext = Concat(iv, ciphertext);
-                byte[] mac = ComputeMac(contentType, version, epoch, sequenceNumber, ivAndCiphertext);
+                byte[] mac = ComputeMac(contentType, version, epoch, sequenceNumber, ivAndCiphertext, connectionId);
                 return Concat(ivAndCiphertext, mac);
             }
 
-            byte[] macBefore = ComputeMac(contentType, version, epoch, sequenceNumber, plaintext);
+            byte[] macBefore = ComputeMac(contentType, version, epoch, sequenceNumber, plaintext, connectionId);
             byte[] withMac = Concat(plaintext, macBefore);
             return Concat(iv, CbcProcess(true, iv, Pad(withMac, withMac.Length)));
         }
 
-        public byte[] Decrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment)
+        public byte[] Decrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment, byte[] connectionId = null)
             => _encryptThenMac
-                ? DecryptEncryptThenMac(contentType, version, epoch, sequenceNumber, fragment)
-                : DecryptMacThenEncrypt(contentType, version, epoch, sequenceNumber, fragment);
+                ? DecryptEncryptThenMac(contentType, version, epoch, sequenceNumber, fragment, connectionId)
+                : DecryptMacThenEncrypt(contentType, version, epoch, sequenceNumber, fragment, connectionId);
 
-        private byte[] DecryptEncryptThenMac(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment)
+        private byte[] DecryptEncryptThenMac(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment, byte[] connectionId)
         {
             int ivAndCiphertextLength = fragment.Length - _macLength;
             if (ivAndCiphertextLength < 2 * _blockSize || (ivAndCiphertextLength - _blockSize) % _blockSize != 0)
                 throw new DtlsRecordDiscardedException("Invalid CBC record length");
 
             byte[] ivAndCiphertext = fragment.AsSpan(0, ivAndCiphertextLength).ToArray();
-            byte[] expected = ComputeMac(contentType, version, epoch, sequenceNumber, ivAndCiphertext);
+            byte[] expected = ComputeMac(contentType, version, epoch, sequenceNumber, ivAndCiphertext, connectionId);
             if (!CryptographicOperations.FixedTimeEquals(expected, fragment.AsSpan(ivAndCiphertextLength, _macLength)))
                 throw new DtlsRecordDiscardedException("Record failed authentication");
 
@@ -355,7 +373,7 @@ namespace SharpDTLS.DTLS12
         /// possible padding length, so the result cannot be used as a padding oracle. Residual timing
         /// from the MAC length (Lucky13) is not fully eliminated.
         /// </summary>
-        private byte[] DecryptMacThenEncrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment)
+        private byte[] DecryptMacThenEncrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment, byte[] connectionId)
         {
             int ciphertextLength = fragment.Length - _blockSize;
             if (ciphertextLength < _macLength + 1 || ciphertextLength % _blockSize != 0)
@@ -379,7 +397,7 @@ namespace SharpDTLS.DTLS12
             int contentLength = plaintext.Length - _macLength - effectivePad;
 
             byte[] content = plaintext.AsSpan(0, contentLength).ToArray();
-            byte[] expected = ComputeMac(contentType, version, epoch, sequenceNumber, content);
+            byte[] expected = ComputeMac(contentType, version, epoch, sequenceNumber, content, connectionId);
             good &= CryptographicOperations.FixedTimeEquals(expected, plaintext.AsSpan(contentLength, _macLength)) ? 1 : 0;
 
             if (good != 1)
@@ -387,11 +405,11 @@ namespace SharpDTLS.DTLS12
             return content;
         }
 
-        private byte[] ComputeMac(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] data)
+        private byte[] ComputeMac(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] data, byte[] connectionId)
         {
             var hmac = RecordCiphers.CreateHmac(_mac);
             hmac.Init(new KeyParameter(_macKey));
-            byte[] header = RecordCiphers.AdditionalData(contentType, version, epoch, sequenceNumber, data.Length);
+            byte[] header = RecordCiphers.AdditionalData(contentType, version, epoch, sequenceNumber, data.Length, connectionId);
             hmac.BlockUpdate(header, 0, header.Length);
             hmac.BlockUpdate(data, 0, data.Length);
             byte[] mac = new byte[hmac.GetMacSize()];

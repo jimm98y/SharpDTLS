@@ -298,6 +298,48 @@ namespace SharpDTLS
     }
 
     /// <summary>
+    /// connection_id (RFC 9146 §3, RFC 9147 §9): the CID the sender wants to receive; empty when it only supports
+    /// sending CIDs.
+    /// </summary>
+    public class ConnectionIdExtension : ITlsExtension
+    {
+        public const ushort Type = 0x0036;
+
+        public ConnectionIdExtension() { }
+
+        public ConnectionIdExtension(byte[] connectionId)
+        {
+            if (connectionId == null || connectionId.Length > 255)
+                throw new ArgumentException("A connection ID is 0 to 255 bytes.", nameof(connectionId));
+            ConnectionId = connectionId;
+        }
+
+        public byte[] ConnectionId { get; private set; } = Array.Empty<byte>();
+
+        public int CalculateLength() => 5 + ConnectionId.Length;
+
+        public int Read(int offset, byte[] source)
+        {
+            int length = (source[offset + 2] << 8) | source[offset + 3];
+            if (length < 1 || source.Length < offset + 4 + length || source[offset + 4] != length - 1)
+                throw new DtlsException(AlertDescription.DecodeError, "Invalid connection_id extension.");
+            ConnectionId = source.AsSpan(offset + 5, length - 1).ToArray();
+            return 4 + length;
+        }
+
+        public int Write(int offset, byte[] destination)
+        {
+            destination[offset] = 0x00;
+            destination[offset + 1] = 0x36;
+            destination[offset + 2] = (byte)((1 + ConnectionId.Length) >> 8);
+            destination[offset + 3] = (byte)(1 + ConnectionId.Length);
+            destination[offset + 4] = (byte)ConnectionId.Length;
+            ConnectionId.CopyTo(destination, offset + 5);
+            return 5 + ConnectionId.Length;
+        }
+    }
+
+    /// <summary>
     /// extended_master_secret (RFC 7627): binds the master secret to the handshake transcript.
     /// </summary>
     public class ExtendedMasterSecretExtension : ITlsExtension

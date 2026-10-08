@@ -1,4 +1,5 @@
 using System;
+using System.Net;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -59,12 +60,19 @@ namespace SharpDTLS
         // ── Public operations ────────────────────────────────────────────────────────────────
 
         /// <summary>Processes one received UDP datagram (which may contain several records).</summary>
-        public void ProcessDatagram(byte[] datagram) => Run(() =>
+        public void ProcessDatagram(byte[] datagram) => ProcessDatagram(datagram, null);
+
+        /// <summary>The source address of the datagram being processed, when the transport reports it.</summary>
+        protected EndPoint DatagramSource { get; private set; }
+
+        /// <summary>Processes a datagram from <paramref name="source"/> (for connection-ID address updates).</summary>
+        public void ProcessDatagram(byte[] datagram, EndPoint source) => Run(() =>
         {
             if (IsClosed)
                 return;
+            DatagramSource = source;
 
-            foreach (var record in DtlsRecordSplitter.Split(datagram))
+            foreach (var record in DtlsRecordSplitter.Split(datagram, ReceiveConnectionIdLength))
             {
                 try
                 {
@@ -119,6 +127,9 @@ namespace SharpDTLS
         // ── Version-specific hooks ───────────────────────────────────────────────────────────
 
         protected abstract void ProcessRecord(byte[] record);
+
+        /// <summary>Length of the connection ID in records sent to us (0 without connection IDs).</summary>
+        protected virtual int ReceiveConnectionIdLength => 0;
         protected abstract void WriteApplicationData(byte[] data);
         protected abstract byte[] ExportKeyingMaterialCore(string label, byte[] context, int length);
         protected abstract void SendAlert(AlertDescription description, bool fatal);
