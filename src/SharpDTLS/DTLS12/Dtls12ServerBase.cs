@@ -52,6 +52,9 @@ namespace SharpDTLS.DTLS12
         /// <summary>Cipher suites in server preference order; null for all implemented suites.</summary>
         public IList<ushort> CipherSuites { get => Settings.CipherSuites; set => Settings.CipherSuites = value; }
 
+        /// <summary>Intermediate CA certificates sent after the server certificate, issuer of the previous one first.</summary>
+        public IList<X509Certificate> IntermediateCertificates { get => Settings.IntermediateCertificates; set => Settings.IntermediateCertificates = value; }
+
         public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ClientCertificateValidator
         {
             get => Settings.ClientCertificateValidator;

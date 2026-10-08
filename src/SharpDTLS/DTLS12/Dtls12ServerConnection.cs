@@ -53,6 +53,9 @@ namespace SharpDTLS.DTLS12
         /// <summary>Resumable sessions by session ID; null disables session ID resumption.</summary>
         public IDtls12SessionCache SessionCache { get; set; } = new Dtls12SessionCache();
 
+        /// <summary>Intermediate CA certificates sent after the server certificate, issuer of the previous one first.</summary>
+        public IList<X509Certificate> IntermediateCertificates { get; set; }
+
         /// <summary>Keys for RFC 5077 session tickets (random per server by default); null disables tickets.</summary>
         public SessionTicketKeys TicketKeys { get; set; } = new SessionTicketKeys();
     }
@@ -291,6 +294,8 @@ namespace SharpDTLS.DTLS12
             {
                 var certificate = new CertificateMessage();
                 certificate.Chain.Add(_settings.Certificate.GetEncoded());
+                foreach (var intermediate in _settings.IntermediateCertificates ?? Array.Empty<X509Certificate>())
+                    certificate.Chain.Add(intermediate.GetEncoded());
                 SendHandshake(HandshakeType.Certificate, certificate.Encode());
             }
 

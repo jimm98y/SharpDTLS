@@ -62,6 +62,9 @@ namespace SharpDTLS.DTLS13
         /// <summary>SRTP protection profiles in server preference order; null to never negotiate use_srtp.</summary>
         public ushort[] SrtpProtectionProfiles { get; set; } = { 0x0007, 0x0001 };
 
+        /// <summary>Intermediate CA certificates sent after the server certificate, issuer of the previous one first.</summary>
+        public IList<X509Certificate> IntermediateCertificates { get; set; }
+
         /// <summary>Optional client certificate validation. Return false to abort with bad_certificate.</summary>
         public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ClientCertificateValidator { get; set; }
 
@@ -565,7 +568,9 @@ namespace SharpDTLS.DTLS13
                     Session.RequiresClientAuth = true;
                 }
 
-                SendHandshake(new CertificateDatagram(_server.ServerCertificate.GetEncoded()), handshakeKeys);
+                var chain = new List<byte[]> { _server.ServerCertificate.GetEncoded() };
+                chain.AddRange((_server.IntermediateCertificates ?? Array.Empty<X509Certificate>()).Select(c => c.GetEncoded()));
+                SendHandshake(new CertificateDatagram(chain), handshakeKeys);
 
                 var clientSchemes = _clientHello.Extensions.OfType<ClientSignatureAlgorithms>().FirstOrDefault()?.SignatureAlgorithms;
                 ushort scheme = Dtls13Signatures.SelectScheme(_server.ServerKeyPair.Private, clientSchemes)

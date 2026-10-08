@@ -8,7 +8,9 @@
  * options:
  *   -cipher <list>      wolfSSL cipher list, e.g. TLS13-AES128-GCM-SHA256
  *   -hrr                server: send a HelloRetryRequest cookie
- *   -verify <ca.pem>    server: require and verify a client certificate
+ *   -verify <ca.pem>    server: require and verify a client certificate; client: verify the server chain
+ *   -host <name>        client: with -verify, also check the server certificate's host name
+ *   <cert.pem> / -cert  may hold the certificate followed by its intermediates
  *   -cert <c> -key <k>  client: present a client certificate
  *   -group <name>       client: initial key share (x25519 | p256)
  *   -srtp <profiles>    offer/accept DTLS-SRTP, e.g. SRTP_AES128_CM_SHA1_80; prints "SRTP:<hex keying material>"
@@ -83,7 +85,7 @@ int main(int argc, char **argv)
     const char *cert = NULL, *key = NULL, *cipher = NULL, *verify = NULL, *group = NULL, *srtp = NULL, *exportLabel = NULL;
     int exportLength = 0;
     int hrr = 0, resume = 0, pskOnly = 0, argi = 3;
-    const char *pskHex = NULL;
+    const char *pskHex = NULL, *host = NULL;
 
     if (server) {
         if (argc < 5) { fprintf(stderr, "server needs cert and key\n"); return 2; }
@@ -99,6 +101,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[argi], "-psk_identity") && argi + 1 < argc) pskIdentity = argv[++argi];
         else if (!strcmp(argv[argi], "-psk_only")) pskOnly = 1;
         else if (!strcmp(argv[argi], "-verify") && argi + 1 < argc) verify = argv[++argi];
+        else if (!strcmp(argv[argi], "-host") && argi + 1 < argc) host = argv[++argi];
         else if (!strcmp(argv[argi], "-cert") && argi + 1 < argc) cert = argv[++argi];
         else if (!strcmp(argv[argi], "-key") && argi + 1 < argc) key = argv[++argi];
         else if (!strcmp(argv[argi], "-group") && argi + 1 < argc) group = argv[++argi];
@@ -110,7 +113,7 @@ int main(int argc, char **argv)
     WOLFSSL_CTX *ctx = wolfSSL_CTX_new(server ? wolfDTLSv1_3_server_method() : wolfDTLSv1_3_client_method());
     if (!ctx) fail("CTX_new", NULL, 0);
 
-    if (cert && wolfSSL_CTX_use_certificate_file(ctx, cert, WOLFSSL_FILETYPE_PEM) != WOLFSSL_SUCCESS)
+    if (cert && wolfSSL_CTX_use_certificate_chain_file(ctx, cert) != WOLFSSL_SUCCESS)
         fail("load cert", NULL, 0);
     if (key && wolfSSL_CTX_use_PrivateKey_file(ctx, key, WOLFSSL_FILETYPE_PEM) != WOLFSSL_SUCCESS)
         fail("load key", NULL, 0);
@@ -135,7 +138,7 @@ int main(int argc, char **argv)
     if (verify) {
         if (wolfSSL_CTX_load_verify_locations(ctx, verify, NULL) != WOLFSSL_SUCCESS)
             fail("load verify", NULL, 0);
-        wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_PEER | WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT, NULL);
+        wolfSSL_CTX_set_verify(ctx, server ? WOLFSSL_VERIFY_PEER | WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT : WOLFSSL_VERIFY_PEER, NULL);
     } else {
         wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_NONE, NULL);
     }
@@ -176,6 +179,8 @@ int main(int argc, char **argv)
     if (!ssl) fail("new", NULL, 0);
     if (session && wolfSSL_set_session(ssl, session) != WOLFSSL_SUCCESS)
         fail("set session", NULL, 0);
+    if (!server && host && wolfSSL_check_domain_name(ssl, host) != WOLFSSL_SUCCESS)
+        fail("check_domain_name", NULL, 0);
     /* the socket is connect()ed, so wolfSSL must use send/recv rather than sendto (EISCONN on macOS) */
     if (wolfSSL_set_dtls_fd_connected(ssl, fd) != WOLFSSL_SUCCESS)
         fail("set fd", NULL, 0);

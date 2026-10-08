@@ -87,6 +87,9 @@ namespace SharpDTLS.DTLS13
         public AsymmetricCipherKeyPair ClientCertificateKeyPair { get; set; }
         public X509Certificate ClientCertificate { get; set; }
 
+        /// <summary>Intermediate CA certificates sent after <see cref="ClientCertificate"/>.</summary>
+        public IList<X509Certificate> ClientIntermediateCertificates { get; set; }
+
         /// <summary>Cipher suites to offer, in preference order: the defaults in <see cref="Dtls13CipherSuite.Supported"/>, or any of <see cref="Dtls13CipherSuite.All"/>.</summary>
         public IList<ushort> CipherSuites { get; set; } = new List<ushort>(Dtls13CipherSuite.Supported);
 
@@ -503,7 +506,9 @@ namespace SharpDTLS.DTLS13
             if (ClientCertificate != null && ClientCertificateKeyPair != null)
                 scheme = Dtls13Signatures.SelectScheme(ClientCertificateKeyPair.Private, _certificateRequest.SignatureAlgorithms);
 
-            var chain = scheme.HasValue ? new[] { ClientCertificate.GetEncoded() } : Array.Empty<byte[]>();
+            var chain = scheme.HasValue
+                ? new[] { ClientCertificate.GetEncoded() }.Concat((ClientIntermediateCertificates ?? Array.Empty<X509Certificate>()).Select(c => c.GetEncoded())).ToArray()
+                : Array.Empty<byte[]>();
             SendHandshake(new CertificateDatagram(chain, _certificateRequest.RequestContext), keys);
 
             if (scheme.HasValue)

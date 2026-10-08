@@ -54,6 +54,9 @@ namespace SharpDTLS.DTLS12
         public AsymmetricCipherKeyPair ClientCertificateKeyPair { get; set; }
         public X509Certificate ClientCertificate { get; set; }
 
+        /// <summary>Intermediate CA certificates sent after <see cref="ClientCertificate"/>.</summary>
+        public IList<X509Certificate> ClientIntermediateCertificates { get; set; }
+
         /// <summary>Cipher suites to offer in preference order; null for the defaults of the version range.</summary>
         public IList<ushort> CipherSuites { get; set; }
 
@@ -453,7 +456,11 @@ namespace SharpDTLS.DTLS12
             {
                 var certificate = new CertificateMessage();
                 if (authenticate || fixedKeyAgreement)
+                {
                     certificate.Chain.Add(ClientCertificate.GetEncoded());
+                    foreach (var intermediate in ClientIntermediateCertificates ?? Array.Empty<X509Certificate>())
+                        certificate.Chain.Add(intermediate.GetEncoded());
+                }
                 SendHandshake(HandshakeType.Certificate, certificate.Encode());
             }
 
