@@ -20,6 +20,12 @@ namespace SharpDTLS.DTLS13.Messages
 
         public ushort SelectedCipherSuite { get; set; } = 0x1301;
 
+        /// <summary>DTLS form (DTLS record, 12-byte handshake header) or, when false, TLS form (TLS record, 4-byte header).</summary>
+        public bool Datagram { get; set; } = true;
+
+        // Bytes before the ServerHello body: record header + handshake header.
+        private int HeaderLength => Datagram ? 25 : 9;
+
         public ServerHelloDatagram()
         { }
 
@@ -43,31 +49,32 @@ namespace SharpDTLS.DTLS13.Messages
         public void FromBytes(byte[] bytes)
         {
             if (bytes == null) throw new ArgumentNullException(nameof(bytes));
-            if (bytes.Length < 65) throw new ArgumentException("Buffer too small to be a valid ServerHello.");
+            int h = HeaderLength;
+            if (bytes.Length < h + 40) throw new ArgumentException("Buffer too small to be a valid ServerHello.");
             if (bytes[0] != 0x16) throw new InvalidDataException("Not a handshake record.");
-            if (bytes[13] != 0x02) throw new InvalidDataException("Not a ServerHello handshake message.");
+            if (bytes[Datagram ? 13 : 5] != 0x02) throw new InvalidDataException("Not a ServerHello handshake message.");
 
             Bytes = bytes.ToArray();
-            Epoch = (bytes[3] << 8) | bytes[4];
-
-            long seq = 0;
-            for (int i = 5; i <= 10; i++)
+            if (Datagram)
             {
-                seq = (seq << 8) | bytes[i];
+                Epoch = (bytes[3] << 8) | bytes[4];
+
+                long seq = 0;
+                for (int i = 5; i <= 10; i++)
+                {
+                    seq = (seq << 8) | bytes[i];
+                }
+                RecordSequenceNumber = (int)seq;
+                SequenceNumber = (bytes[17] << 8) | bytes[18];
             }
-            RecordSequenceNumber = (int)seq;
-            SequenceNumber = (bytes[17] << 8) | bytes[18];
 
-            if (bytes.Length < 27 + 32) throw new ArgumentException("Buffer too small for ServerRandom.");
             ServerRandom = new byte[32];
-            Buffer.BlockCopy(bytes, 27, ServerRandom, 0, 32);
+            Buffer.BlockCopy(bytes, h + 2, ServerRandom, 0, 32);
 
-            // Legacy session id length 
-            if (bytes.Length < 60) throw new ArgumentException("Buffer truncated before session id / cipher suite.");
-            int sessionIdLen = bytes[59];
-            if (sessionIdLen > 32 || bytes.Length < 60 + sessionIdLen) throw new DtlsException(AlertDescription.DecodeError, "Invalid legacy_session_id_echo.");
-            LegacySessionIdEcho = bytes.AsSpan(60, sessionIdLen).ToArray();
-            int cipherOffset = 60 + sessionIdLen;
+            int sessionIdLen = bytes[h + 34];
+            if (sessionIdLen > 32 || bytes.Length < h + 35 + sessionIdLen) throw new DtlsException(AlertDescription.DecodeError, "Invalid legacy_session_id_echo.");
+            LegacySessionIdEcho = bytes.AsSpan(h + 35, sessionIdLen).ToArray();
+            int cipherOffset = h + 35 + sessionIdLen;
             if (bytes.Length < cipherOffset + 3) throw new ArgumentException("Buffer truncated before cipher suite/compression.");
 
             // Selected cipher suite 
@@ -135,6 +142,8 @@ namespace SharpDTLS.DTLS13.Messages
             int extensionsLength = Extensions.Select(x => x.CalculateLength()).Sum();
             int sid = LegacySessionIdEcho.Length;
             byte[] serverHello = new byte[65 + sid + extensionsLength];
+            if (!Datagram)
+                return ToTlsBytes(serverHello, extensionsLength);
 
             // DTLS record header
             serverHello[0] = 0x16; // TLS record type 22 (Handshake)
@@ -211,6 +220,25 @@ namespace SharpDTLS.DTLS13.Messages
 
             Bytes = serverHello;
 
+            return Bytes;
+        }
+
+        // TLS: record header (version 0x0303), 4-byte handshake header.
+        private byte[] ToTlsBytes(byte[] buffer, int extensionsLength)
+        {
+            int offset = 0;
+            foreach (var extension in Extensions)
+                offset += extension.Write(offset, buffer);
+            byte[] message = new TlsWriter()
+                .WriteUInt16(0x0303)
+                .WriteBytes(ServerRandom)
+                .WriteOpaque8(LegacySessionIdEcho)
+                .WriteUInt16(SelectedCipherSuite)
+                .WriteUInt8(0)
+                .WriteOpaque16(buffer.AsSpan(0, extensionsLength).ToArray())
+                .ToArray();
+            Bytes = new TlsWriter().WriteUInt8(0x16).WriteUInt16(0x0303).WriteUInt16(4 + message.Length)
+                .WriteUInt8(0x02).WriteUInt24(message.Length).WriteBytes(message).ToArray();
             return Bytes;
         }
     }
@@ -297,6 +325,11 @@ namespace SharpDTLS.DTLS13.Messages
         public ServerSupportedVersions()
         { }
 
+        public ServerSupportedVersions(ushort version) => Version = version;
+
+        /// <summary>The selected version: DTLS 1.3 (0xFEFC) or TLS 1.3 (0x0304).</summary>
+        public ushort Version { get; private set; } = 0xFEFC;
+
         public int CalculateLength()
         {
             return 6;
@@ -317,8 +350,9 @@ namespace SharpDTLS.DTLS13.Messages
             byte major = source[offset + 4];
             byte minor = source[offset + 5];
 
-            if (major != 0xFE || minor != 0xFC)
-                throw new InvalidDataException($"Unsupported DTLS version: 0x{major:X2} 0x{minor:X2}");
+            Version = (ushort)((major << 8) | minor);
+            if (Version != 0xFEFC && Version != 0x0304)
+                throw new InvalidDataException($"Unsupported (D)TLS version: 0x{major:X2} 0x{minor:X2}");
 
             return 6;
         }
@@ -329,8 +363,8 @@ namespace SharpDTLS.DTLS13.Messages
             destination[offset + 1] = 0x2b; // Extension type 0x002b (Supported Versions)
             destination[offset + 2] = 0x00; // Extension length
             destination[offset + 3] = 0x02; // Length of versions list (2 bytes)
-            destination[offset + 4] = 0xfe; // DTLS 1.3 major version
-            destination[offset + 5] = 0xfc; // DTLS 1.3 minor version
+            destination[offset + 4] = (byte)(Version >> 8);
+            destination[offset + 5] = (byte)Version;
             return 6; // total length of the extension data
         }
     }

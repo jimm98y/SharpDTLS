@@ -43,3 +43,59 @@ namespace Dtls13Test.Tests
         }
     }
 }
+
+namespace Dtls13Test.Tests
+{
+    using SharpDTLS.DTLS13.Messages;
+    using System.Linq;
+
+    /// <summary>ClientHello, ServerHello and HelloRetryRequest in TLS form (RFC 8446 §4.1).</summary>
+    [TestClass]
+    public sealed class TestTls13Hellos
+    {
+        [TestMethod]
+        public void ClientHello_TlsForm_RoundTrips()
+        {
+            var ch = new ClientHelloDatagram(new byte[32]) { Datagram = false, LegacySessionId = new byte[32] };
+            ch.Extensions.RemoveAll(e => e is ClientSupportedVersions);
+            ch.Extensions.Add(new ClientSupportedVersions(ClientSupportedVersions.Tls13));
+            byte[] record = ch.ToBytes();
+            CollectionAssert.AreEqual(new byte[] { 0x16, 0x03, 0x01 }, record.Take(3).ToArray());
+            Assert.AreEqual(record.Length - 5, (record[3] << 8) | record[4]);
+            Assert.AreEqual(0x01, record[5]);
+            Assert.AreEqual(record.Length - 9, (record[6] << 16) | (record[7] << 8) | record[8]);
+            CollectionAssert.AreEqual(new byte[] { 0x03, 0x03 }, record.Skip(9).Take(2).ToArray());
+
+            var parsed = new ClientHelloDatagram { Datagram = false };
+            parsed.FromBytes(record);
+            CollectionAssert.AreEqual(ch.ClientRandom, parsed.ClientRandom);
+            Assert.HasCount(32, parsed.LegacySessionId);
+            CollectionAssert.AreEqual(ch.CipherSuites, parsed.CipherSuites);
+            CollectionAssert.AreEqual(new[] { ClientSupportedVersions.Tls13 }, parsed.Extensions.OfType<ClientSupportedVersions>().Single().Versions);
+            Assert.AreEqual(ch.Extensions.Count, parsed.Extensions.Count);
+        }
+
+        [TestMethod]
+        public void ServerHelloAndRetry_TlsForm_RoundTrip()
+        {
+            var sh = new ServerHelloDatagram(new byte[32], 0x1302, new byte[32]) { Datagram = false, LegacySessionIdEcho = new byte[32] };
+            sh.Extensions.RemoveAll(e => e is ServerSupportedVersions);
+            sh.Extensions.Add(new ServerSupportedVersions(0x0304));
+            byte[] record = sh.ToBytes();
+            CollectionAssert.AreEqual(new byte[] { 0x16, 0x03, 0x03 }, record.Take(3).ToArray());
+            Assert.AreEqual(0x02, record[5]);
+            var parsed = new ServerHelloDatagram { Datagram = false };
+            parsed.FromBytes(record);
+            Assert.AreEqual(0x1302, parsed.SelectedCipherSuite);
+            Assert.AreEqual(0x0304, parsed.Extensions.OfType<ServerSupportedVersions>().Single().Version);
+            Assert.HasCount(32, parsed.LegacySessionIdEcho);
+
+            var hrr = new HelloRetryRequest(0x1301, null, 0x0017, new byte[] { 1, 2, 3 }, datagram: false);
+            var parsedHrr = new ServerHelloDatagram { Datagram = false };
+            parsedHrr.FromBytes(hrr.ToBytes());
+            Assert.IsTrue(HelloRetryRequest.IsHelloRetryRequest(parsedHrr));
+            Assert.IsFalse(parsedHrr.Extensions.OfType<CookieExtension>().Any());
+            CollectionAssert.AreEqual(new byte[] { 1, 2, 3 }, parsedHrr.LegacySessionIdEcho);
+        }
+    }
+}

@@ -15,16 +15,18 @@ namespace SharpDTLS.DTLS13.Messages
         { }
 
         /// <param name="selectedGroup">Group the client must send a key share for, or null when the client's share is acceptable.</param>
-        public HelloRetryRequest(ushort cipherSuite, byte[] cookie, ushort? selectedGroup, byte[] legacySessionIdEcho)
+        public HelloRetryRequest(ushort cipherSuite, byte[] cookie, ushort? selectedGroup, byte[] legacySessionIdEcho, bool datagram = true)
         {
+            Datagram = datagram;
             ServerRandom = (byte[])HelloRetryRequestRandom.Clone();
             SelectedCipherSuite = cipherSuite;
             LegacySessionIdEcho = legacySessionIdEcho ?? Array.Empty<byte>();
 
-            var extensions = new List<ITlsExtension> { new ServerSupportedVersions() };
+            var extensions = new List<ITlsExtension> { new ServerSupportedVersions(datagram ? (ushort)0xFEFC : (ushort)0x0304) };
             if (selectedGroup.HasValue)
                 extensions.Add(new ServerKeyShareExtension(selectedGroup.Value, null));
-            extensions.Add(new CookieExtension(cookie));
+            if (cookie != null)
+                extensions.Add(new CookieExtension(cookie));
             Extensions = extensions;
         }
 

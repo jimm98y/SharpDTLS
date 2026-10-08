@@ -20,6 +20,15 @@ namespace SharpDTLS.DTLS13.Messages
         public byte[] LegacyCookie { get; set; } = Array.Empty<byte>();
         public byte[] Bytes { get; private set; }
 
+        /// <summary>
+        /// DTLS form (a DTLS record with a 12-byte handshake header, legacy version 0xFEFD and a legacy_cookie) or, when
+        /// false, TLS form (a TLS record with a 4-byte handshake header, legacy version 0x0303, no cookie).
+        /// </summary>
+        public bool Datagram { get; set; } = true;
+
+        // Bytes before the ClientHello body: record header + handshake header.
+        private int HeaderLength => Datagram ? 25 : 9;
+
         public ClientHelloDatagram()
         { }
 
@@ -45,34 +54,40 @@ namespace SharpDTLS.DTLS13.Messages
         public void FromBytes(byte[] bytes)
         {
             if (bytes == null) throw new ArgumentNullException(nameof(bytes));
-            if (bytes.Length < 67) throw new ArgumentException("Buffer too small to be a valid ClientHello.");
+            int h = HeaderLength;
+            if (bytes.Length < h + 42) throw new ArgumentException("Buffer too small to be a valid ClientHello.");
             if (bytes[0] != 0x16) throw new InvalidDataException("Not a handshake record.");
 
             Bytes = bytes.ToArray();
-            Epoch = (bytes[3] << 8) | bytes[4];
-
-            long seq = 0;
-            for (int i = 5; i <= 10; i++)
+            if (Datagram)
             {
-                seq = (seq << 8) | bytes[i];
+                Epoch = (bytes[3] << 8) | bytes[4];
+
+                long seq = 0;
+                for (int i = 5; i <= 10; i++)
+                {
+                    seq = (seq << 8) | bytes[i];
+                }
+                RecordSequenceNumber = (int)seq;
+                SequenceNumber = (bytes[17] << 8) | bytes[18];
             }
-            RecordSequenceNumber = (int)seq;
-            SequenceNumber = (bytes[17] << 8) | bytes[18];
 
-            if (bytes.Length < 27 + 32) throw new ArgumentException("Buffer too small for ClientRandom.");
             ClientRandom = new byte[32];
-            Buffer.BlockCopy(bytes, 27, ClientRandom, 0, 32);
+            Buffer.BlockCopy(bytes, h + 2, ClientRandom, 0, 32);
 
-            int p = 59;
+            int p = h + 34;
             int sessionIdLen = bytes[p++];
             if (sessionIdLen > 32 || bytes.Length < p + sessionIdLen + 1) throw new DtlsException(AlertDescription.DecodeError, "Invalid legacy_session_id.");
             LegacySessionId = bytes.AsSpan(p, sessionIdLen).ToArray();
             p += sessionIdLen;
 
-            int cookieLen = bytes[p++];
-            if (bytes.Length < p + cookieLen + 2) throw new DtlsException(AlertDescription.DecodeError, "Invalid legacy_cookie.");
-            LegacyCookie = bytes.AsSpan(p, cookieLen).ToArray();
-            p += cookieLen;
+            if (Datagram)
+            {
+                int cookieLen = bytes[p++];
+                if (bytes.Length < p + cookieLen + 2) throw new DtlsException(AlertDescription.DecodeError, "Invalid legacy_cookie.");
+                LegacyCookie = bytes.AsSpan(p, cookieLen).ToArray();
+                p += cookieLen;
+            }
 
             int cipherSuitesLen = (bytes[p] << 8) | bytes[p + 1];
             p += 2;
@@ -160,6 +175,9 @@ namespace SharpDTLS.DTLS13.Messages
             // Sized from the content: post-quantum key shares alone exceed a kilobyte.
             byte[] clientHello = new byte[512 + 2 * CipherSuites.Count + LegacySessionId.Length + LegacyCookie.Length
                                           + Extensions.Sum(e => e.CalculateLength())];
+
+            if (!Datagram)
+                return ToTlsBytes(clientHello);
 
             // DTLS record header
             clientHello[0] = 0x16; // TLS record type 22 (Handshake)
@@ -249,6 +267,26 @@ namespace SharpDTLS.DTLS13.Messages
 
             Bytes = clientHello.Take(nextExtensionOffset).ToArray();
 
+            return Bytes;
+        }
+
+        // TLS: record header (version 0x0301 for compatibility, RFC 8446 §5.1), 4-byte handshake header, no cookie.
+        private byte[] ToTlsBytes(byte[] buffer)
+        {
+            var body = new TlsWriter()
+                .WriteUInt16(0x0303)
+                .WriteBytes(ClientRandom)
+                .WriteOpaque8(LegacySessionId)
+                .WriteUInt16List16(CipherSuites)
+                .WriteOpaque8(new byte[] { 0 });
+            int extensionsLength = Extensions.Sum(x => x.CalculateLength());
+            int offset = 0;
+            foreach (var extension in Extensions)
+                offset += extension.Write(offset, buffer);
+            body.WriteOpaque16(buffer.AsSpan(0, extensionsLength).ToArray());
+            byte[] message = body.ToArray();
+            Bytes = new TlsWriter().WriteUInt8(0x16).WriteUInt16(0x0301).WriteUInt16(4 + message.Length)
+                .WriteUInt8(0x01).WriteUInt24(message.Length).WriteBytes(message).ToArray();
             return Bytes;
         }
     }
@@ -346,11 +384,14 @@ namespace SharpDTLS.DTLS13.Messages
     {
         public const ushort Dtls13 = 0xFEFC;
         public const ushort Dtls12 = 0xFEFD;
+        public const ushort Tls13 = 0x0304;
 
         public List<ushort> Versions { get; private set; } = new List<ushort> { Dtls13 };
 
         public ClientSupportedVersions()
         { }
+
+        public ClientSupportedVersions(params ushort[] versions) => Versions = versions.ToList();
 
         public int CalculateLength()
         {
