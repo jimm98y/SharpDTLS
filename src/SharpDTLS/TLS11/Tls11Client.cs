@@ -1,7 +1,7 @@
 using SharpDTLS.TLS12;
 using System.IO;
 
-namespace SharpDTLS.TLS10
+namespace SharpDTLS.TLS11
 {
     /// <summary>
     /// TLS 1.1 client (RFC 4346): the TLS 1.0-1.2 client restricted to TLS 1.1. Deprecated by RFC 8996; use it only

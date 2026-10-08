@@ -1,6 +1,7 @@
 using SharpDTLS;
 using SharpDTLS.DTLS12;
 using SharpDTLS.TLS10;
+using SharpDTLS.TLS11;
 using SharpDTLS.TLS12;
 using SharpDTLS.TLS13;
 using System;

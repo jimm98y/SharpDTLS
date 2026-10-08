@@ -2,7 +2,7 @@ using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.X509;
 using SharpDTLS.TLS12;
 
-namespace SharpDTLS.TLS10
+namespace SharpDTLS.TLS11
 {
     /// <summary>
     /// TLS 1.1 server (RFC 4346): the TLS 1.0-1.2 server restricted to TLS 1.1. Deprecated by RFC 8996; use it only
