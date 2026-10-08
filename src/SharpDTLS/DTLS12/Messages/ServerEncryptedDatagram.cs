@@ -85,6 +85,11 @@ namespace SharpDTLS.DTLS12.Messages
                 plaintext = work.Take(plaintextLen).ToArray();
             }
 
+            // Mark only after the record authenticated (RFC 6347 §4.1.2.6).
+            if (_ctx.ServerRecords.IsDuplicate(SequenceNumber))
+                throw new DtlsRecordDiscardedException($"Replayed record {SequenceNumber}");
+            _ctx.ServerRecords.Mark(SequenceNumber);
+
             Datagram = ContentType == 0x16
                 ? plaintext[0] switch
                 {

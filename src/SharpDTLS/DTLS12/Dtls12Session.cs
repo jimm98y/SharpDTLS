@@ -21,6 +21,19 @@ namespace SharpDTLS.DTLS12
         // Current epoch: 0 = unencrypted, 1 = encrypted (post-ChangeCipherSpec)
         public ushort Epoch { get; set; } = 0;
 
+        // Server-side retransmission state: the last flight sent and its timer.
+        internal List<System.Func<IEnumerable<byte[]>>> Flight { get; } = new List<System.Func<IEnumerable<byte[]>>>();
+        internal RetransmitTimer RetransmitTimer { get; set; }
+
+        /// <summary>The SRTP protection profile negotiated via use_srtp (RFC 5764), or null.</summary>
+        public ushort? SrtpProtectionProfile { get; set; }
+
+        /// <summary>The negotiated ECDHE group.</summary>
+        public ushort NamedGroup { get; set; } = EcdheGroups.X25519;
+
+        /// <summary>Whether extended_master_secret (RFC 7627) was negotiated.</summary>
+        public bool UseExtendedMasterSecret { get; set; }
+
         public byte[] ClientRandom { get; set; }
         public byte[] ServerRandom { get; set; }
         public ushort CipherSuite { get; set; } = 0xC02F;

@@ -92,7 +92,7 @@ namespace SharpDTLS.DTLS10.Messages
                 {
                     0x000a => new SupportedGroupsExtension(),
                     0x000b => new EcPointFormatsExtension(),
-                    0x000f => new UseSrtpExtension(),
+                    0x000e => new UseSrtpExtension(),
                     _ => null
                 };
 

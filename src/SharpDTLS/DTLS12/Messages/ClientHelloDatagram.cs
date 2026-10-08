@@ -108,7 +108,9 @@ namespace SharpDTLS.DTLS12.Messages
                     0x000b => new EcPointFormatsExtension(),
                     0x000d => new SignatureAlgorithmsExtension(),
                     0x0016 => new EncryptThenMacExtension(),
-                    0x000f => new UseSrtpExtension(),
+                    0x000e => new UseSrtpExtension(),
+                    RenegotiationInfoExtension.Type => new RenegotiationInfoExtension(),
+                    ExtendedMasterSecretExtension.Type => new ExtendedMasterSecretExtension(),
                     _ => null
                 };
 
@@ -134,8 +136,8 @@ namespace SharpDTLS.DTLS12.Messages
             buf[2] = 0xFD;
             buf[3] = (byte)((Epoch >> 8) & 0xFF);
             buf[4] = (byte)(Epoch & 0xFF);
-            buf[5]  = (byte)((RecordSequenceNumber >> 40) & 0xFF);
-            buf[6]  = (byte)((RecordSequenceNumber >> 32) & 0xFF);
+            buf[5]  = (byte)(((long)RecordSequenceNumber >> 40) & 0xFF);
+            buf[6]  = (byte)(((long)RecordSequenceNumber >> 32) & 0xFF);
             buf[7]  = (byte)((RecordSequenceNumber >> 24) & 0xFF);
             buf[8]  = (byte)((RecordSequenceNumber >> 16) & 0xFF);
             buf[9]  = (byte)((RecordSequenceNumber >> 8) & 0xFF);
@@ -374,7 +376,7 @@ namespace SharpDTLS.DTLS12.Messages
         public int Write(int offset, byte[] dst)
         {
             dst[offset]     = 0x00;
-            dst[offset + 1] = 0x0F; // 0x000f
+            dst[offset + 1] = 0x0E; // 0x000e use_srtp (RFC 5764)
             int profileLen = 2 * ProtectionProfiles.Length;
             int extLen = 2 + profileLen + 1 + MasterKeyIdentifier.Length;
             dst[offset + 2] = (byte)((extLen >> 8) & 0xFF);
@@ -406,30 +408,39 @@ namespace SharpDTLS.DTLS12.Messages
             MasterKeyIdentifier = mki ?? Array.Empty<byte>();
         }
 
-        public int CalculateLength() => 4 + 2 + 1 + MasterKeyIdentifier.Length;
+        // RFC 5764 §4.1.1: the server's use_srtp has the same structure as the client's, with a
+        // profile list containing exactly the selected profile.
+        public int CalculateLength() => 4 + 2 + 2 + 1 + MasterKeyIdentifier.Length;
 
         public int Read(int offset, byte[] src)
         {
-            ushort extLen = (ushort)((src[offset + 2] << 8) | src[offset + 3]);
-            SelectedProfile = (ushort)((src[offset + 4] << 8) | src[offset + 5]);
-            byte mkiLen = src[offset + 6];
+            int extLen = (src[offset + 2] << 8) | src[offset + 3];
+            int listLen = (src[offset + 4] << 8) | src[offset + 5];
+            if (listLen != 2 || extLen < 2 + listLen + 1)
+                throw new DtlsException(AlertDescription.IllegalParameter, "Server use_srtp must contain exactly one profile.");
+            SelectedProfile = (ushort)((src[offset + 6] << 8) | src[offset + 7]);
+            byte mkiLen = src[offset + 8];
+            if (extLen != 2 + listLen + 1 + mkiLen)
+                throw new DtlsException(AlertDescription.DecodeError, "Invalid use_srtp extension length.");
             MasterKeyIdentifier = new byte[mkiLen];
-            if (mkiLen > 0) Buffer.BlockCopy(src, offset + 7, MasterKeyIdentifier, 0, mkiLen);
+            if (mkiLen > 0) Buffer.BlockCopy(src, offset + 9, MasterKeyIdentifier, 0, mkiLen);
             return 4 + extLen;
         }
 
         public int Write(int offset, byte[] dst)
         {
             dst[offset]     = 0x00;
-            dst[offset + 1] = 0x0F; // 0x000f
-            int extLen = 2 + 1 + MasterKeyIdentifier.Length;
+            dst[offset + 1] = 0x0E; // 0x000e use_srtp (RFC 5764)
+            int extLen = 2 + 2 + 1 + MasterKeyIdentifier.Length;
             dst[offset + 2] = (byte)((extLen >> 8) & 0xFF);
             dst[offset + 3] = (byte)(extLen & 0xFF);
-            dst[offset + 4] = (byte)((SelectedProfile >> 8) & 0xFF);
-            dst[offset + 5] = (byte)(SelectedProfile & 0xFF);
-            dst[offset + 6] = (byte)MasterKeyIdentifier.Length;
+            dst[offset + 4] = 0x00; // profile list length = 2
+            dst[offset + 5] = 0x02;
+            dst[offset + 6] = (byte)((SelectedProfile >> 8) & 0xFF);
+            dst[offset + 7] = (byte)(SelectedProfile & 0xFF);
+            dst[offset + 8] = (byte)MasterKeyIdentifier.Length;
             if (MasterKeyIdentifier.Length > 0)
-                Buffer.BlockCopy(MasterKeyIdentifier, 0, dst, offset + 7, MasterKeyIdentifier.Length);
+                Buffer.BlockCopy(MasterKeyIdentifier, 0, dst, offset + 9, MasterKeyIdentifier.Length);
             return 4 + extLen;
         }
     }

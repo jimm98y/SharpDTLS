@@ -61,7 +61,7 @@ namespace SharpDTLS.DTLS10.Messages
 
                 ITlsExtension ext = extType switch
                 {
-                    0x000f => new ServerUseSrtpExtension(),
+                    0x000e => new ServerUseSrtpExtension(),
                     0x000b => new ServerEcPointFormatsExtension(),
                     _ => null
                 };
