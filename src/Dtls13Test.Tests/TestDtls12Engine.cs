@@ -82,6 +82,34 @@ namespace Dtls13Test.Tests
         }
 
         [TestMethod]
+        public void FallbackScsv_BelowServerMaximum_IsRejected()
+        {
+            // RFC 7507: a DTLS 1.0 retry marked as a fallback reaches a server that supports DTLS 1.2.
+            var pair = new ScriptedTransportPair();
+            var server = new Dtls12Server(pair.Server) { MinimumVersion = DtlsVersion.Dtls10 };
+            var client = new Dtls10Client(pair.Client) { IsFallback = true };
+            var failed = new TaskCompletionSource<Exception>();
+            client.Failed += (_, ex) => failed.TrySetResult(ex);
+
+            client.BeginHandshake();
+
+            Assert.IsTrue(failed.Task.Wait(Timeout));
+            Assert.AreEqual(AlertDescription.InappropriateFallback, ((DtlsException)failed.Task.Result).Alert);
+        }
+
+        [TestMethod]
+        public void FallbackScsv_AtServerMaximum_IsAccepted()
+        {
+            var pair = new ScriptedTransportPair();
+            var server = new Dtls10Server(pair.Server);
+            var client = new Dtls10Client(pair.Client) { IsFallback = true };
+
+            Handshake(client, server, client.BeginHandshake);
+
+            Assert.AreEqual(DtlsVersion.Dtls10, client.NegotiatedVersion);
+        }
+
+        [TestMethod]
         public void VersionNegotiation_Dtls12OnlyServer_RejectsDtls10Client()
         {
             var pair = new ScriptedTransportPair();

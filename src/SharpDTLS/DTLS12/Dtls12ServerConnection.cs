@@ -134,6 +134,11 @@ namespace SharpDTLS.DTLS12
                 throw new DtlsException(AlertDescription.ProtocolVersion, $"Client version {DtlsVersion.Name(ch.ClientVersion)} is not supported.");
             NegotiatedVersion = version;
 
+            // RFC 7507 §3: a client that fell back below our highest version is being downgraded.
+            if (ch.CipherSuites.Contains(SharpDTLS.CipherSuites.TLS_FALLBACK_SCSV) && ch.ClientVersion != MaximumVersion
+                && DtlsVersion.IsAtLeast(MaximumVersion, ch.ClientVersion))
+                throw new DtlsException(AlertDescription.InappropriateFallback, $"Client fell back to {DtlsVersion.Name(ch.ClientVersion)}.");
+
             if (!ch.CompressionMethods.Contains((byte)0))
                 throw new DtlsException(AlertDescription.IllegalParameter, "Client does not offer null compression.");
 

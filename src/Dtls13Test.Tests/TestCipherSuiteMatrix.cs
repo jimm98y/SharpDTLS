@@ -208,6 +208,18 @@ namespace Dtls13Test.Tests
             var export = CipherSuites.Registry.Where(s => s.IsExport).ToList();
             Assert.HasCount(15, export, "9 export and 6 KRB5 export suites");
             Assert.IsTrue(export.All(s => s.IsProhibited && !s.IsImplemented), "export suites must never be negotiated");
+
+            // Every registry entry is either implemented or deliberately not, with the reason.
+            var byStatus = CipherSuites.Registry.GroupBy(s => s.Status).ToDictionary(g => g.Key, g => g.Count());
+            Assert.IsFalse(byStatus.ContainsKey(CipherSuiteStatus.NotImplemented),
+                "uncategorised: " + string.Join(", ", CipherSuites.Registry.Where(s => s.Status == CipherSuiteStatus.NotImplemented)));
+            Assert.AreEqual(CipherSuites.All.Count, byStatus[CipherSuiteStatus.Implemented]);
+            Assert.AreEqual(9, byStatus[CipherSuiteStatus.Dtls13]);
+            Assert.AreEqual(28, byStatus[CipherSuiteStatus.NotDtls]);
+            Assert.AreEqual(2, byStatus[CipherSuiteStatus.Signaling]);
+            Assert.AreEqual(12, byStatus[CipherSuiteStatus.Prohibited], "NULL_WITH_NULL_NULL and the DTLS-OK export suites");
+            Assert.AreEqual(6, byStatus[CipherSuiteStatus.Unsupported], "Kerberos");
+            Assert.AreEqual(4, byStatus[CipherSuiteStatus.Unspecified], "Ascon");
         }
     }
 }

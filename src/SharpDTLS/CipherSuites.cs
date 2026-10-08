@@ -175,12 +175,36 @@ namespace SharpDTLS
         /// <summary>The key exchange authenticates with a TLS-PWD password (RFC 8492).</summary>
         public bool RequiresPwd => KeyExchange == KeyExchangeAlgorithm.ECCPWD;
 
+        /// <summary>Why the suite is or is not implemented.</summary>
+        public CipherSuiteStatus Status
+        {
+            get
+            {
+                if (IsImplemented)
+                    return CipherSuiteStatus.Implemented;
+                if (!DtlsOk)
+                    return CipherSuiteStatus.NotDtls;
+                if (Id is CipherSuites.TLS_EMPTY_RENEGOTIATION_INFO_SCSV or CipherSuites.TLS_FALLBACK_SCSV)
+                    return CipherSuiteStatus.Signaling;
+                if (IsProhibited)
+                    return CipherSuiteStatus.Prohibited;
+                if (DTLS13.Dtls13CipherSuite.IsSupported(Id))
+                    return CipherSuiteStatus.Dtls13;
+                if (KeyExchange == KeyExchangeAlgorithm.KRB5)
+                    return CipherSuiteStatus.Unsupported;
+                if (Name.Contains("ASCON", StringComparison.Ordinal))
+                    return CipherSuiteStatus.Unspecified;
+                return CipherSuiteStatus.NotImplemented;
+            }
+        }
+
         /// <summary>
-        /// Export suites (including the KRB5 export suites) must not be negotiated by TLS 1.1 and later
+        /// TLS_NULL_WITH_NULL_NULL (the initial state, RFC 5246 Appendix A.5) and the export suites, including
+        /// the KRB5 export suites, must not be negotiated by TLS 1.1 and later
         /// (RFC 4346 Appendix A.5, RFC 5246 Appendix A.5), so never by DTLS, which is defined on TLS 1.1 and 1.2.
         /// IANA marks them DTLS-OK only because they use no stream cipher.
         /// </summary>
-        public bool IsProhibited => IsExport;
+        public bool IsProhibited => IsExport || Id == 0x0000;
 
         /// <summary>Whether this implementation supports the suite.</summary>
         public bool IsImplemented => DtlsOk && !IsProhibited && CipherSuites.IsKeyExchangeImplemented(KeyExchange) && CipherSuites.IsCipherImplemented(Cipher)
@@ -303,12 +327,47 @@ namespace SharpDTLS
         }
     }
 
+    /// <summary>The implementation status of a registry entry.</summary>
+    public enum CipherSuiteStatus
+    {
+        /// <summary>Implemented by the DTLS 1.0/1.2 engine.</summary>
+        Implemented,
+
+        /// <summary>A TLS 1.3 suite, implemented by the DTLS 1.3 engine (<see cref="DTLS13.Dtls13CipherSuite"/>).</summary>
+        Dtls13,
+
+        /// <summary>IANA marks the suite DTLS-OK = N (stream ciphers cannot be used over datagrams).</summary>
+        NotDtls,
+
+        /// <summary>A signalling value (RFC 5746 renegotiation SCSV, RFC 7507 fallback SCSV), not a cipher suite.</summary>
+        Signaling,
+
+        /// <summary>Must never be negotiated: NULL_WITH_NULL_NULL and the export suites.</summary>
+        Prohibited,
+
+        /// <summary>
+        /// Deliberately not implemented: the Kerberos suites (RFC 2712), which no maintained implementation
+        /// supports and whose premaster secret encryption the RFC leaves ambiguous.
+        /// </summary>
+        Unsupported,
+
+        /// <summary>
+        /// No TLS/DTLS specification defines how to use the suite (the Ascon suites cite only NIST SP 800-232,
+        /// so their DTLS 1.3 record number encryption and Ascon-Hash256 key schedule are undefined).
+        /// </summary>
+        Unspecified,
+
+        /// <summary>Not yet implemented.</summary>
+        NotImplemented,
+    }
+
     /// <summary>
     /// The IANA cipher suite registry with the DTLS 1.0/1.2 properties of every suite, and the set implemented here.
     /// </summary>
     public static class CipherSuites
     {
         public const ushort TLS_EMPTY_RENEGOTIATION_INFO_SCSV = 0x00FF;
+        public const ushort TLS_FALLBACK_SCSV = 0x5600;
 
         private static readonly HashSet<KeyExchangeAlgorithm> ImplementedKeyExchanges = new()
         {

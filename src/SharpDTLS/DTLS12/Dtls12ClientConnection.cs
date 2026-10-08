@@ -103,6 +103,12 @@ namespace SharpDTLS.DTLS12
 
         private bool HavePwd => PwdUsername != null && PwdPassword != null;
 
+        /// <summary>
+        /// Set when this handshake is a retry at a lower version after a failed one: sends TLS_FALLBACK_SCSV
+        /// so a server supporting a higher version detects the downgrade (RFC 7507 §4).
+        /// </summary>
+        public bool IsFallback { get; set; }
+
         /// <summary>Smallest finite-field Diffie-Hellman prime, or SRP group modulus, accepted from a server.</summary>
         public int MinimumDhPrimeBits { get; set; } = 1024;
 
@@ -136,7 +142,7 @@ namespace SharpDTLS.DTLS12
                 ClientVersion = MaximumVersion,
                 Random = ClientRandom,
                 Cookie = cookie,
-                CipherSuites = offered,
+                CipherSuites = IsFallback ? offered.Append(SharpDTLS.CipherSuites.TLS_FALLBACK_SCSV).ToList() : offered,
             };
 
             // Supported groups: elliptic curves, plus the RFC 7919 FFDHE groups when DHE suites are offered.

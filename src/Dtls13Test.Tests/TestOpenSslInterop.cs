@@ -283,6 +283,43 @@ namespace Dtls13Test.Tests
         }
 
         [TestMethod]
+        public void OpenSslFallbackClient_IsRejectedWithInappropriateFallback()
+        {
+            OpenSsl.RequireOpenSsl();
+            string dir = OpenSsl.NewTempDirectory();
+            using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
+            var server = new Dtls12Server(transport) { MinimumVersion = DtlsVersion.Dtls10 };
+
+            using var client = new OpenSslProcess(
+                $"s_client -dtls1 -fallback_scsv -cipher DEFAULT@SECLEVEL=0 -connect 127.0.0.1:{transport.LocalEndpoint.Port} -quiet", dir);
+            Assert.IsTrue(client.WaitForOutput("inappropriate fallback", Timeout), "expected inappropriate_fallback:\n" + client.Output);
+            Assert.IsEmpty(server.Connections.Where(c => c.IsHandshakeComplete));
+        }
+
+        [TestMethod]
+        public void SharpDtlsFallbackClient_To_OpenSslServer_IsRejected()
+        {
+            OpenSsl.RequireOpenSsl();
+            string dir = OpenSsl.NewTempDirectory();
+            var (keyPair, certificate) = TestCredentials.For(CertificateKeyType.Rsa);
+            string certPath = OpenSsl.WritePem(dir, "cert.pem", certificate);
+            string keyPath = OpenSsl.WritePem(dir, "key.pem", keyPair.Private);
+            using var server = OpenSslProcess.StartServer(p =>
+                $"s_server -dtls -accept 127.0.0.1:{p} -cert {certPath} -key {keyPath} -cipher DEFAULT@SECLEVEL=0", dir, Timeout, out int port);
+            Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), "s_server did not start:\n" + server.Output);
+
+            using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
+            var client = new SharpDTLS.DTLS10.Dtls10Client(transport) { IsFallback = true };
+            var failed = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
+            client.Failed += (_, ex) => failed.TrySetResult(ex);
+            client.HandshakeFinished += (_, _) => failed.TrySetResult(null);
+            client.BeginHandshake();
+
+            Assert.IsTrue(failed.Task.Wait(Timeout), "no result:\n" + server.Output);
+            Assert.AreEqual(AlertDescription.InappropriateFallback, (failed.Task.Result as DtlsException)?.Alert, server.Output);
+        }
+
+        [TestMethod]
         public void SharpDtlsClient_WithClientCertificate_To_OpenSslServerRequiringIt()
         {
             OpenSsl.RequireOpenSsl();
