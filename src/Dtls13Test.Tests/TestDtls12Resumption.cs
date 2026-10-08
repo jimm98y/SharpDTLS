@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 
 namespace Dtls13Test.Tests
 {
-    /// <summary>DTLS 1.0/1.2 session resumption by session ID (RFC 5246 §7.3, RFC 7627 §5.3).</summary>
+    /// <summary>DTLS 1.0/1.2 session resumption by session ID and ticket (RFC 5246 §7.3, RFC 5077, RFC 7627 §5.3).</summary>
     [TestClass]
     public sealed class TestDtls12Resumption
     {
@@ -26,7 +26,7 @@ namespace Dtls13Test.Tests
         }
 
         private static Run Connect(ushort version, IDtls12SessionCache cache, Dtls12SessionState resume, ushort? suite = null,
-            Action<ScriptedTransportPair> configureLink = null)
+            Action<ScriptedTransportPair> configureLink = null, Dtls12TicketKeys ticketKeys = null)
         {
             var r = new Run();
             configureLink?.Invoke(r.Pair);
@@ -34,17 +34,17 @@ namespace Dtls13Test.Tests
             var suites = suite.HasValue ? new List<ushort> { suite.Value } : null;
             if (version == DtlsVersion.Dtls12)
             {
-                var server = new Dtls12Server(r.Pair.Server) { SessionCache = cache, InitialRetransmitTimeout = timeout, CipherSuites = suites };
+                var server = new Dtls12Server(r.Pair.Server) { SessionCache = cache, TicketKeys = ticketKeys, InitialRetransmitTimeout = timeout, CipherSuites = suites };
                 server.ApplicationDataReceived += (_, e) => { lock (r.ServerReceived) r.ServerReceived.Add(Encoding.UTF8.GetString(e.Data)); };
                 r.Server = server;
-                r.Client = new Dtls12Client(r.Pair.Client) { ResumptionSession = resume, InitialRetransmitTimeout = timeout, CipherSuites = suites };
+                r.Client = new Dtls12Client(r.Pair.Client) { ResumptionSession = resume, InitialRetransmitTimeout = timeout, CipherSuites = suites, UseSessionTickets = ticketKeys != null };
             }
             else
             {
-                var server = new Dtls10Server(r.Pair.Server) { SessionCache = cache, InitialRetransmitTimeout = timeout, CipherSuites = suites };
+                var server = new Dtls10Server(r.Pair.Server) { SessionCache = cache, TicketKeys = ticketKeys, InitialRetransmitTimeout = timeout, CipherSuites = suites };
                 server.ApplicationDataReceived += (_, e) => { lock (r.ServerReceived) r.ServerReceived.Add(Encoding.UTF8.GetString(e.Data)); };
                 r.Server = server;
-                r.Client = new Dtls10Client(r.Pair.Client) { ResumptionSession = resume, InitialRetransmitTimeout = timeout, CipherSuites = suites };
+                r.Client = new Dtls10Client(r.Pair.Client) { ResumptionSession = resume, InitialRetransmitTimeout = timeout, CipherSuites = suites, UseSessionTickets = ticketKeys != null };
             }
             r.Client.ApplicationDataReceived += (_, data) => { lock (r.ClientReceived) r.ClientReceived.Add(Encoding.UTF8.GetString(data)); };
 
@@ -162,6 +162,109 @@ namespace Dtls13Test.Tests
                     pair.ClientToServer = drop;
             });
             Assert.IsTrue(r.Client.IsResumed);
+            ExchangeData(r);
+        }
+
+        // ── RFC 5077 session tickets ─────────────────────────────────────────────────────────
+
+        [DataRow(DtlsVersion.Dtls12, (ushort)0xC02F)]
+        [DataRow(DtlsVersion.Dtls12, (ushort)0xC027)]
+        [DataRow(DtlsVersion.Dtls10, (ushort)0xC013)]
+        [TestMethod]
+        public void Ticket_IsResumedStatelessly(ushort version, ushort suite)
+        {
+            var cache = new Dtls12SessionCache();
+            var keys = new Dtls12TicketKeys();
+            var first = Connect(version, cache, null, suite, ticketKeys: keys);
+            var session = first.Client.SessionState;
+            Assert.IsNotNull(session?.Ticket, "the server issues a ticket during the full handshake");
+            Assert.IsEmpty(session.SessionId);
+            Assert.AreEqual(0, cache.Count, "ticket sessions need no server state");
+            Assert.AreEqual((uint)keys.Lifetime.TotalSeconds, session.TicketLifetimeHint);
+
+            var second = Connect(version, new Dtls12SessionCache(), session, suite, ticketKeys: keys);
+            Assert.IsTrue(second.Client.IsResumed);
+            Assert.IsTrue(second.ServerConnection.IsResumed);
+            Assert.AreSame(session, second.Client.SessionState, "tickets under the current key are not renewed");
+            ExchangeData(second);
+        }
+
+        [TestMethod]
+        public void Ticket_FromAnotherServerKey_FallsBackToAFullHandshakeWithANewTicket()
+        {
+            var session = Connect(DtlsVersion.Dtls12, null, null, ticketKeys: new Dtls12TicketKeys()).Client.SessionState;
+            var r = Connect(DtlsVersion.Dtls12, null, session, ticketKeys: new Dtls12TicketKeys());
+            Assert.IsFalse(r.Client.IsResumed);
+            Assert.IsNotNull(r.Client.SessionState.Ticket);
+            CollectionAssert.AreNotEqual(session.Ticket, r.Client.SessionState.Ticket);
+        }
+
+        [TestMethod]
+        public void Ticket_AfterKeyRotation_IsResumedAndRenewedKeepingItsAge()
+        {
+            var keys = new Dtls12TicketKeys();
+            var session = Connect(DtlsVersion.Dtls12, null, null, ticketKeys: keys).Client.SessionState;
+            keys.Rotate();
+
+            var r = Connect(DtlsVersion.Dtls12, null, session, ticketKeys: keys);
+            Assert.IsTrue(r.Client.IsResumed);
+            var renewed = r.Client.SessionState;
+            CollectionAssert.AreNotEqual(session.Ticket, renewed.Ticket);
+
+            keys.Rotate(); // the original key is gone, the renewed ticket still works
+            Assert.IsTrue(Connect(DtlsVersion.Dtls12, null, renewed, ticketKeys: keys).Client.IsResumed);
+            Assert.IsFalse(Connect(DtlsVersion.Dtls12, null, session, ticketKeys: keys).Client.IsResumed);
+        }
+
+        [TestMethod]
+        public void Ticket_ExpiredOrTampered_IsNotResumed()
+        {
+            var keys = new Dtls12TicketKeys();
+            var session = Connect(DtlsVersion.Dtls12, null, null, ticketKeys: keys).Client.SessionState;
+
+            byte[] tampered = (byte[])session.Ticket.Clone();
+            tampered[^1] ^= 1;
+            var forged = new Dtls12SessionState(session.SessionId, session.Version, session.CipherSuite, session.MasterSecret,
+                session.EncryptThenMac, session.PeerCertificate, session.CreatedUtc, tampered, 0);
+            Assert.IsFalse(Connect(DtlsVersion.Dtls12, null, forged, ticketKeys: keys).Client.IsResumed);
+
+            keys.Lifetime = TimeSpan.Zero;
+            Assert.IsFalse(Connect(DtlsVersion.Dtls12, null, session, ticketKeys: keys).Client.IsResumed);
+        }
+
+        [TestMethod]
+        public void ClientWithoutTickets_GetsASessionId()
+        {
+            var cache = new Dtls12SessionCache();
+            var r = Connect(DtlsVersion.Dtls12, cache, null);
+            Assert.IsNull(r.Client.SessionState.Ticket);
+            Assert.HasCount(32, r.Client.SessionState.SessionId);
+            Assert.AreEqual(1, cache.Count);
+        }
+
+        // Full handshake with a ticket — server: 1 HelloVerifyRequest, 2 ServerHello, 3 Certificate, 4 ServerKeyExchange,
+        // 5 ServerHelloDone, 6 NewSessionTicket, 7 ChangeCipherSpec, 8 Finished. Abbreviated with a renewed ticket:
+        // 1 HelloVerifyRequest, 2 ServerHello, 3 NewSessionTicket, 4 ChangeCipherSpec, 5 Finished.
+        [DataRow(false, 6)]
+        [DataRow(true, 3)]
+        [TestMethod]
+        public void LostNewSessionTicket_IsRetransmitted(bool resumption, int dropIndex)
+        {
+            var keys = new Dtls12TicketKeys();
+            Dtls12SessionState session = null;
+            if (resumption)
+            {
+                session = Connect(DtlsVersion.Dtls12, null, null, ticketKeys: keys).Client.SessionState;
+                keys.Rotate(); // forces a renewed ticket in the abbreviated handshake
+            }
+
+            var r = Connect(DtlsVersion.Dtls12, null, session, ticketKeys: keys, configureLink: pair =>
+            {
+                int count = 0;
+                pair.ServerToClient = d => ++count == dropIndex ? Array.Empty<byte[]>() : new[] { d };
+            });
+            Assert.AreEqual(resumption, r.Client.IsResumed);
+            Assert.IsNotNull(r.Client.SessionState.Ticket);
             ExchangeData(r);
         }
     }

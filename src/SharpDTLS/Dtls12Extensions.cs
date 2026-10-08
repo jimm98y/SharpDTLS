@@ -107,6 +107,41 @@ namespace SharpDTLS
     }
 
     /// <summary>
+    /// SessionTicket (RFC 5077 §3.2): empty to advertise support (and, in ServerHello, to announce a
+    /// NewSessionTicket), or a ticket to resume. The extension data is the ticket itself.
+    /// </summary>
+    public class SessionTicketExtension : ITlsExtension
+    {
+        public const ushort Type = 0x0023;
+
+        public SessionTicketExtension() { }
+        public SessionTicketExtension(byte[] ticket) => Ticket = ticket ?? Array.Empty<byte>();
+
+        public byte[] Ticket { get; private set; } = Array.Empty<byte>();
+
+        public int CalculateLength() => 4 + Ticket.Length;
+
+        public int Read(int offset, byte[] source)
+        {
+            int length = (source[offset + 2] << 8) | source[offset + 3];
+            if (source.Length < offset + 4 + length)
+                throw new DtlsException(AlertDescription.DecodeError, "Invalid SessionTicket extension.");
+            Ticket = source.AsSpan(offset + 4, length).ToArray();
+            return 4 + length;
+        }
+
+        public int Write(int offset, byte[] destination)
+        {
+            destination[offset]     = 0x00;
+            destination[offset + 1] = 0x23;
+            destination[offset + 2] = (byte)(Ticket.Length >> 8);
+            destination[offset + 3] = (byte)Ticket.Length;
+            Buffer.BlockCopy(Ticket, 0, destination, offset + 4, Ticket.Length);
+            return 4 + Ticket.Length;
+        }
+    }
+
+    /// <summary>
     /// extended_master_secret (RFC 7627): binds the master secret to the handshake transcript.
     /// </summary>
     public class ExtendedMasterSecretExtension : ITlsExtension

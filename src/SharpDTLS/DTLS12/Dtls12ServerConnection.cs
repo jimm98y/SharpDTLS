@@ -52,6 +52,9 @@ namespace SharpDTLS.DTLS12
 
         /// <summary>Resumable sessions by session ID; null disables session ID resumption.</summary>
         public IDtls12SessionCache SessionCache { get; set; } = new Dtls12SessionCache();
+
+        /// <summary>Keys for RFC 5077 session tickets (random per server by default); null disables tickets.</summary>
+        public Dtls12TicketKeys TicketKeys { get; set; } = new Dtls12TicketKeys();
     }
 
     /// <summary>
@@ -78,6 +81,7 @@ namespace SharpDTLS.DTLS12
         private X509Certificate _clientCertificate;
         private Dtls12SessionState _resumedSession;
         private byte[] _sessionId = Array.Empty<byte>();
+        private bool _issueTicket;
 
         public event EventHandler<EventArgs> HandshakeFinished;
 
@@ -193,8 +197,10 @@ namespace SharpDTLS.DTLS12
             UseExtendedMasterSecret = ch.Extension<ExtendedMasterSecretExtension>() != null;
             UseEncryptThenMac = CipherSuite.IsCbc && ch.Extension<EncryptThenMacExtension>() != null;
 
-            // A new session gets an ID only when it will be resumable (RFC 7627 §5.3: EMS sessions only).
-            if (_settings.SessionCache != null && UseExtendedMasterSecret)
+            // A new session is resumable only with the extended master secret (RFC 7627 §5.3): by ticket when the
+            // client supports them (RFC 5077, keeping the server stateless), otherwise by session ID.
+            _issueTicket = _settings.TicketKeys != null && UseExtendedMasterSecret && ch.Extension<SessionTicketExtension>() != null;
+            if (!_issueTicket && _settings.SessionCache != null && UseExtendedMasterSecret)
                 _sessionId = Dtls12CryptoUtils.GenerateRandom(32);
         }
 
@@ -204,9 +210,15 @@ namespace SharpDTLS.DTLS12
         /// </summary>
         private bool TryResume(ClientHelloMessage ch, ushort version)
         {
-            if (ch.SessionId.Length == 0 || _settings.SessionCache == null)
-                return false;
-            var session = _settings.SessionCache.Find(ch.SessionId);
+            // A ticket takes precedence over the session ID; the client generates the ID to detect acceptance
+            // (RFC 5077 §3.4).
+            Dtls12SessionState session = null;
+            bool renewTicket = false;
+            byte[] ticket = ch.Extension<SessionTicketExtension>()?.Ticket;
+            if (ticket is { Length: > 0 } && _settings.TicketKeys != null)
+                session = _settings.TicketKeys.Open(ticket, out renewTicket);
+            if (session == null && ch.SessionId.Length != 0 && _settings.SessionCache != null)
+                session = _settings.SessionCache.Find(ch.SessionId);
             if (session == null)
                 return false;
 
@@ -223,7 +235,8 @@ namespace SharpDTLS.DTLS12
                 return false;
 
             _resumedSession = session;
-            _sessionId = session.SessionId;
+            _sessionId = ch.SessionId;
+            _issueTicket = renewTicket;
             CipherSuite = suite;
             UseExtendedMasterSecret = true;
             UseEncryptThenMac = session.EncryptThenMac;
@@ -254,12 +267,17 @@ namespace SharpDTLS.DTLS12
                 sh.Extensions.Add(new ServerEcPointFormatsExtension());
             if (SelectedSrtpProtectionProfile.HasValue)
                 sh.Extensions.Add(new ServerUseSrtpExtension(SelectedSrtpProtectionProfile.Value, ch.Extension<UseSrtpExtension>().MasterKeyIdentifier));
+            if (_issueTicket)
+                sh.Extensions.Add(new SessionTicketExtension());
             SendHandshake(HandshakeType.ServerHello, sh.Encode());
 
             if (IsResumed)
             {
-                // Abbreviated handshake: ServerHello, ChangeCipherSpec, Finished; the client answers with its own.
+                // Abbreviated handshake: ServerHello, [NewSessionTicket], ChangeCipherSpec, Finished; the client
+                // answers with its own ChangeCipherSpec and Finished.
                 DeriveKeysFromMasterSecret(_resumedSession.MasterSecret);
+                if (_issueTicket)
+                    SendNewSessionTicket(_resumedSession);
                 SendChangeCipherSpec();
                 SendHandshake(HandshakeType.Finished, ComputeVerifyData(fromClient: false));
                 ArmRetransmission();
@@ -393,6 +411,9 @@ namespace SharpDTLS.DTLS12
             {
                 // Final flight: not retransmitted on a timer, only when the client retransmits (RFC 6347 §4.2.4).
                 BeginFlight();
+                if (_issueTicket)
+                    SendNewSessionTicket(new Dtls12SessionState(Array.Empty<byte>(), NegotiatedVersion, CipherSuite.Id, MasterSecret,
+                        UseEncryptThenMac, _clientCertificate?.GetEncoded()));
                 SendChangeCipherSpec();
                 SendHandshake(HandshakeType.Finished, ComputeVerifyData(fromClient: false));
 
@@ -407,15 +428,15 @@ namespace SharpDTLS.DTLS12
             RaiseEvent(() => HandshakeFinished?.Invoke(this, EventArgs.Empty));
         }
 
-        /// <summary>
-        /// Sends a NewSessionTicket after the handshake. Note: RFC 5077 tickets belong inside the
-        /// handshake; session resumption is not implemented yet.
-        /// </summary>
-        public void SendNewSessionTicket(byte[] ticket, uint lifetimeHint) => Locked(() =>
+        // NewSessionTicket comes right before the server's ChangeCipherSpec (RFC 5077 §3.3).
+        private void SendNewSessionTicket(Dtls12SessionState session)
         {
-            if (!IsHandshakeComplete)
-                throw new InvalidOperationException("The handshake has not completed.");
-            SendHandshakeNoFlight(HandshakeType.NewSessionTicket, new NewSessionTicketMessage { LifetimeHint = lifetimeHint, Ticket = ticket }.Encode());
-        });
+            var keys = _settings.TicketKeys;
+            SendHandshake(HandshakeType.NewSessionTicket, new NewSessionTicketMessage
+            {
+                LifetimeHint = (uint)Math.Min(uint.MaxValue, keys.Lifetime.TotalSeconds),
+                Ticket = keys.Seal(session),
+            }.Encode());
+        }
     }
 }

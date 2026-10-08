@@ -76,6 +76,12 @@ namespace SharpDTLS.DTLS12
         /// <summary>Resumable sessions by session ID; null disables session ID resumption.</summary>
         public IDtls12SessionCache SessionCache { get => Settings.SessionCache; set => Settings.SessionCache = value; }
 
+        /// <summary>
+        /// Keys for RFC 5077 session tickets (random per server by default); share them between servers to let them
+        /// resume each other's sessions, or set null to disable tickets.
+        /// </summary>
+        public Dtls12TicketKeys TicketKeys { get => Settings.TicketKeys; set => Settings.TicketKeys = value; }
+
         /// <summary>Private key for recovering pwd_protect usernames (RFC 8492 §4.3.2); null accepts only pwd_clear.</summary>
         public Org.BouncyCastle.Crypto.Parameters.ECPrivateKeyParameters PwdProtectionKey { get => Settings.PwdProtectionKey; set => Settings.PwdProtectionKey = value; }
 

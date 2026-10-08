@@ -32,7 +32,6 @@ namespace SharpDTLS.DTLS12
 
         public event EventHandler<EventArgs> HandshakeFinished;
         public event EventHandler<AlertDatagram> AlertReceived;
-        public event EventHandler<NewSessionTicketDatagram> NewSessionTicketSent;
         public event EventHandler<Dtls12DataReceivedEventArgs> ApplicationDataReceived;
 
         public Dtls12Server(IServerTransport serverTransport)
@@ -59,12 +58,5 @@ namespace SharpDTLS.DTLS12
         protected override void OnAlert(Dtls12ServerConnection connection, AlertDescription description)
             => AlertReceived?.Invoke(this, new AlertDatagram(description == AlertDescription.CloseNotify ? (byte)1 : (byte)2, (byte)description));
 
-        // Sends a NewSessionTicket post-handshake message to the peer (RFC 5077).
-        public void SendNewSessionTicket(EndPoint endpoint, string sessionKey, byte[] ticket, uint lifetimeHint = 7200)
-        {
-            var connection = GetConnection(endpoint) ?? throw new InvalidOperationException($"No session for {sessionKey}");
-            connection.SendNewSessionTicket(ticket, lifetimeHint);
-            NewSessionTicketSent?.Invoke(this, new NewSessionTicketDatagram(ticket, lifetimeHint));
-        }
     }
 }

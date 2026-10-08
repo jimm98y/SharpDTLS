@@ -37,9 +37,13 @@ namespace SharpDTLS.DTLS12
         private IClientKeyExchange _keyExchange;
         private CertificateRequestMessage _certificateRequest;
         private Dtls12SessionState _offeredSession;
+        private byte[] _offeredSessionId;
         private byte[] _newSessionId;
+        private bool _ticketExpected;
+        private NewSessionTicketMessage _newTicket;
 
         public event EventHandler<EventArgs> HandshakeFinished;
+        /// <summary>Raised when the server issues an RFC 5077 session ticket during the handshake.</summary>
         public event EventHandler<NewSessionTicketMessage> NewSessionTicketMessageReceived;
 
         public Dtls12ClientConnection(Action<byte[]> send) : base(isClient: true, send)
@@ -117,6 +121,9 @@ namespace SharpDTLS.DTLS12
         /// <summary>Whether the server resumed <see cref="ResumptionSession"/>.</summary>
         public bool IsResumed { get; private set; }
 
+        /// <summary>Advertise RFC 5077 session tickets (and present the ticket of <see cref="ResumptionSession"/>).</summary>
+        public bool UseSessionTickets { get; set; } = true;
+
         // In an abbreviated handshake the client sends the final flight (RFC 6347 §4.2.4).
         protected override bool ResendFinalFlightOnPeerRetransmit => IsResumed;
 
@@ -154,17 +161,24 @@ namespace SharpDTLS.DTLS12
             if (offered.Count == 0)
                 throw new InvalidOperationException("No configured cipher suite is usable with the configured versions.");
 
-            // Offer a session only within the version range and with its suite still offered.
+            // Offer a session only within the version range and with its suite still offered. A ticket goes with a
+            // client-generated session ID, which the server echoes when it accepts the ticket (RFC 5077 §3.4).
+            // The ID is kept across a HelloVerifyRequest so both ClientHellos offer the same session.
             var resumable = ResumptionSession;
-            _offeredSession = resumable != null && resumable.SessionId.Length != 0 && offered.Contains(resumable.CipherSuite)
+            bool presentTicket = resumable?.Ticket != null && UseSessionTickets;
+            _offeredSession = resumable != null && (presentTicket || resumable.SessionId.Length != 0) && offered.Contains(resumable.CipherSuite)
                               && DtlsVersion.IsAtLeast(resumable.Version, MinimumVersion) && DtlsVersion.IsAtLeast(MaximumVersion, resumable.Version)
                 ? resumable : null;
+            if (_offeredSession == null)
+                _offeredSessionId = null;
+            else if (_offeredSessionId == null)
+                _offeredSessionId = presentTicket ? Dtls12CryptoUtils.GenerateRandom(32) : _offeredSession.SessionId;
 
             var ch = new ClientHelloMessage
             {
                 ClientVersion = MaximumVersion,
                 Random = ClientRandom,
-                SessionId = _offeredSession?.SessionId ?? Array.Empty<byte>(),
+                SessionId = _offeredSessionId ?? Array.Empty<byte>(),
                 Cookie = cookie,
                 CipherSuites = IsFallback ? offered.Append(SharpDTLS.CipherSuites.TLS_FALLBACK_SCSV).ToList() : offered,
             };
@@ -186,6 +200,8 @@ namespace SharpDTLS.DTLS12
             ch.Extensions.Add(new RenegotiationInfoExtension());
             if (SrtpProtectionProfiles != null && SrtpProtectionProfiles.Length > 0)
                 ch.Extensions.Add(new UseSrtpExtension(SrtpProtectionProfiles));
+            if (UseSessionTickets)
+                ch.Extensions.Add(new SessionTicketExtension(presentTicket && _offeredSession != null ? _offeredSession.Ticket : null));
             if (offeredSuites.Any(s => s.RequiresSrp))
                 ch.Extensions.Add(new SrpExtension(SrpIdentity));
             if (offeredSuites.Any(s => s.RequiresPwd))
@@ -247,6 +263,11 @@ namespace SharpDTLS.DTLS12
                     SendFinalFlight();
                     break;
 
+                case State.WaitFinished when type == HandshakeType.NewSessionTicket && _ticketExpected && _newTicket == null:
+                    _newTicket = NewSessionTicketMessage.Decode(body);
+                    AddToTranscript(message);
+                    break;
+
                 case State.WaitFinished when type == HandshakeType.Finished:
                     OnServerFinished(body, message);
                     break;
@@ -303,6 +324,11 @@ namespace SharpDTLS.DTLS12
 
             UseExtendedMasterSecret = sh.Extension<ExtendedMasterSecretExtension>() != null;
 
+            // An empty SessionTicket extension announces a NewSessionTicket before the server's ChangeCipherSpec.
+            _ticketExpected = sh.Extension<SessionTicketExtension>() != null;
+            if (_ticketExpected && _clientHello.Extension<SessionTicketExtension>() == null)
+                throw new DtlsException(AlertDescription.UnsupportedExtension, "Unsolicited SessionTicket extension.");
+
             var srtp = sh.Extension<ServerUseSrtpExtension>();
             if (srtp != null)
             {
@@ -317,7 +343,7 @@ namespace SharpDTLS.DTLS12
             AddToTranscript(message);
             Debug.WriteLine($"{LogPrefix} ServerHello: {DtlsVersion.Name(NegotiatedVersion)}, {suite}");
 
-            if (_offeredSession != null && sh.SessionId.AsSpan().SequenceEqual(_offeredSession.SessionId))
+            if (_offeredSession != null && sh.SessionId.AsSpan().SequenceEqual(_offeredSessionId))
             {
                 // Abbreviated handshake: the server's ChangeCipherSpec and Finished follow (RFC 5246 §7.3).
                 var session = _offeredSession;
@@ -463,6 +489,9 @@ namespace SharpDTLS.DTLS12
             AddToTranscript(message);
             StopRetransmission();
 
+            if (_ticketExpected && _newTicket == null)
+                throw new DtlsException(AlertDescription.UnexpectedMessage, "Missing NewSessionTicket.");
+
             if (IsResumed)
             {
                 // Final flight of an abbreviated handshake: resent only when the server retransmits.
@@ -470,10 +499,18 @@ namespace SharpDTLS.DTLS12
                 SendChangeCipherSpec();
                 SendHandshake(HandshakeType.Finished, ComputeVerifyData(fromClient: true));
             }
-            else if (_newSessionId != null)
+            else if (_newSessionId != null || (_newTicket is { Ticket.Length: > 0 } && UseExtendedMasterSecret))
             {
-                SessionState = new Dtls12SessionState(_newSessionId, NegotiatedVersion, CipherSuite.Id, MasterSecret, UseEncryptThenMac,
-                    _serverCertificate?.GetEncoded());
+                SessionState = new Dtls12SessionState(_newSessionId ?? Array.Empty<byte>(), NegotiatedVersion, CipherSuite.Id, MasterSecret,
+                    UseEncryptThenMac, _serverCertificate?.GetEncoded());
+            }
+
+            // A zero-length ticket means the server changed its mind (RFC 5077 §3.3).
+            if (SessionState != null && _newTicket is { Ticket.Length: > 0 })
+            {
+                SessionState = SessionState.WithTicket(_newTicket.Ticket, _newTicket.LifetimeHint);
+                var ticket = _newTicket;
+                RaiseEvent(() => NewSessionTicketMessageReceived?.Invoke(this, ticket));
             }
 
             _state = State.Connected;
@@ -486,11 +523,6 @@ namespace SharpDTLS.DTLS12
         {
             switch (type)
             {
-                case HandshakeType.NewSessionTicket:
-                    var ticket = NewSessionTicketMessage.Decode(body);
-                    RaiseEvent(() => NewSessionTicketMessageReceived?.Invoke(this, ticket));
-                    break;
-
                 case HandshakeType.HelloRequest:
                     // Renegotiation is not supported (RFC 5746 §4.5): decline with a warning.
                     SendAlert(AlertDescription.NoRenegotiation, fatal: false);

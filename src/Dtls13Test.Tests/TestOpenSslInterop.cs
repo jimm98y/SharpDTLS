@@ -287,22 +287,29 @@ namespace Dtls13Test.Tests
             Assert.AreEqual(DtlsVersion.Dtls12, server.Connections.Single().NegotiatedVersion);
         }
 
-        [DataRow("-dtls1_2")]
-        [DataRow("-dtls1")]
+        [DataRow("-dtls1_2", true)]
+        [DataRow("-dtls1_2", false)]
+        [DataRow("-dtls1", true)]
+        [DataRow("-dtls1", false)]
         [TestMethod]
-        public void OpenSslClient_ResumesSessionId_WithSharpDtlsServer(string versionFlag)
+        public void OpenSslClient_ResumesSession_WithSharpDtlsServer(string versionFlag, bool tickets)
         {
             OpenSsl.RequireOpenSsl();
             string dir = OpenSsl.NewTempDirectory();
             string sessionFile = System.IO.Path.Combine(dir, "session.pem");
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
             var server = new Dtls12Server(transport) { MinimumVersion = DtlsVersion.Dtls10 };
-            string connect = $"s_client {versionFlag} -cipher ECDHE-RSA-AES128-SHA@SECLEVEL=0 -connect 127.0.0.1:{transport.LocalEndpoint.Port}";
+            var cache = new Dtls12SessionCache();
+            server.SessionCache = cache;
+            string connect = $"s_client {versionFlag} -cipher ECDHE-RSA-AES128-SHA@SECLEVEL=0 -connect 127.0.0.1:{transport.LocalEndpoint.Port}"
+                + (tickets ? "" : " -no_ticket");
 
             using (var first = new OpenSslProcess($"{connect} -sess_out {sessionFile}", dir))
             {
                 Assert.IsTrue(first.WaitForOutput("New, ", Timeout), "first handshake:\n" + first.Output);
                 Assert.IsTrue(SpinWait.SpinUntil(() => System.IO.File.Exists(sessionFile) && new System.IO.FileInfo(sessionFile).Length > 0, Timeout));
+                Assert.AreEqual(tickets, first.Output.Contains("TLS session ticket:"), "ticket issued:\n" + first.Output);
+                Assert.AreEqual(tickets ? 0 : 1, cache.Count, "session ID sessions are cached, ticket sessions are not");
             }
 
             using var second = new OpenSslProcess($"{connect} -sess_in {sessionFile}", dir);
@@ -310,8 +317,10 @@ namespace Dtls13Test.Tests
             Assert.IsTrue(SpinWait.SpinUntil(() => server.Connections.Any(c => c.IsResumed && c.IsHandshakeComplete), Timeout));
         }
 
+        [DataRow(true)]
+        [DataRow(false)]
         [TestMethod]
-        public void SharpDtlsClient_ResumesSessionId_WithOpenSslServer()
+        public void SharpDtlsClient_ResumesSession_WithOpenSslServer(bool tickets)
         {
             OpenSsl.RequireOpenSsl();
             string dir = OpenSsl.NewTempDirectory();
@@ -325,17 +334,18 @@ namespace Dtls13Test.Tests
             Dtls12SessionState session;
             using (var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port)))
             {
-                var client = Handshake(new Dtls12Client(transport), server);
+                var client = Handshake(new Dtls12Client(transport) { UseSessionTickets = tickets }, server);
                 Assert.IsFalse(client.IsResumed);
                 session = client.SessionState;
-                Assert.IsNotNull(session, "OpenSSL assigns a session ID");
+                Assert.IsNotNull(session, "OpenSSL makes the session resumable");
+                Assert.AreEqual(tickets, session.Ticket != null, "OpenSSL issues a ticket when the client supports them");
                 client.Close();
             }
             Assert.IsTrue(server.WaitForOutput("DONE", Timeout), server.Output); // s_server finished the connection and accepts the next
 
             using (var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port)))
             {
-                var client = Handshake(new Dtls12Client(transport) { ResumptionSession = session }, server);
+                var client = Handshake(new Dtls12Client(transport) { ResumptionSession = session, UseSessionTickets = tickets }, server);
                 Assert.IsTrue(client.IsResumed, "OpenSSL did not resume:\n" + server.Output);
                 client.SendApplicationData(Encoding.UTF8.GetBytes("resumed\n"));
                 Assert.IsTrue(server.WaitForOutput("resumed", Timeout), server.Output);

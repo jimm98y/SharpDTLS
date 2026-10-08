@@ -34,6 +34,7 @@ namespace SharpDTLS.DTLS12
             SrpExtension.Type => new SrpExtension(),
             PwdClearExtension.Type => new PwdClearExtension(),
             PwdProtectExtension.Type => new PwdProtectExtension(),
+            SessionTicketExtension.Type => new SessionTicketExtension(),
             0x0016 => new EncryptThenMacExtension(),
             ExtendedMasterSecretExtension.Type => new ExtendedMasterSecretExtension(),
             RenegotiationInfoExtension.Type => new RenegotiationInfoExtension(),
@@ -44,6 +45,7 @@ namespace SharpDTLS.DTLS12
         {
             0x000b => new ServerEcPointFormatsExtension(),
             0x000e => new ServerUseSrtpExtension(),
+            SessionTicketExtension.Type => new SessionTicketExtension(),
             0x0016 => new EncryptThenMacExtension(),
             ExtendedMasterSecretExtension.Type => new ExtendedMasterSecretExtension(),
             RenegotiationInfoExtension.Type => new RenegotiationInfoExtension(),
