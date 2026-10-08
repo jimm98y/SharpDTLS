@@ -139,8 +139,9 @@ namespace SharpDTLS.DTLS13
             if (!CipherSuites.Contains(serverHello.SelectedCipherSuite))
                 throw new DtlsException(AlertDescription.IllegalParameter, $"Server selected a cipher suite that was not offered (0x{serverHello.SelectedCipherSuite:X4}).");
 
-            if (!serverHello.LegacySessionIdEcho.AsSpan().SequenceEqual(_clientHello.LegacySessionId))
-                throw new DtlsException(AlertDescription.IllegalParameter, "legacy_session_id_echo does not match.");
+            // RFC 9147 §5: DTLS 1.3 servers must not echo legacy_session_id.
+            if (serverHello.LegacySessionIdEcho.Length != 0)
+                throw new DtlsException(AlertDescription.IllegalParameter, "DTLS 1.3 ServerHello echoes a legacy_session_id.");
         }
 
         private void OnHelloRetryRequest(byte[] record, ServerHelloDatagram hrr)

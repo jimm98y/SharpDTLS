@@ -218,7 +218,8 @@ namespace SharpDTLS.DTLS13
             byte[] cookie = Dtls13CryptoUtils.CreateCookie(DateTime.UtcNow, ipEndpoint.Address.ToString(), ipEndpoint.Port,
                 suiteId, transcript.Hash(suite), requestKeyShare);
 
-            var hrr = new HelloRetryRequest(suiteId, cookie, requestKeyShare ? GroupX25519 : null, clientHello.LegacySessionId)
+            // RFC 9147 §5: DTLS servers never echo legacy_session_id.
+            var hrr = new HelloRetryRequest(suiteId, cookie, requestKeyShare ? GroupX25519 : null, Array.Empty<byte>())
             {
                 SequenceNumber = clientHello.SequenceNumber,
                 // RFC 9147 §5.1: reuse the ClientHello's record sequence number so a stateless server never repeats one.
@@ -319,7 +320,7 @@ namespace SharpDTLS.DTLS13
                 {
                     // Rebuild the transcript the client has: message_hash(ClientHello1) || HelloRetryRequest || ClientHello2.
                     // The HelloRetryRequest is deterministic given the cookie, so it can be recreated byte for byte.
-                    var hrr = new HelloRetryRequest(suite.Id, retry.Cookie, retry.KeyShareRequested ? GroupX25519 : null, clientHello.LegacySessionId);
+                    var hrr = new HelloRetryRequest(suite.Id, retry.Cookie, retry.KeyShareRequested ? GroupX25519 : null, Array.Empty<byte>());
                     Session.Transcript.AddMessageHash(retry.ClientHello1Hash);
                     Session.Transcript.AddPlaintextRecord(hrr.ToBytes());
                 }
@@ -344,10 +345,8 @@ namespace SharpDTLS.DTLS13
 
             BeginFlight();
 
-            var serverHello = new ServerHelloDatagram(Session.PublicKey, suite.Id, Dtls13CryptoUtils.GenerateRandom(32))
-            {
-                LegacySessionIdEcho = _clientHello.LegacySessionId,
-            };
+            // RFC 9147 §5: legacy_session_id_echo stays empty, whatever the client sent (no compatibility mode).
+            var serverHello = new ServerHelloDatagram(Session.PublicKey, suite.Id, Dtls13CryptoUtils.GenerateRandom(32));
             Session.Transcript.AddPlaintextRecord(SendPlaintextHandshake(serverHello));
 
             byte[] sharedSecret = Dtls13CryptoUtils.DeriveSharedSecretX25519(Session.PrivateKey, _clientHello.PublicKey);
