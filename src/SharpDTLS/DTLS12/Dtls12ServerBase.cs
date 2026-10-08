@@ -50,6 +50,9 @@ namespace SharpDTLS.DTLS12
         /// </summary>
         public bool AutoUpdatePeerAddress { get => Settings.AutoUpdatePeerAddress; set => Settings.AutoUpdatePeerAddress = value; }
 
+        /// <summary>The server also offers DTLS 1.3 (see <see cref="SharpDTLS.DTLS13.DtlsServer"/>).</summary>
+        internal bool SignalTls13Downgrade { get => Settings.SignalTls13Downgrade; set => Settings.SignalTls13Downgrade = value; }
+
         public IReadOnlyCollection<Tls12ServerConnection> Connections => _connections.Values.ToList();
 
         public Tls12ServerConnection GetConnection(EndPoint endpoint)
@@ -76,6 +79,11 @@ namespace SharpDTLS.DTLS12
         protected virtual void OnApplicationData(Tls12ServerConnection connection, byte[] data) { }
         protected virtual void OnAlert(Tls12ServerConnection connection, AlertDescription description) { }
         protected virtual void OnConnectionClosed(Tls12ServerConnection connection) { }
+
+        // The same, with the connection, for DtlsServer.
+        internal event Action<Tls12ServerConnection> ConnectionEstablished;
+        internal event Action<Tls12ServerConnection, byte[]> ConnectionDataReceived;
+        internal event Action<Tls12ServerConnection> ConnectionEnded;
 
         // ── Stateless ClientHello processing ─────────────────────────────────────────────────
 
@@ -143,8 +151,16 @@ namespace SharpDTLS.DTLS12
             if (!_connections.TryAdd(endpoint.ToString(), connection))
                 return;
 
-            connection.HandshakeFinished += (_, _) => OnConnectionEstablished(connection);
-            connection.ApplicationDataReceived += (_, data) => OnApplicationData(connection, data);
+            connection.HandshakeFinished += (_, _) =>
+            {
+                OnConnectionEstablished(connection);
+                ConnectionEstablished?.Invoke(connection);
+            };
+            connection.ApplicationDataReceived += (_, data) =>
+            {
+                OnApplicationData(connection, data);
+                ConnectionDataReceived?.Invoke(connection, data);
+            };
             connection.AlertReceived += (_, alert) => OnAlert(connection, alert);
             connection.PeerAddressConfirmed += (_, change) =>
             {
@@ -157,6 +173,7 @@ namespace SharpDTLS.DTLS12
                 if (connection.ConnectionId != null)
                     _connectionsById.TryRemove(new KeyValuePair<string, Tls12ServerConnection>(Convert.ToHexString(connection.ConnectionId), connection));
                 OnConnectionClosed(connection);
+                ConnectionEnded?.Invoke(connection);
             };
 
             connection.Start(clientHello, message, recordSeq + 1);

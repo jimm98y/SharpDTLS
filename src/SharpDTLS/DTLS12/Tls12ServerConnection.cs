@@ -95,7 +95,7 @@ namespace SharpDTLS.DTLS12
         /// </summary>
         public byte[] OcspResponse { get; set; }
 
-        /// <summary>The server also offers TLS 1.3: lower versions carry the downgrade sentinel (RFC 8446 §4.1.3).</summary>
+        /// <summary>The server also offers (D)TLS 1.3: lower versions carry the downgrade sentinel (RFC 8446 §4.1.3).</summary>
         internal bool SignalTls13Downgrade { get; set; }
 
         /// <summary>
@@ -284,9 +284,9 @@ namespace SharpDTLS.DTLS12
 
             ClientRandom = ch.Random;
             ServerRandom = Dtls12CryptoUtils.GenerateRandom(32);
-            // RFC 8446 §4.1.3: a server that also speaks TLS 1.3 marks a lower version in its random, so a TLS 1.3 client
-            // can detect a downgrade.
-            if (!IsDatagram && _settings.SignalTls13Downgrade)
+            // RFC 8446 §4.1.3, RFC 9147 §5.3: a server that also speaks (D)TLS 1.3 marks a lower version in its random, so
+            // a 1.3 client can detect a downgrade.
+            if (_settings.SignalTls13Downgrade)
                 Downgrade.Mark(ServerRandom, version);
             SelectedSrtpProtectionProfile = IsDatagram ? DtlsSrtp.Select(_settings.SrtpProtectionProfiles, ch.Extension<UseSrtpExtension>()?.ProtectionProfiles) : null;
 

@@ -194,15 +194,20 @@ namespace SharpDTLS.TLS13
             }
         }
 
-        /// <summary>Whether a ClientHello (4-byte header + body) lists <paramref name="version"/> in supported_versions.</summary>
-        internal static bool OffersVersion(byte[] clientHello, ushort version)
+        /// <summary>
+        /// Whether a ClientHello (TLS: 4-byte header + body; DTLS: 12-byte header + body, with a cookie) lists
+        /// <paramref name="version"/> in supported_versions.
+        /// </summary>
+        internal static bool OffersVersion(byte[] clientHello, ushort version, bool datagram = false)
         {
             try
             {
-                var r = new TlsReader(clientHello.AsSpan(4).ToArray());
+                var r = new TlsReader(clientHello.AsSpan(datagram ? 12 : 4).ToArray());
                 r.ReadUInt16();
                 r.ReadBytes(32);
                 r.ReadOpaque8();
+                if (datagram)
+                    r.ReadOpaque8();
                 r.ReadOpaque16();
                 r.ReadOpaque8();
                 if (r.Remaining == 0)
