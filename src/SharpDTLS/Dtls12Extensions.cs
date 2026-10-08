@@ -365,4 +365,102 @@ namespace SharpDTLS
             return 4;
         }
     }
+
+    /// <summary>
+    /// record_size_limit (RFC 8449): the largest protected record plaintext the sender is willing to receive. In
+    /// DTLS 1.3 the value counts the inner content type (and padding), so it is one more than the payload.
+    /// </summary>
+    public class RecordSizeLimitExtension : ITlsExtension
+    {
+        public const ushort Type = 0x001c;
+
+        /// <summary>The smallest value a peer may advertise (RFC 8449 §4).</summary>
+        public const int Minimum = 64;
+
+        public RecordSizeLimitExtension() { }
+
+        public RecordSizeLimitExtension(int limit)
+        {
+            if (limit < Minimum || limit > 0xFFFF)
+                throw new ArgumentOutOfRangeException(nameof(limit), "A record size limit is 64 to 65535.");
+            Limit = limit;
+        }
+
+        public int Limit { get; private set; }
+
+        public int CalculateLength() => 6;
+
+        public int Read(int offset, byte[] source)
+        {
+            int length = (source[offset + 2] << 8) | source[offset + 3];
+            if (length != 2 || source.Length < offset + 6)
+                throw new DtlsException(AlertDescription.DecodeError, "Invalid record_size_limit extension.");
+            Limit = (source[offset + 4] << 8) | source[offset + 5];
+            if (Limit < Minimum)
+                throw new DtlsException(AlertDescription.IllegalParameter, $"record_size_limit {Limit} is below {Minimum}.");
+            return 6;
+        }
+
+        public int Write(int offset, byte[] destination)
+        {
+            destination[offset] = 0x00;
+            destination[offset + 1] = 0x1c;
+            destination[offset + 2] = 0x00;
+            destination[offset + 3] = 0x02;
+            destination[offset + 4] = (byte)(Limit >> 8);
+            destination[offset + 5] = (byte)Limit;
+            return 6;
+        }
+    }
+
+    /// <summary>
+    /// max_fragment_length (RFC 6066 §4): the client asks for records of at most 512, 1024, 2048 or 4096 bytes of
+    /// plaintext in both directions, and the server confirms by echoing it. Superseded by record_size_limit.
+    /// </summary>
+    public class MaxFragmentLengthExtension : ITlsExtension
+    {
+        public const ushort Type = 0x0001;
+
+        public MaxFragmentLengthExtension() { }
+
+        public MaxFragmentLengthExtension(int length)
+        {
+            Code = length switch
+            {
+                512 => 1,
+                1024 => 2,
+                2048 => 3,
+                4096 => 4,
+                _ => throw new ArgumentOutOfRangeException(nameof(length), "max_fragment_length is 512, 1024, 2048 or 4096."),
+            };
+        }
+
+        /// <summary>The wire code: 1 to 4 for 2^9 to 2^12.</summary>
+        public byte Code { get; private set; }
+
+        public int Length => 1 << (8 + Code);
+
+        public int CalculateLength() => 5;
+
+        public int Read(int offset, byte[] source)
+        {
+            int length = (source[offset + 2] << 8) | source[offset + 3];
+            if (length != 1 || source.Length < offset + 5)
+                throw new DtlsException(AlertDescription.DecodeError, "Invalid max_fragment_length extension.");
+            Code = source[offset + 4];
+            if (Code < 1 || Code > 4)
+                throw new DtlsException(AlertDescription.IllegalParameter, $"Invalid max_fragment_length code {Code}.");
+            return 5;
+        }
+
+        public int Write(int offset, byte[] destination)
+        {
+            destination[offset] = 0x00;
+            destination[offset + 1] = 0x01;
+            destination[offset + 2] = 0x00;
+            destination[offset + 3] = 0x01;
+            destination[offset + 4] = Code;
+            return 5;
+        }
+    }
 }

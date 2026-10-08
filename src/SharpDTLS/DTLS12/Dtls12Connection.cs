@@ -177,7 +177,10 @@ namespace SharpDTLS.DTLS12
                 plaintext = plaintext.AsSpan(0, end - 1).ToArray();
             }
             if (cipher != null)
+            {
+                CheckReceivedRecordSize(plaintext.Length);
                 OnRecordAuthenticated(epoch, sequenceNumber, connectionId != null);
+            }
 
             switch (contentType)
             {
@@ -405,7 +408,7 @@ namespace SharpDTLS.DTLS12
             int offset = 0;
             do
             {
-                int length = Math.Min(MaxHandshakeFragment, body.Length - offset);
+                int length = Math.Min(Math.Min(MaxHandshakeFragment, MaxApplicationDataSize - 12), body.Length - offset);
                 records.Add(WriteRecord(0x16, epoch, HandshakeHeader(type, body.Length, messageSeq, offset, length, body, offset)));
                 offset += length;
             }
@@ -427,6 +430,9 @@ namespace SharpDTLS.DTLS12
             _writeSequence[_writeEpoch] = 0;
             _pendingWriteCipher = null;
         }
+
+        // A tls12_cid record's DTLSInnerPlaintext has the content type in it as well.
+        public override int MaxApplicationDataSize => PeerRecordLimit - (WriteConnectionId is { Length: > 0 } ? 1 : 0);
 
         protected override void WriteApplicationData(byte[] data) => Enqueue(WriteRecord(0x17, _writeEpoch, data));
 

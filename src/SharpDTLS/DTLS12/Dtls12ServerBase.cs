@@ -80,6 +80,9 @@ namespace SharpDTLS.DTLS12
         /// <summary>Application protocols (ALPN, RFC 7301) in server preference order; null to ignore ALPN.</summary>
         public IList<string> ApplicationProtocols { get => Settings.ApplicationProtocols; set => Settings.ApplicationProtocols = value; }
 
+        /// <summary>The most payload per record we accept, advertised with record_size_limit (RFC 8449); null for 16384.</summary>
+        public int? RecordSizeLimit { get => Settings.RecordSizeLimit; set => Settings.RecordSizeLimit = value; }
+
         public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ClientCertificateValidator
         {
             get => Settings.ClientCertificateValidator;

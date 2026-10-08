@@ -111,6 +111,8 @@ namespace SharpDTLS.DTLS13.Messages
                 {
                     ServerNameExtension.Type => new ServerNameExtension(),
                     AlpnExtension.Type => new AlpnExtension(),
+                    RecordSizeLimitExtension.Type => new RecordSizeLimitExtension(),
+                    MaxFragmentLengthExtension.Type => new MaxFragmentLengthExtension(),
                     ConnectionIdExtension.Type => new ConnectionIdExtension(),
                     0x0033 => new ClientKeyShareExtension(),
                     0x002b => new ClientSupportedVersions(),

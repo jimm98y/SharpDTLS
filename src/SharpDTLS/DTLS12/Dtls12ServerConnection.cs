@@ -66,6 +66,12 @@ namespace SharpDTLS.DTLS12
         public IList<string> ApplicationProtocols { get; set; }
 
         /// <summary>
+        /// The most payload per record we accept (64 to 16384), sent in record_size_limit (RFC 8449) to clients that
+        /// offer it; null for 16384. Clients' limits (and max_fragment_length requests) are always honoured.
+        /// </summary>
+        public int? RecordSizeLimit { get; set; }
+
+        /// <summary>
         /// Negotiate connection IDs (RFC 9146) with clients that offer them: the client then sends our CID in every
         /// encrypted record, so the association survives a change of its address (e.g. NAT rebinding).
         /// </summary>
@@ -101,6 +107,7 @@ namespace SharpDTLS.DTLS12
         }
 
         private readonly Dtls12ServerSettings _settings;
+        private ITlsExtension _recordSizeResponse;
         private State _state = State.Start;
         private ClientHelloMessage _clientHello;
         private CertificateRequestMessage _certificateRequest;
@@ -251,6 +258,11 @@ namespace SharpDTLS.DTLS12
             // ALPN is negotiated per connection, also when resuming (RFC 7301 §3.1).
             ApplicationProtocol = AlpnExtension.Select(_settings.ApplicationProtocols, ch.Extension<AlpnExtension>());
 
+            // Record size limits too, applying to everything we send from the ServerHello on.
+            RecordSizeNegotiation.Validate(_settings.RecordSizeLimit, null);
+            (PeerRecordLimit, ReceiveRecordLimit, _recordSizeResponse) = RecordSizeNegotiation.Accept(
+                ch.Extension<RecordSizeLimitExtension>(), ch.Extension<MaxFragmentLengthExtension>(), _settings.RecordSizeLimit, dtls13: false);
+
             if (TryResume(ch, version))
                 return;
 
@@ -368,6 +380,8 @@ namespace SharpDTLS.DTLS12
                 sh.Extensions.Add(new AlpnExtension(new[] { ApplicationProtocol }));
             if (ReadConnectionId != null)
                 sh.Extensions.Add(new ConnectionIdExtension(ReadConnectionId));
+            if (_recordSizeResponse != null)
+                sh.Extensions.Add(_recordSizeResponse);
             SendHandshake(HandshakeType.ServerHello, sh.Encode());
 
             if (IsResumed)

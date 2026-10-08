@@ -134,6 +134,18 @@ namespace SharpDTLS.DTLS12
         public IList<string> ApplicationProtocols { get; set; }
 
         /// <summary>
+        /// Offer record_size_limit (RFC 8449): the most payload per record we accept, 64 to 16384; null to not offer it.
+        /// Lets a constrained endpoint keep the server's records small.
+        /// </summary>
+        public int? RecordSizeLimit { get; set; }
+
+        /// <summary>
+        /// Request max_fragment_length (RFC 6066 §4): 512, 1024, 2048 or 4096 bytes per record in both directions; null
+        /// to not request it. A server that also supports record_size_limit uses that instead.
+        /// </summary>
+        public int? MaxFragmentLength { get; set; }
+
+        /// <summary>
         /// Offer connection IDs (RFC 9146) so the association survives our address changing (e.g. NAT rebinding):
         /// a server that agrees gives us a CID to send in every encrypted record.
         /// </summary>
@@ -231,6 +243,7 @@ namespace SharpDTLS.DTLS12
                 ch.Extensions.Add(new ServerNameExtension(ServerName));
             if (ApplicationProtocols is { Count: > 0 })
                 ch.Extensions.Add(new AlpnExtension(ApplicationProtocols));
+            ch.Extensions.AddRange(RecordSizeNegotiation.Offer(RecordSizeLimit, MaxFragmentLength, dtls13: false));
             if (UseConnectionId)
             {
                 _offeredConnectionId ??= Dtls12CryptoUtils.GenerateRandom(ConnectionIdLength);
@@ -363,6 +376,8 @@ namespace SharpDTLS.DTLS12
             if (sh.Extension<ServerNameExtension>() != null && ServerName == null)
                 throw new DtlsException(AlertDescription.UnsupportedExtension, "Unsolicited server_name extension.");
             ApplicationProtocol = AlpnExtension.Accept(ApplicationProtocols, sh.Extension<AlpnExtension>());
+            (PeerRecordLimit, ReceiveRecordLimit) = RecordSizeNegotiation.Complete(sh.Extension<RecordSizeLimitExtension>(),
+                sh.Extension<MaxFragmentLengthExtension>(), RecordSizeLimit, MaxFragmentLength, dtls13: false);
 
             var serverCid = sh.Extension<ConnectionIdExtension>();
             if (serverCid != null)

@@ -29,6 +29,8 @@ namespace SharpDTLS.DTLS12
         {
             ServerNameExtension.Type => new ServerNameExtension(),
             AlpnExtension.Type => new AlpnExtension(),
+            RecordSizeLimitExtension.Type => new RecordSizeLimitExtension(),
+            MaxFragmentLengthExtension.Type => new MaxFragmentLengthExtension(),
             ConnectionIdExtension.Type => new ConnectionIdExtension(),
             0x000a => new SupportedGroupsExtension(),
             0x000b => new EcPointFormatsExtension(),
@@ -48,6 +50,8 @@ namespace SharpDTLS.DTLS12
         {
             ServerNameExtension.Type => new ServerNameExtension(),
             AlpnExtension.Type => new AlpnExtension(),
+            RecordSizeLimitExtension.Type => new RecordSizeLimitExtension(),
+            MaxFragmentLengthExtension.Type => new MaxFragmentLengthExtension(),
             ConnectionIdExtension.Type => new ConnectionIdExtension(),
             0x000b => new ServerEcPointFormatsExtension(),
             0x000e => new ServerUseSrtpExtension(),

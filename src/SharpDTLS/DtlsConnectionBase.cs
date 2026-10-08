@@ -52,6 +52,29 @@ namespace SharpDTLS
         /// <summary>The application protocol negotiated with ALPN (RFC 7301), or null.</summary>
         public string ApplicationProtocol { get; protected set; }
 
+        /// <summary>The largest record payload without any negotiated limit (RFC 5246 §6.2.1, RFC 8446 §5.1).</summary>
+        public const int MaxRecordPayload = 16384;
+
+        /// <summary>
+        /// The most data one SendApplicationData call can carry: 2^14 bytes, or less when the peer asked for smaller
+        /// records with record_size_limit (RFC 8449) or max_fragment_length (RFC 6066). Data is never split, as that
+        /// would change the datagram boundaries the peer sees.
+        /// </summary>
+        public virtual int MaxApplicationDataSize => PeerRecordLimit;
+
+        /// <summary>The most payload (content without the DTLS 1.3 content type) the peer accepts per record.</summary>
+        protected int PeerRecordLimit { get; set; } = MaxRecordPayload;
+
+        /// <summary>The most payload per protected record we accept; larger records are a record_overflow.</summary>
+        protected int ReceiveRecordLimit { get; set; } = MaxRecordPayload;
+
+        /// <summary>Throws record_overflow for a protected record payload over <see cref="ReceiveRecordLimit"/>.</summary>
+        protected void CheckReceivedRecordSize(int payloadLength)
+        {
+            if (payloadLength > ReceiveRecordLimit)
+                throw new DtlsException(AlertDescription.RecordOverflow, $"Record of {payloadLength} bytes exceeds the limit of {ReceiveRecordLimit}.");
+        }
+
         public event EventHandler<byte[]> ApplicationDataReceived;
         public event EventHandler<AlertDescription> AlertReceived;
         public event EventHandler<Exception> Failed;
@@ -92,6 +115,8 @@ namespace SharpDTLS
         {
             if (!IsHandshakeComplete || IsClosed)
                 throw new InvalidOperationException("The handshake has not completed.");
+            if (data.Length > MaxApplicationDataSize)
+                throw new ArgumentException($"At most {MaxApplicationDataSize} bytes fit in one record.", nameof(data));
             WriteApplicationData(data);
         });
 

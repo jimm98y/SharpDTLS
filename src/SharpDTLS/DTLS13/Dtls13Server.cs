@@ -73,6 +73,12 @@ namespace SharpDTLS.DTLS13
         public IList<string> ApplicationProtocols { get; set; }
 
         /// <summary>
+        /// The most payload per record we accept (64 to 16384), sent in record_size_limit (RFC 8449) to clients that
+        /// offer it; null for 16384. Clients' limits (and max_fragment_length requests) are always honoured.
+        /// </summary>
+        public int? RecordSizeLimit { get; set; }
+
+        /// <summary>
         /// Key exchange groups in server preference order (see <see cref="Dtls13Groups"/>). A group the client already
         /// sent a share for is preferred, to avoid a HelloRetryRequest; otherwise the server asks for its best group.
         /// </summary>
@@ -428,6 +434,7 @@ namespace SharpDTLS.DTLS13
         private X509Certificate _certificate;
         private IList<X509Certificate> _intermediates;
         private bool _serverNameUsed;
+        private ITlsExtension _recordSizeResponse;
         private long _earlyDataReceived;
         private bool _earlyDataAccepted;
 
@@ -532,6 +539,12 @@ namespace SharpDTLS.DTLS13
                     : (_server.ServerKeyPair, _server.ServerCertificate, _server.IntermediateCertificates);
 
                 ApplicationProtocol = AlpnExtension.Select(_server.ApplicationProtocols, _clientHello.Extensions.OfType<AlpnExtension>().FirstOrDefault());
+
+                // Record size limits apply to everything we send from the ServerHello on (0-RTT data is exempt).
+                RecordSizeNegotiation.Validate(_server.RecordSizeLimit, null);
+                (PeerRecordLimit, ReceiveRecordLimit, _recordSizeResponse) = RecordSizeNegotiation.Accept(
+                    _clientHello.Extensions.OfType<RecordSizeLimitExtension>().FirstOrDefault(),
+                    _clientHello.Extensions.OfType<MaxFragmentLengthExtension>().FirstOrDefault(), _server.RecordSizeLimit, dtls13: true);
 
                 var offeredCid = _clientHello.Extensions.OfType<ConnectionIdExtension>().FirstOrDefault();
                 if (_server.UseConnectionIds && offeredCid != null)
@@ -749,6 +762,8 @@ namespace SharpDTLS.DTLS13
                 extensions.Extensions.Add(new ServerNameExtension());
             if (ApplicationProtocol != null)
                 extensions.Extensions.Add(new AlpnExtension(new[] { ApplicationProtocol }));
+            if (_recordSizeResponse != null)
+                extensions.Extensions.Add(_recordSizeResponse);
 
             return extensions;
         }

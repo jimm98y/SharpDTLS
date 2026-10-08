@@ -247,6 +247,8 @@ namespace SharpDTLS.DTLS13
             OnRecordAuthenticated(keys.Epoch, unprotected.SequenceNumber, unprotected.ConnectionId != null);
             byte[] inner = unprotected.InnerPlaintext;
             byte contentType = inner[inner.Length - 1];
+            if (keys.Epoch >= 2)
+                CheckReceivedRecordSize(inner.Length - 1);
 
             // Epoch 1 carries only 0-RTT application data; DTLS 1.3 has no EndOfEarlyData (RFC 9147 §5.6).
             if (keys.Epoch == 1)
@@ -371,7 +373,7 @@ namespace SharpDTLS.DTLS13
             if (IsRetransmissionArmed)
                 RetransmitFlight();
             else if (_lastAck != null && Session.WriteKeys != null)
-                SendProtected(Session.WriteKeys, _lastAck.ToBytes());
+                SendAckRecords(_lastAck);
         }
 
         // ── Post-handshake messages ──────────────────────────────────────────────────────────
@@ -502,7 +504,7 @@ namespace SharpDTLS.DTLS13
             SendInFlight(() =>
             {
                 int seq = _plaintextRecordSequence;
-                var fragments = HandshakeFragmenter.FragmentUnencryptedRecord((byte[])record.Clone(), 1200, ref seq);
+                var fragments = HandshakeFragmenter.FragmentUnencryptedRecord((byte[])record.Clone(), Math.Min(1200, 13 + PeerRecordLimit), ref seq);
                 _plaintextRecordSequence = (ushort)seq;
                 return fragments;
             });
@@ -523,7 +525,7 @@ namespace SharpDTLS.DTLS13
             SendInFlight(() =>
             {
                 var datagrams = new List<byte[]>();
-                foreach (var fragment in HandshakeFragmenter.FragmentHandshakePlaintext(plaintext, MaxHandshakeBodyPerRecord))
+                foreach (var fragment in HandshakeFragmenter.FragmentHandshakePlaintext(plaintext, Math.Min(MaxHandshakeBodyPerRecord, PeerRecordLimit - 12)))
                 {
                     var (record, number) = Protect(keys, fragment);
                     _flightRecords.Add(number);
@@ -560,7 +562,15 @@ namespace SharpDTLS.DTLS13
 
             _lastAck = new AcknowledgementDatagram(_receivedHandshakeRecords);
             _receivedHandshakeRecords.Clear();
-            SendProtected(Session.WriteKeys, _lastAck.ToBytes());
+            SendAckRecords(_lastAck);
+        }
+
+        // An ACK lists 16 bytes per record; under a small record size limit it takes several records.
+        private void SendAckRecords(AcknowledgementDatagram ack)
+        {
+            int perRecord = Math.Max(1, (PeerRecordLimit - 2) / 16);
+            for (int i = 0; i < ack.Records.Count; i += perRecord)
+                SendProtected(Session.WriteKeys, new AcknowledgementDatagram(ack.Records.Skip(i).Take(perRecord)).ToBytes());
         }
 
         protected void ClearReceivedHandshakeRecords() => _receivedHandshakeRecords.Clear();

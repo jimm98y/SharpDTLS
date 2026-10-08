@@ -285,6 +285,17 @@ namespace Dtls13Test.Tests
 
         protected override byte[] GetNewConnectionID() => ConnectionId;
 
+        /// <summary>The record_size_limit (RFC 8449) this client offers; null to not offer one.</summary>
+        public int? RecordSizeLimit { get; set; }
+
+        public override IDictionary<int, byte[]> GetClientExtensions()
+        {
+            var extensions = base.GetClientExtensions() ?? new Dictionary<int, byte[]>();
+            if (RecordSizeLimit.HasValue)
+                TlsExtensionsUtilities.AddRecordSizeLimitExtension(extensions, RecordSizeLimit.Value);
+            return extensions;
+        }
+
         private sealed class Authentication(BcTestClient owner) : TlsAuthentication
         {
             public void NotifyServerCertificate(TlsServerCertificate serverCertificate) { }

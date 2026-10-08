@@ -87,7 +87,7 @@ int main(int argc, char **argv)
     int port = atoi(argv[2]);
     const char *cert = NULL, *key = NULL, *cipher = NULL, *verify = NULL, *group = NULL, *srtp = NULL, *exportLabel = NULL;
     int exportLength = 0;
-    int hrr = 0, resume = 0, pskOnly = 0, argi = 3;
+    int hrr = 0, resume = 0, pskOnly = 0, mfl = 0, argi = 3;
     const char *pskHex = NULL, *host = NULL, *sni = NULL, *alpn = NULL, *cidHex = NULL;
 
     if (server) {
@@ -111,6 +111,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[argi], "-cert") && argi + 1 < argc) cert = argv[++argi];
         else if (!strcmp(argv[argi], "-key") && argi + 1 < argc) key = argv[++argi];
         else if (!strcmp(argv[argi], "-group") && argi + 1 < argc) group = argv[++argi];
+        else if (!strcmp(argv[argi], "-mfl") && argi + 1 < argc) mfl = atoi(argv[++argi]);
         else if (!strcmp(argv[argi], "-srtp") && argi + 1 < argc) srtp = argv[++argi];
         else if (!strcmp(argv[argi], "-export") && argi + 2 < argc) { exportLabel = argv[++argi]; exportLength = atoi(argv[++argi]); }
     }
@@ -210,6 +211,9 @@ int main(int argc, char **argv)
     if (wolfSSL_set_dtls_fd_connected(ssl, fd) != WOLFSSL_SUCCESS)
         fail("set fd", NULL, 0);
 
+    /* max_fragment_length code 1-4 (2^9 to 2^12); the client asks, the server always accepts */
+    if (mfl && !server && wolfSSL_UseMaxFragment(ssl, (unsigned char)mfl) != WOLFSSL_SUCCESS)
+        fail("UseMaxFragment", NULL, 0);
     /* post-quantum key shares make ClientHellos larger than one datagram */
     if (server && wolfSSL_dtls13_allow_ch_frag(ssl, 1) != WOLFSSL_SUCCESS)
         fail("allow ch frag", NULL, 0);
