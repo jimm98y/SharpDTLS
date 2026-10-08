@@ -262,7 +262,7 @@ namespace SharpDTLS.DTLS13
         {
             var (clientKey, clientIv, clientSnKey) = DeriveTrafficKeys(clientSecret, suite);
             var (serverKey, serverIv, serverSnKey) = DeriveTrafficKeys(serverSecret, suite);
-            return new Dtls13CryptoContext(clientRandom, secret, clientSecret, serverSecret, clientKey, clientIv, serverKey, serverIv, clientSnKey, serverSnKey, suite.Id, epoch);
+            return new Dtls13CryptoContext(clientRandom, secret, clientSecret, serverSecret, clientKey, clientIv, serverKey, serverIv, clientSnKey, serverSnKey, suite, epoch);
         }
 
         private static (byte[] key, byte[] iv, byte[] snKey) DeriveTrafficKeys(byte[] trafficSecret, Dtls13CipherSuite suite)
@@ -300,7 +300,7 @@ namespace SharpDTLS.DTLS13
                 key, iv,
                 current.ServerKey, current.ServerIv,
                 snKey, current.ServerSnKey,
-                suite.Id, current.Epoch + 1);
+                suite, current.Epoch + 1);
         }
 
         public static Dtls13CryptoContext UpdateServerTrafficSecret(Dtls13CryptoContext current)
@@ -315,7 +315,7 @@ namespace SharpDTLS.DTLS13
                 current.ClientKey, current.ClientIv,
                 key, iv,
                 current.ClientSnKey, snKey,
-                suite.Id, current.Epoch + 1);
+                suite, current.Epoch + 1);
         }
 
         private static byte[] EmptyHash(Dtls13CipherSuite suite)

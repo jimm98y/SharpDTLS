@@ -30,8 +30,15 @@ namespace SharpDTLS.DTLS13
 
         public Dtls13CryptoContext(byte[] clientRandom, byte[] secret, byte[] clientSecret, byte[] serverSecret, byte[] clientKey, byte[] clientIv, byte[] serverKey, byte[] serverIv, byte[] clientSnKey, byte[] serverSnKey,
             ushort cipherSuite = Dtls13CipherSuite.TLS_AES_128_GCM_SHA256, ulong epoch = 2)
+            : this(clientRandom, secret, clientSecret, serverSecret, clientKey, clientIv, serverKey, serverIv, clientSnKey, serverSnKey, Dtls13CipherSuite.Get(cipherSuite), epoch)
         {
-            Suite = Dtls13CipherSuite.Get(cipherSuite);
+        }
+
+        /// <summary>Keeps <paramref name="suite"/> itself, so a TLS suite's "tls13 " labels carry over to KeyUpdates.</summary>
+        internal Dtls13CryptoContext(byte[] clientRandom, byte[] secret, byte[] clientSecret, byte[] serverSecret, byte[] clientKey, byte[] clientIv, byte[] serverKey, byte[] serverIv, byte[] clientSnKey, byte[] serverSnKey,
+            Dtls13CipherSuite suite, ulong epoch)
+        {
+            Suite = suite;
             Epoch = epoch;
             ClientRandom = clientRandom;
             Secret = secret;
