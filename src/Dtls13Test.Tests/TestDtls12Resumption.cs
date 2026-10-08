@@ -26,7 +26,7 @@ namespace Dtls13Test.Tests
         }
 
         private static Run Connect(ushort version, IDtls12SessionCache cache, Dtls12SessionState resume, ushort? suite = null,
-            Action<ScriptedTransportPair> configureLink = null, Dtls12TicketKeys ticketKeys = null)
+            Action<ScriptedTransportPair> configureLink = null, SessionTicketKeys ticketKeys = null)
         {
             var r = new Run();
             configureLink?.Invoke(r.Pair);
@@ -174,7 +174,7 @@ namespace Dtls13Test.Tests
         public void Ticket_IsResumedStatelessly(ushort version, ushort suite)
         {
             var cache = new Dtls12SessionCache();
-            var keys = new Dtls12TicketKeys();
+            var keys = new SessionTicketKeys();
             var first = Connect(version, cache, null, suite, ticketKeys: keys);
             var session = first.Client.SessionState;
             Assert.IsNotNull(session?.Ticket, "the server issues a ticket during the full handshake");
@@ -192,8 +192,8 @@ namespace Dtls13Test.Tests
         [TestMethod]
         public void Ticket_FromAnotherServerKey_FallsBackToAFullHandshakeWithANewTicket()
         {
-            var session = Connect(DtlsVersion.Dtls12, null, null, ticketKeys: new Dtls12TicketKeys()).Client.SessionState;
-            var r = Connect(DtlsVersion.Dtls12, null, session, ticketKeys: new Dtls12TicketKeys());
+            var session = Connect(DtlsVersion.Dtls12, null, null, ticketKeys: new SessionTicketKeys()).Client.SessionState;
+            var r = Connect(DtlsVersion.Dtls12, null, session, ticketKeys: new SessionTicketKeys());
             Assert.IsFalse(r.Client.IsResumed);
             Assert.IsNotNull(r.Client.SessionState.Ticket);
             CollectionAssert.AreNotEqual(session.Ticket, r.Client.SessionState.Ticket);
@@ -202,7 +202,7 @@ namespace Dtls13Test.Tests
         [TestMethod]
         public void Ticket_AfterKeyRotation_IsResumedAndRenewedKeepingItsAge()
         {
-            var keys = new Dtls12TicketKeys();
+            var keys = new SessionTicketKeys();
             var session = Connect(DtlsVersion.Dtls12, null, null, ticketKeys: keys).Client.SessionState;
             keys.Rotate();
 
@@ -219,7 +219,7 @@ namespace Dtls13Test.Tests
         [TestMethod]
         public void Ticket_ExpiredOrTampered_IsNotResumed()
         {
-            var keys = new Dtls12TicketKeys();
+            var keys = new SessionTicketKeys();
             var session = Connect(DtlsVersion.Dtls12, null, null, ticketKeys: keys).Client.SessionState;
 
             byte[] tampered = (byte[])session.Ticket.Clone();
@@ -250,7 +250,7 @@ namespace Dtls13Test.Tests
         [TestMethod]
         public void LostNewSessionTicket_IsRetransmitted(bool resumption, int dropIndex)
         {
-            var keys = new Dtls12TicketKeys();
+            var keys = new SessionTicketKeys();
             Dtls12SessionState session = null;
             if (resumption)
             {

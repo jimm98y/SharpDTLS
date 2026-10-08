@@ -54,7 +54,7 @@ namespace SharpDTLS.DTLS12
         public IDtls12SessionCache SessionCache { get; set; } = new Dtls12SessionCache();
 
         /// <summary>Keys for RFC 5077 session tickets (random per server by default); null disables tickets.</summary>
-        public Dtls12TicketKeys TicketKeys { get; set; } = new Dtls12TicketKeys();
+        public SessionTicketKeys TicketKeys { get; set; } = new SessionTicketKeys();
     }
 
     /// <summary>
@@ -216,7 +216,7 @@ namespace SharpDTLS.DTLS12
             bool renewTicket = false;
             byte[] ticket = ch.Extension<SessionTicketExtension>()?.Ticket;
             if (ticket is { Length: > 0 } && _settings.TicketKeys != null)
-                session = _settings.TicketKeys.Open(ticket, out renewTicket);
+                session = Dtls12SessionState.Open(_settings.TicketKeys, ticket, out renewTicket);
             if (session == null && ch.SessionId.Length != 0 && _settings.SessionCache != null)
                 session = _settings.SessionCache.Find(ch.SessionId);
             if (session == null)
@@ -435,7 +435,7 @@ namespace SharpDTLS.DTLS12
             SendHandshake(HandshakeType.NewSessionTicket, new NewSessionTicketMessage
             {
                 LifetimeHint = (uint)Math.Min(uint.MaxValue, keys.Lifetime.TotalSeconds),
-                Ticket = keys.Seal(session),
+                Ticket = session.Seal(keys),
             }.Encode());
         }
     }
