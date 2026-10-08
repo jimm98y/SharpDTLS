@@ -6,7 +6,8 @@ namespace SharpDTLS.TLS12
     /// <summary>
     /// TLS 1.2 client over a stream (usually a connected <see cref="System.Net.Sockets.NetworkStream"/>). It is the
     /// DTLS 1.0/1.2 client's handshake over TLS framing, so the same settings apply; DTLS-only ones (SRTP, connection
-    /// IDs) are ignored. Set <see cref="Tls12Connection.MinimumVersion"/> to accept older TLS versions.
+    /// IDs) are ignored. Set <see cref="Tls12Connection.MinimumVersion"/> to also accept TLS 1.0 or 1.1 servers;
+    /// <see cref="SharpDTLS.TLS10.Tls10Client"/> and <see cref="SharpDTLS.TLS10.Tls11Client"/> speak only those.
     /// </summary>
     public class Tls12Client : Tls12ClientConnection
     {
