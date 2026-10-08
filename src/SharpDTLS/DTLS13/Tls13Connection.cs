@@ -29,6 +29,8 @@ namespace SharpDTLS.DTLS13
 
         // KeyUpdate we sent and are waiting to be ACKed before switching write keys.
         private List<(ulong Epoch, ulong SequenceNumber)> _pendingKeyUpdateRecords;
+        // A KeyUpdate asked for while one was pending: sent once that one is ACKed (null when none).
+        private bool? _queuedKeyUpdateRequest;
         private AcknowledgementDatagram _lastAck;
         private ushort _plaintextRecordSequence;
 
@@ -166,14 +168,16 @@ namespace SharpDTLS.DTLS13
 
         /// <summary>
         /// Sends a KeyUpdate. The new write keys take effect once the peer ACKs it (RFC 9147 §8).
+        /// While an earlier KeyUpdate (possibly one answering the peer's) awaits its ACK, this one is sent after it.
         /// </summary>
         public void SendKeyUpdate(bool requestUpdate = false) => Locked(() =>
         {
             if (!IsHandshakeComplete || IsClosed)
                 throw new InvalidOperationException("The handshake has not completed.");
             if (_pendingKeyUpdateRecords != null)
-                throw new InvalidOperationException("A KeyUpdate is already in progress.");
-            StartKeyUpdate(requestUpdate);
+                _queuedKeyUpdateRequest = (_queuedKeyUpdateRequest ?? false) || requestUpdate;
+            else
+                StartKeyUpdate(requestUpdate);
         });
 
         protected override void WriteApplicationData(byte[] data)
@@ -723,6 +727,11 @@ namespace SharpDTLS.DTLS13
                     ? Dtls13CryptoUtils.UpdateClientTrafficSecret(Session.WriteKeys)
                     : Dtls13CryptoUtils.UpdateServerTrafficSecret(Session.WriteKeys);
                 Debug.WriteLine($"{LogPrefix} KeyUpdate acknowledged, now writing epoch {Session.WriteKeys.Epoch}");
+                if (_queuedKeyUpdateRequest is bool requestUpdate)
+                {
+                    _queuedKeyUpdateRequest = null;
+                    StartKeyUpdate(requestUpdate);
+                }
             }
         }
 

@@ -285,6 +285,31 @@ namespace Dtls13Test.Tests
         }
 
         [TestMethod]
+        public void KeyUpdate_WhileOneAwaitsItsAck_IsSentAfterIt()
+        {
+            var h = new Harness(configureServer: s => s.ShouldSendHelloRetry = false);
+            h.Handshake();
+            ulong clientEpoch = h.Client.Session.WriteKeys.Epoch;
+
+            // Hold the server's ACKs, so the first KeyUpdate stays pending.
+            var held = new List<byte[]>();
+            h.Pair.ServerToClient = d => { held.Add(d); return Array.Empty<byte[]>(); };
+            h.Client.SendKeyUpdate();
+            h.Client.SendKeyUpdate(requestUpdate: true);
+            Assert.AreEqual(clientEpoch, h.Client.Session.WriteKeys.Epoch);
+
+            h.Pair.ServerToClient = d => new[] { d };
+            foreach (byte[] d in held)
+                h.Pair.Client.Deliver(d);
+
+            Assert.AreEqual(clientEpoch + 2, h.Client.Session.WriteKeys.Epoch, "the queued KeyUpdate should follow the first one's ACK");
+            h.Client.SendApplicationData(Encoding.UTF8.GetBytes("after-updates"));
+            Assert.AreEqual("after-updates", h.ServerReceived[^1]);
+            Assert.IsEmpty(h.ClientErrors);
+            Assert.IsEmpty(h.ServerErrors);
+        }
+
+        [TestMethod]
         public void LostServerFlight_IsRetransmitted()
         {
             // Without tickets, so a NewSessionTicket does not count as a retransmission.

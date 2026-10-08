@@ -128,7 +128,7 @@ namespace Dtls13Test.Tests
 
             // our KeyUpdate (with update_requested), then data in both directions
             client.SendKeyUpdate(requestUpdate: true);
-            Assert.IsTrue(WaitFor(() => client.Session.WriteKeys.Epoch > 3), "client KeyUpdate was not acknowledged:\n" + server.Output);
+            Assert.IsTrue(WaitFor(() => client.Session.WriteKeys.Epoch > 4), "client KeyUpdate was not acknowledged:\n" + server.Output);
             client.SendApplicationData(Encoding.UTF8.GetBytes("after-client-keyupdate\n"));
             Assert.IsTrue(server.WaitForOutput("RECV:after-client-keyupdate", Timeout), server.Output);
             server.WriteLine("final");
@@ -176,7 +176,7 @@ namespace Dtls13Test.Tests
             Assert.IsTrue(WaitFor(() => Contains(received, "after-client-keyupdate")), "server did not receive data after KeyUpdate:\n" + client.Output);
 
             connection.SendKeyUpdate(requestUpdate: true);
-            Assert.IsTrue(WaitFor(() => connection.Session.WriteKeys.Epoch > 3), "server KeyUpdate was not acknowledged:\n" + client.Output);
+            Assert.IsTrue(WaitFor(() => connection.Session.WriteKeys.Epoch > 4), "server KeyUpdate was not acknowledged:\n" + client.Output);
             connection.SendApplicationData(Encoding.UTF8.GetBytes("after-server-keyupdate\n"));
             Assert.IsTrue(client.WaitForOutput("RECV:after-server-keyupdate", Timeout), client.Output);
         }
