@@ -3,7 +3,7 @@ using System.Linq;
 
 namespace SharpDTLS.DTLS13.Messages
 {
-    public class RequestConnectionIdDatagram : IDatagram
+    public class RequestConnectionIdDatagram : IHandshakeDatagram
     {
         // Handshake type byte left configurable in case protocol mapping differs. Default to 0x18.
         public byte HandshakeType { get; set; } = 0x18;

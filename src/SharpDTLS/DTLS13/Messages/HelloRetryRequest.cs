@@ -1,26 +1,34 @@
-﻿using System;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace SharpDTLS.DTLS13.Messages
 {
+    /// <summary>
+    /// HelloRetryRequest: a ServerHello with the special random value (RFC 8446 §4.1.3).
+    /// </summary>
     public class HelloRetryRequest : ServerHelloDatagram
     {
-        const string HelloRetryRequestRandom = "CF21AD74E59A6111BE1D8C021E65B891C2A211167ABB8C5E079E09E2C8A8339C";
+        public static readonly byte[] HelloRetryRequestRandom = Convert.FromHexString("CF21AD74E59A6111BE1D8C021E65B891C2A211167ABB8C5E079E09E2C8A8339C");
 
         public HelloRetryRequest()
         { }
 
-        public HelloRetryRequest(DateTime timestamp, string clientIP, int clientPort)
+        /// <param name="selectedGroup">Group the client must send a key share for, or null when the client's share is acceptable.</param>
+        public HelloRetryRequest(ushort cipherSuite, byte[] cookie, ushort? selectedGroup, byte[] legacySessionIdEcho)
         {
-            ServerRandom = Convert.FromHexString(HelloRetryRequestRandom);
-            Extensions = [.. GetDefaultExtensions(), new CookieExtension(Dtls13CryptoUtils.CreateCookie(timestamp, clientIP, clientPort))];
+            ServerRandom = (byte[])HelloRetryRequestRandom.Clone();
+            SelectedCipherSuite = cipherSuite;
+            LegacySessionIdEcho = legacySessionIdEcho ?? Array.Empty<byte>();
+
+            var extensions = new List<ITlsExtension> { new ServerSupportedVersions() };
+            if (selectedGroup.HasValue)
+                extensions.Add(new ServerKeyShareExtension(selectedGroup.Value, null));
+            extensions.Add(new CookieExtension(cookie));
+            Extensions = extensions;
         }
 
-        private static ITlsExtension[] GetDefaultExtensions()
-        {
-            return new ITlsExtension[]
-            {
-                new ServerSupportedVersions(),
-            };
-        }
+        public static bool IsHelloRetryRequest(ServerHelloDatagram serverHello)
+            => serverHello.ServerRandom != null && serverHello.ServerRandom.AsSpan().SequenceEqual(HelloRetryRequestRandom);
     }
 }

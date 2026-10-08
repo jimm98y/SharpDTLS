@@ -1,15 +1,19 @@
-﻿using System;
+using System;
 using System.IO;
-using System.Linq;
 
 namespace SharpDTLS.DTLS13.Messages
 {
-    public class CertificateRequestDatagram : IDatagram
+    /// <summary>
+    /// TLS 1.3 CertificateRequest (RFC 8446 §4.3.2).
+    /// </summary>
+    public class CertificateRequestDatagram : IHandshakeDatagram
     {
         public byte HandshakeType { get; set; } = 0x0d; // CertificateRequest
         public int SequenceNumber { get; set; } = 0;
-        public byte RequestContext { get; set; } = 0;
-        // Extensions would go here, but we'll skip them for now
+        public byte[] RequestContext { get; set; } = Array.Empty<byte>();
+
+        /// <summary>Schemes accepted for the client's CertificateVerify (signature_algorithms, mandatory).</summary>
+        public ushort[] SignatureAlgorithms { get; set; } = Dtls13Signatures.Supported;
 
         public byte[] Bytes { get; private set; }
 
@@ -17,100 +21,81 @@ namespace SharpDTLS.DTLS13.Messages
         {
         }
 
-        public CertificateRequestDatagram(byte requestContext)
-        {
-            RequestContext = requestContext;
-        }
-
         public void FromBytes(byte[] bytes)
         {
             if (bytes == null) throw new ArgumentNullException(nameof(bytes));
-            if (bytes.Length < 12 + 1 + 2) throw new ArgumentException("Buffer too small to be a valid CertificateRequest.");
-
-            Bytes = bytes.ToArray();
-
+            if (bytes.Length < 12 + 1 + 2) throw new DtlsException(AlertDescription.DecodeError, "Buffer too small to be a valid CertificateRequest.");
             if (bytes[0] != HandshakeType) throw new InvalidDataException("Not a CertificateRequest handshake message.");
+
+            Bytes = (byte[])bytes.Clone();
 
             int length = (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
             SequenceNumber = (bytes[4] << 8) | bytes[5];
+            int end = 12 + length;
+            if (bytes.Length < end) throw new DtlsException(AlertDescription.DecodeError, "Truncated CertificateRequest.");
 
             int pos = 12;
+            int contextLength = bytes[pos++];
+            if (pos + contextLength + 2 > end) throw new DtlsException(AlertDescription.DecodeError, "Invalid certificate_request_context.");
+            RequestContext = bytes.AsSpan(pos, contextLength).ToArray();
+            pos += contextLength;
 
-            // request context
-            if (bytes.Length < pos + 1) throw new ArgumentException("Buffer truncated before request context.");
-            RequestContext = bytes[pos++];
-
-            // certificate request extensions
-            if (bytes.Length < pos + 2) throw new ArgumentException("Buffer truncated before extensions length.");
             int extensionsLength = (bytes[pos] << 8) | bytes[pos + 1];
             pos += 2;
+            if (pos + extensionsLength != end) throw new DtlsException(AlertDescription.DecodeError, "Inconsistent CertificateRequest extensions length.");
 
-            if (bytes.Length < pos + extensionsLength) throw new ArgumentException("Buffer truncated in extensions area.");
-            // Skip extensions for now
-            pos += extensionsLength;
+            SignatureAlgorithms = null;
+            while (pos < end)
+            {
+                if (pos + 4 > end) throw new DtlsException(AlertDescription.DecodeError, "Truncated extension.");
+                ushort type = (ushort)((bytes[pos] << 8) | bytes[pos + 1]);
+                int extLength = (bytes[pos + 2] << 8) | bytes[pos + 3];
+                if (pos + 4 + extLength > end) throw new DtlsException(AlertDescription.DecodeError, "Truncated extension.");
+
+                if (type == 0x000d)
+                {
+                    var ext = new ClientSignatureAlgorithms();
+                    ext.Read(pos, bytes);
+                    SignatureAlgorithms = ext.SignatureAlgorithms;
+                }
+
+                pos += 4 + extLength;
+            }
+
+            if (SignatureAlgorithms == null)
+                throw new DtlsException(AlertDescription.MissingExtension, "CertificateRequest has no signature_algorithms extension.");
         }
 
         public byte[] ToBytes()
         {
-            byte[] data = new byte[512];
+            var sigAlgs = new ClientSignatureAlgorithms(SignatureAlgorithms);
+            int extensionsLength = sigAlgs.CalculateLength();
+            int bodyLength = 1 + RequestContext.Length + 2 + extensionsLength;
 
-            data[0] = HandshakeType; // CertificateRequest
-
-            int length = 0;
-            data[1] = (byte)((length >> 16) & 0xFF);
-            data[2] = (byte)((length >> 8) & 0xFF);
-            data[3] = (byte)(length & 0xFF);
-
-            // handshake reconstruction data
-            data[4] = (byte)((SequenceNumber >> 8) & 0xFF);
-            data[5] = (byte)(SequenceNumber & 0xFF);
-
-            // fragment offset and fragment length
-            data[6] = 0; data[7] = 0; data[8] = 0;
-            data[9] = 0; data[10] = 0; data[11] = 0;
+            byte[] data = new byte[12 + bodyLength + 1];
+            data[0] = HandshakeType;
+            data[1] = (byte)(bodyLength >> 16);
+            data[2] = (byte)(bodyLength >> 8);
+            data[3] = (byte)bodyLength;
+            data[4] = (byte)(SequenceNumber >> 8);
+            data[5] = (byte)SequenceNumber;
+            // fragment_offset = 0
+            data[9] = (byte)(bodyLength >> 16);
+            data[10] = (byte)(bodyLength >> 8);
+            data[11] = (byte)bodyLength;
 
             int pos = 12;
+            data[pos++] = (byte)RequestContext.Length;
+            Buffer.BlockCopy(RequestContext, 0, data, pos, RequestContext.Length);
+            pos += RequestContext.Length;
 
-            // request context
-            data[pos++] = RequestContext;
+            data[pos++] = (byte)(extensionsLength >> 8);
+            data[pos++] = (byte)extensionsLength;
+            pos += sigAlgs.Write(pos, data);
 
-            // certificate request extensions:
-            //   signature_algorithms (0x000D):
-            //     extension data length = 6 (2 for list length + 4 for two schemes)
-            //     signature_scheme_list length = 4
-            //     ecdsa_secp256r1_sha256 (0x0403)
-            //     rsa_pss_rsae_sha256 (0x0804)
-            int extensionsLength = 10; // type(2)+extLen(2)+listLen(2)+scheme1(2)+scheme2(2)
-            data[pos++] = (byte)((extensionsLength >> 8) & 0xFF);
-            data[pos++] = (byte)(extensionsLength & 0xFF);
+            data[pos] = 0x16; // inner content type (handshake)
 
-            // signature_algorithms extension
-            data[pos++] = 0x00; data[pos++] = 0x0D; // extension type
-            data[pos++] = 0x00; data[pos++] = 0x06; // extension data length = 6
-            data[pos++] = 0x00; data[pos++] = 0x04; // signature_scheme_list length = 4
-            data[pos++] = 0x04; data[pos++] = 0x03; // ecdsa_secp256r1_sha256
-            data[pos++] = 0x08; data[pos++] = 0x04; // rsa_pss_rsae_sha256
-
-            // trailing record type for parity
-            data[pos++] = 0x16;
-
-            // fill in lengths
-            length = pos - 13;
-            data[1] = (byte)((length >> 16) & 0xFF);
-            data[2] = (byte)((length >> 8) & 0xFF);
-            data[3] = (byte)(length & 0xFF);
-
-            int fragmentOffset = 0;
-            data[6] = (byte)((fragmentOffset >> 16) & 0xFF);
-            data[7] = (byte)((fragmentOffset >> 8) & 0xFF);
-            data[8] = (byte)(fragmentOffset & 0xFF);
-
-            int fragmentLength = length;
-            data[9] = (byte)((fragmentLength >> 16) & 0xFF);
-            data[10] = (byte)((fragmentLength >> 8) & 0xFF);
-            data[11] = (byte)(fragmentLength & 0xFF);
-
-            Bytes = data.Take(pos).ToArray();
+            Bytes = data;
             return Bytes;
         }
     }

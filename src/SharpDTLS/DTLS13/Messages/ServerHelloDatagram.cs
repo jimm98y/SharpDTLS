@@ -5,13 +5,17 @@ using System.Linq;
 
 namespace SharpDTLS.DTLS13.Messages
 {
-    public class ServerHelloDatagram : IDatagram
+    public class ServerHelloDatagram : IHandshakeDatagram
     {
         public byte[] ServerRandom { get; set; } 
         public byte[] PublicKey { get; private set; }
         public byte[] Bytes { get; private set; }
         public int Epoch { get; set; } = 0;
         public int RecordSequenceNumber { get; set; }
+
+        /// <summary>Handshake message_seq.</summary>
+        public int SequenceNumber { get; set; }
+        public byte[] LegacySessionIdEcho { get; set; } = Array.Empty<byte>();
         public List<ITlsExtension> Extensions { get; protected set; } = new List<ITlsExtension>();
 
         public ushort SelectedCipherSuite { get; set; } = 0x1301;
@@ -52,6 +56,7 @@ namespace SharpDTLS.DTLS13.Messages
                 seq = (seq << 8) | bytes[i];
             }
             RecordSequenceNumber = (int)seq;
+            SequenceNumber = (bytes[17] << 8) | bytes[18];
 
             if (bytes.Length < 27 + 32) throw new ArgumentException("Buffer too small for ServerRandom.");
             ServerRandom = new byte[32];
@@ -60,6 +65,8 @@ namespace SharpDTLS.DTLS13.Messages
             // Legacy session id length 
             if (bytes.Length < 60) throw new ArgumentException("Buffer truncated before session id / cipher suite.");
             int sessionIdLen = bytes[59];
+            if (sessionIdLen > 32 || bytes.Length < 60 + sessionIdLen) throw new DtlsException(AlertDescription.DecodeError, "Invalid legacy_session_id_echo.");
+            LegacySessionIdEcho = bytes.AsSpan(60, sessionIdLen).ToArray();
             int cipherOffset = 60 + sessionIdLen;
             if (bytes.Length < cipherOffset + 3) throw new ArgumentException("Buffer truncated before cipher suite/compression.");
 
@@ -93,8 +100,8 @@ namespace SharpDTLS.DTLS13.Messages
                     0x0033 => new ServerKeyShareExtension(),
                     0x002b => new ServerSupportedVersions(),
                     0x002c => new CookieExtension(),
-                    0x000f => new UseSrtpExtension(),
-                    _ => throw new NotSupportedException()
+                    0x000e => new UseSrtpExtension(),
+                    _ => new UnknownExtension()
                 };
 
                 if (extensionInstance != null)
@@ -124,7 +131,8 @@ namespace SharpDTLS.DTLS13.Messages
         public byte[] ToBytes()
         {
             int extensionsLength = Extensions.Select(x => x.CalculateLength()).Sum();
-            byte[] serverHello = new byte[65 + extensionsLength];
+            int sid = LegacySessionIdEcho.Length;
+            byte[] serverHello = new byte[65 + sid + extensionsLength];
 
             // DTLS record header
             serverHello[0] = 0x16; // TLS record type 22 (Handshake)
@@ -132,8 +140,8 @@ namespace SharpDTLS.DTLS13.Messages
             serverHello[2] = 0xFD; // DTLS 1.2 minor version
             serverHello[3] = (byte)((Epoch >> 8) & 0xff); // Epoch
             serverHello[4] = (byte)((Epoch) & 0xff); // Epoch
-            serverHello[5] = (byte)((RecordSequenceNumber >> 40) & 0xff); // Record sequence number
-            serverHello[6] = (byte)((RecordSequenceNumber >> 32) & 0xff); // Record sequence number
+            serverHello[5] = (byte)(((long)RecordSequenceNumber >> 40) & 0xff); // Record sequence number
+            serverHello[6] = (byte)(((long)RecordSequenceNumber >> 32) & 0xff); // Record sequence number
             serverHello[7] = (byte)((RecordSequenceNumber >> 24) & 0xff); // Record sequence number
             serverHello[8] = (byte)((RecordSequenceNumber >> 16) & 0xff); // Record sequence number
             serverHello[9] = (byte)((RecordSequenceNumber >> 8) & 0xff); // Record sequence number
@@ -148,7 +156,7 @@ namespace SharpDTLS.DTLS13.Messages
             serverHello[16] = 0x00; // Length (placeholder)
 
             // Handshake reconstruction data
-            ushort messageSequenceNumber = 0;
+            ushort messageSequenceNumber = (ushort)SequenceNumber;
             uint fragmentOffset = 0;
             uint fragmentLength = 0;
             serverHello[17] = (byte)((messageSequenceNumber >> 8) & 0xff);
@@ -166,17 +174,18 @@ namespace SharpDTLS.DTLS13.Messages
 
             Buffer.BlockCopy(ServerRandom, 0, serverHello, 27, ServerRandom.Length);
 
-            serverHello[59] = 0; // Legacy session ID
+            serverHello[59] = (byte)sid; // Legacy session ID echo
+            Buffer.BlockCopy(LegacySessionIdEcho, 0, serverHello, 60, sid);
 
-            serverHello[60] = (byte)((SelectedCipherSuite >> 8) & 0xff); // Cipher suite (placeholder)
-            serverHello[61] = (byte)(SelectedCipherSuite & 0xff); // Cipher suite (placeholder)
+            serverHello[60 + sid] = (byte)((SelectedCipherSuite >> 8) & 0xff); // Cipher suite
+            serverHello[61 + sid] = (byte)(SelectedCipherSuite & 0xff); // Cipher suite
 
-            serverHello[62] = 0x00; // Compression method (null) - DTLS1.3 does not support compression
+            serverHello[62 + sid] = 0x00; // Compression method (null) - DTLS1.3 does not support compression
 
             // Extensions 
-            serverHello[63] = (byte)((extensionsLength >> 8) & 0xff); // Extensions length in bytes (placeholder)
-            serverHello[64] = (byte)(extensionsLength & 0xff); // Extensions length in bytes (placeholder)
-            int nextExtensionOffset = 65; // Starting offset for extensions
+            serverHello[63 + sid] = (byte)((extensionsLength >> 8) & 0xff); // Extensions length in bytes
+            serverHello[64 + sid] = (byte)(extensionsLength & 0xff); // Extensions length in bytes
+            int nextExtensionOffset = 65 + sid; // Starting offset for extensions
             foreach (var extension in Extensions)
             {
                 int extensionLength = extension.Write(nextExtensionOffset, serverHello);
@@ -207,6 +216,8 @@ namespace SharpDTLS.DTLS13.Messages
     public class ServerKeyShareExtension : ITlsExtension
     {
         public ushort KeyType { get; private set; }
+
+        /// <summary>The server's key share, or null in a HelloRetryRequest (which only carries selected_group).</summary>
         public byte[] PublicKey { get; private set; }
 
         public ServerKeyShareExtension()
@@ -220,23 +231,31 @@ namespace SharpDTLS.DTLS13.Messages
 
         public int CalculateLength()
         {
-            return 8 + this.PublicKey.Length;
+            return PublicKey == null ? 6 : 8 + this.PublicKey.Length;
         }
 
         public int Read(int offset, byte[] source)
         {
             if (source == null) throw new ArgumentNullException(nameof(source));
-            if (offset < 0) throw new ArgumentOutOfRangeException(nameof(offset));
+            if (source.Length < offset + 6) throw new DtlsException(AlertDescription.DecodeError, "Truncated key_share extension.");
 
             ushort extType = (ushort)((source[offset] << 8) | source[offset + 1]);
             if (extType != 0x0033) throw new InvalidDataException($"Unexpected extension type: 0x{extType:X4}");
 
-            ushort extensionLength = (ushort)((source[offset + 2] << 8) | source[offset + 3]);
+            int extensionLength = (source[offset + 2] << 8) | source[offset + 3];
             this.KeyType = (ushort)((source[offset + 4] << 8) | source[offset + 5]);
-            ushort publicKeyLength = (ushort)((source[offset + 6] << 8) | source[offset + 7]);
 
-            if (source.Length < offset + 8 + publicKeyLength)
-                throw new ArgumentException("Buffer too small to contain the declared public key.");
+            if (extensionLength == 2)
+            {
+                // HelloRetryRequest: KeyShareHelloRetryRequest { NamedGroup selected_group; }
+                this.PublicKey = null;
+                return 6;
+            }
+
+            if (source.Length < offset + 8) throw new DtlsException(AlertDescription.DecodeError, "Truncated key_share extension.");
+            int publicKeyLength = (source[offset + 6] << 8) | source[offset + 7];
+            if (extensionLength != 4 + publicKeyLength || source.Length < offset + 8 + publicKeyLength)
+                throw new DtlsException(AlertDescription.DecodeError, "Inconsistent key_share extension length.");
 
             this.PublicKey = new byte[publicKeyLength];
             Buffer.BlockCopy(source, offset + 8, this.PublicKey, 0, publicKeyLength);
@@ -247,20 +266,27 @@ namespace SharpDTLS.DTLS13.Messages
         public int Write(int offset, byte[] destination)
         {
             destination[offset] = 0x00; // Extension type 0x0033 (KeyShare)
-            destination[offset + 1] = 0x33; // Extension type 0x0033 (KeyShare)
+            destination[offset + 1] = 0x33;
+
+            if (PublicKey == null)
+            {
+                destination[offset + 2] = 0x00;
+                destination[offset + 3] = 0x02;
+                destination[offset + 4] = (byte)((KeyType >> 8) & 0xff);
+                destination[offset + 5] = (byte)(KeyType & 0xff);
+                return 6;
+            }
 
             int extensionLength = 2 + 2 + this.PublicKey.Length;
-            destination[offset + 2] = (byte)((extensionLength >> 8) & 0xff); // Extension length 
-            destination[offset + 3] = (byte)(extensionLength & 0xff); // Extension length 
-
-            destination[offset + 4] = (byte)((KeyType >> 8) & 0xff); // assigned value for x25519 (key exchange via curve25519)
-            destination[offset + 5] = (byte)(KeyType & 0xff); // assigned value for x25519 (key exchange via curve25519)
-
-            destination[offset + 6] = (byte)((this.PublicKey.Length >> 8) & 0xff); //  bytes of public key follows
-            destination[offset + 7] = (byte)(this.PublicKey.Length & 0xff); //  bytes of public key follows
+            destination[offset + 2] = (byte)((extensionLength >> 8) & 0xff);
+            destination[offset + 3] = (byte)(extensionLength & 0xff);
+            destination[offset + 4] = (byte)((KeyType >> 8) & 0xff);
+            destination[offset + 5] = (byte)(KeyType & 0xff);
+            destination[offset + 6] = (byte)((this.PublicKey.Length >> 8) & 0xff);
+            destination[offset + 7] = (byte)(this.PublicKey.Length & 0xff);
             Buffer.BlockCopy(this.PublicKey, 0, destination, offset + 8, this.PublicKey.Length);
 
-            return 8 + this.PublicKey.Length; // total length of the extension data
+            return 8 + this.PublicKey.Length;
         }
     }
 
@@ -385,7 +411,7 @@ namespace SharpDTLS.DTLS13.Messages
             if (source.Length < offset + 7) throw new ArgumentException("Not enough data for ServerUseSrtp extension header.");
 
             ushort extType = (ushort)((source[offset] << 8) | source[offset + 1]);
-            if (extType != 0x000f) throw new InvalidDataException($"Unexpected extension type: 0x{extType:X4}");
+            if (extType != 0x000e) throw new InvalidDataException($"Unexpected extension type: 0x{extType:X4}");
 
             ushort extensionLength = (ushort)((source[offset + 2] << 8) | source[offset + 3]);
             this.SelectedSrtpProfile = (ushort)((source[offset + 4] << 8) | source[offset + 5]);
@@ -412,7 +438,7 @@ namespace SharpDTLS.DTLS13.Messages
         public int Write(int offset, byte[] destination)
         {
             destination[offset] = 0x00;
-            destination[offset + 1] = 0x0f; // extension type 0x000f (Use SRTP)
+            destination[offset + 1] = 0x0e; // extension type 0x000e (use_srtp, RFC 5764)
 
             int extensionLength = 2 + 1 + this.MasterKeyIdentifier.Length;
             destination[offset + 2] = (byte)((extensionLength >> 8) & 0xff); // extension length

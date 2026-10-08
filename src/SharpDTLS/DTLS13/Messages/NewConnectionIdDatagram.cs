@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace SharpDTLS.DTLS13.Messages
 {
-    public class NewConnectionIdDatagram : IDatagram
+    public class NewConnectionIdDatagram : IHandshakeDatagram
     {
         // Handshake type for NewConnectionID per TLS 1.3 post-handshake messages
         public byte HandshakeType { get; set; } = 0x19;

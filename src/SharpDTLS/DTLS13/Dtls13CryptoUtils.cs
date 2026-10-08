@@ -1,7 +1,6 @@
-﻿using Org.BouncyCastle.Asn1.X509;
+using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.Asn1.X9;
 using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Crypto.Digests;
 using Org.BouncyCastle.Crypto.Generators;
 using Org.BouncyCastle.Crypto.Macs;
 using Org.BouncyCastle.Crypto.Operators;
@@ -13,65 +12,96 @@ using Org.BouncyCastle.Tls.Crypto;
 using Org.BouncyCastle.Tls.Crypto.Impl.BC;
 using Org.BouncyCastle.X509;
 using System;
-using System.Collections.Generic;
-using System.Linq;
+using System.Buffers.Binary;
 using System.Security.Cryptography;
-using SharpDTLS.DTLS13.Messages;
+using System.Text;
 
 namespace SharpDTLS.DTLS13
 {
     public static class Dtls13CryptoUtils
     {
-        private static readonly byte[] _privateKey;
+        private static readonly byte[] _cookieKey;
+        private static readonly BcTlsCrypto _crypto = new BcTlsCrypto();
+
+        private const byte CookieVersion = 1;
+        private static readonly TimeSpan CookieLifetime = TimeSpan.FromMinutes(2);
 
         static Dtls13CryptoUtils()
         {
-            _privateKey = new byte[32];
-            new SecureRandom().NextBytes(_privateKey);
+            _cookieKey = new byte[32];
+            new SecureRandom().NextBytes(_cookieKey);
         }
 
-        public static byte[] CreateCookie(DateTime timestamp, string clientIP, int clientPort, int minuteTimeOffset = 0)
+        // ── Stateless HelloRetryRequest cookie (RFC 8446 §4.2.2) ────────────────────────────────
+        // cookie = version(1) || timestamp(8) || cipher_suite(2) || flags(1) || hash_len(1) || Hash(ClientHello1) || HMAC-SHA256(32)
+        // The MAC also covers the client address so a cookie cannot be replayed from another address.
+
+        public static byte[] CreateCookie(DateTime timestamp, string clientIP, int clientPort,
+            ushort cipherSuite = Dtls13CipherSuite.TLS_AES_128_GCM_SHA256, byte[] clientHelloHash = null, bool keyShareRequested = false)
         {
-            DateTime timestampRounded = new DateTime(timestamp.Year, timestamp.Month, timestamp.Day, timestamp.Hour, timestamp.Minute, 0, DateTimeKind.Utc);
-            timestampRounded = timestampRounded.AddMinutes(minuteTimeOffset);
+            clientHelloHash ??= Array.Empty<byte>();
+            byte[] payload = new byte[1 + 8 + 2 + 1 + 1 + clientHelloHash.Length];
+            payload[0] = CookieVersion;
+            BinaryPrimitives.WriteInt64BigEndian(payload.AsSpan(1, 8), timestamp.ToUniversalTime().Ticks);
+            BinaryPrimitives.WriteUInt16BigEndian(payload.AsSpan(9, 2), cipherSuite);
+            payload[11] = (byte)(keyShareRequested ? 1 : 0);
+            payload[12] = (byte)clientHelloHash.Length;
+            Buffer.BlockCopy(clientHelloHash, 0, payload, 13, clientHelloHash.Length);
 
-            string data = $"{clientIP}:{clientPort}:{timestampRounded.ToFileTime()}";
-            using (var hmac = new HMACSHA256(_privateKey))
-            {
-                return hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(data));
-            }
+            byte[] mac = CookieMac(clientIP, clientPort, payload);
+            byte[] cookie = new byte[payload.Length + mac.Length];
+            Buffer.BlockCopy(payload, 0, cookie, 0, payload.Length);
+            Buffer.BlockCopy(mac, 0, cookie, payload.Length, mac.Length);
+            return cookie;
         }
 
-        public static bool ValidateCookie(DateTime timestamp, string clientIP, int clientPort, byte[] cookie)
+        public static bool ValidateCookie(DateTime now, string clientIP, int clientPort, byte[] cookie,
+            out ushort cipherSuite, out byte[] clientHelloHash, out bool keyShareRequested)
         {
-            byte[] expectedCookie = CreateCookie(timestamp, clientIP, clientPort);
-            if(expectedCookie.SequenceEqual(cookie))
-            {
-                return true;
-            }
-            else
-            {
-                expectedCookie = CreateCookie(timestamp, clientIP, clientPort, -1);
-                return expectedCookie.SequenceEqual(cookie);
-            }
+            cipherSuite = 0;
+            clientHelloHash = null;
+            keyShareRequested = false;
+
+            if (cookie == null || cookie.Length < 13 + 32 || cookie[0] != CookieVersion)
+                return false;
+
+            int hashLength = cookie[12];
+            int payloadLength = 13 + hashLength;
+            if (cookie.Length != payloadLength + 32)
+                return false;
+
+            byte[] expected = CookieMac(clientIP, clientPort, cookie.AsSpan(0, payloadLength).ToArray());
+            if (!CryptographicOperations.FixedTimeEquals(expected, cookie.AsSpan(payloadLength, 32)))
+                return false;
+
+            var issued = new DateTime(BinaryPrimitives.ReadInt64BigEndian(cookie.AsSpan(1, 8)), DateTimeKind.Utc);
+            var age = now.ToUniversalTime() - issued;
+            if (age < TimeSpan.FromSeconds(-5) || age > CookieLifetime)
+                return false;
+
+            cipherSuite = BinaryPrimitives.ReadUInt16BigEndian(cookie.AsSpan(9, 2));
+            keyShareRequested = cookie[11] == 1;
+            clientHelloHash = cookie.AsSpan(13, hashLength).ToArray();
+            return true;
         }
+
+        private static byte[] CookieMac(string clientIP, int clientPort, byte[] payload)
+        {
+            using var hmac = new HMACSHA256(_cookieKey);
+            byte[] address = Encoding.UTF8.GetBytes($"{clientIP}:{clientPort}|");
+            hmac.TransformBlock(address, 0, address.Length, null, 0);
+            hmac.TransformFinalBlock(payload, 0, payload.Length);
+            return hmac.Hash;
+        }
+
+        // ── Certificates and key exchange ───────────────────────────────────────────────────────
 
         public static (AsymmetricCipherKeyPair keyPair, X509Certificate certificate) GenerateSelfSignedCertificate()
         {
             var rsaGenerator = new RsaKeyPairGenerator();
             rsaGenerator.Init(new KeyGenerationParameters(new SecureRandom(), 2048));
             var keyPair = rsaGenerator.GenerateKeyPair();
-
-            var certGenerator = new X509V3CertificateGenerator();
-            certGenerator.SetSerialNumber(BigInteger.ValueOf(1));
-            certGenerator.SetIssuerDN(new X509Name("CN=SharpDTLS Server"));
-            certGenerator.SetSubjectDN(new X509Name("CN=SharpDTLS Server"));
-            certGenerator.SetNotBefore(DateTime.UtcNow.AddDays(-1));
-            certGenerator.SetNotAfter(DateTime.UtcNow.AddYears(10));
-            certGenerator.SetPublicKey(keyPair.Public);
-            var certificate = certGenerator.Generate(new Asn1SignatureFactory("SHA256WITHRSA", keyPair.Private, new SecureRandom()));
-
-            return (keyPair, certificate);
+            return (keyPair, CreateSelfSigned(keyPair, "SHA256WITHRSA"));
         }
 
         public static (AsymmetricCipherKeyPair keyPair, X509Certificate certificate) GenerateSelfSignedEcCertificate()
@@ -81,7 +111,11 @@ namespace SharpDTLS.DTLS13
             var ecGenerator = new ECKeyPairGenerator();
             ecGenerator.Init(new ECKeyGenerationParameters(domainParams, new SecureRandom()));
             var keyPair = ecGenerator.GenerateKeyPair();
+            return (keyPair, CreateSelfSigned(keyPair, "SHA256WITHECDSA"));
+        }
 
+        private static X509Certificate CreateSelfSigned(AsymmetricCipherKeyPair keyPair, string signatureAlgorithm)
+        {
             var certGenerator = new X509V3CertificateGenerator();
             certGenerator.SetSerialNumber(BigInteger.ValueOf(1));
             certGenerator.SetIssuerDN(new X509Name("CN=SharpDTLS Server"));
@@ -89,9 +123,7 @@ namespace SharpDTLS.DTLS13
             certGenerator.SetNotBefore(DateTime.UtcNow.AddDays(-1));
             certGenerator.SetNotAfter(DateTime.UtcNow.AddYears(10));
             certGenerator.SetPublicKey(keyPair.Public);
-            var certificate = certGenerator.Generate(new Asn1SignatureFactory("SHA256WITHECDSA", keyPair.Private, new SecureRandom()));
-
-            return (keyPair, certificate);
+            return certGenerator.Generate(new Asn1SignatureFactory(signatureAlgorithm, keyPair.Private, new SecureRandom()));
         }
 
         public static (X25519PrivateKeyParameters privateX25519, X25519PublicKeyParameters publicX25519) CreateX25519KeyPair()
@@ -104,10 +136,9 @@ namespace SharpDTLS.DTLS13
 
         public static byte[] GenerateRandom(int length)
         {
-            var clientRandom = new byte[length];
-            var secureRandom = new SecureRandom();
-            secureRandom.NextBytes(clientRandom);
-            return clientRandom;
+            var bytes = new byte[length];
+            new SecureRandom().NextBytes(bytes);
+            return bytes;
         }
 
         public static byte[] DeriveSharedSecretX25519(byte[] privateKey, byte[] publicKey)
@@ -115,124 +146,156 @@ namespace SharpDTLS.DTLS13
             if (privateKey == null) throw new ArgumentNullException(nameof(privateKey));
             if (publicKey == null) throw new ArgumentNullException(nameof(publicKey));
             if (privateKey.Length != 32) throw new ArgumentException("Private key must be 32 bytes.", nameof(privateKey));
-            if (publicKey.Length != 32) throw new ArgumentException("Public key must be 32 bytes.", nameof(publicKey));
+            if (publicKey.Length != 32) throw new DtlsException(AlertDescription.IllegalParameter, "X25519 public key must be 32 bytes.");
 
             var priv = new X25519PrivateKeyParameters(privateKey, 0);
             var pub = new X25519PublicKeyParameters(publicKey, 0);
 
             var shared = new byte[32];
             priv.GenerateSecret(pub, shared, 0);
+
+            // RFC 8446 §7.4.2: abort if the shared secret is all zeros (small-order point)
+            int acc = 0;
+            foreach (byte b in shared) acc |= b;
+            if (acc == 0) throw new DtlsException(AlertDescription.IllegalParameter, "X25519 shared secret is zero.");
+
             return shared;
         }
 
-        public static byte[] CalculateHelloHash(byte[] clientHelloBytes, byte[] serverHelloBytes)
+        // ── Key schedule (RFC 8446 §7.1 with the "dtls13" label prefix of RFC 9147 §5.9) ─────────
+
+        public static Dtls13CryptoContext CalculateHandshakeKeys(byte[] clientRandom, byte[] helloHash, byte[] sharedSecret, Dtls13CipherSuite suite)
         {
-            // skipping DTLS-specific bytes 
-            byte[] clientHello = clientHelloBytes.Skip(13).Take(4).Concat(clientHelloBytes.Skip(13 + 4 + 8)).ToArray();
-            byte[] serverHello = serverHelloBytes.Skip(13).Take(4).Concat(serverHelloBytes.Skip(13 + 4 + 8)).ToArray();
-            byte[] helloHash = SHA256.HashData(clientHello.Concat(serverHello).ToArray());
-            return helloHash;
+            int hashAlg = suite.HashAlgorithm;
+            byte[] zeroKey = new byte[suite.HashLength];
+
+            var earlySecret = new BcTlsSecret(_crypto, new byte[suite.HashLength]).HkdfExtract(hashAlg, new BcTlsSecret(_crypto, zeroKey)).Extract();
+            var derivedSecret = HkdfExpandLabel(new BcTlsSecret(_crypto, earlySecret), hashAlg, "derived", EmptyHash(suite), suite.HashLength).Extract();
+            var handshakeSecret = new BcTlsSecret(_crypto, derivedSecret).HkdfExtract(hashAlg, new BcTlsSecret(_crypto, sharedSecret)).Extract();
+
+            var clientSecret = HkdfExpandLabel(new BcTlsSecret(_crypto, handshakeSecret), hashAlg, "c hs traffic", helloHash, suite.HashLength).Extract();
+            var serverSecret = HkdfExpandLabel(new BcTlsSecret(_crypto, handshakeSecret), hashAlg, "s hs traffic", helloHash, suite.HashLength).Extract();
+
+            return CreateContext(clientRandom, handshakeSecret, clientSecret, serverSecret, suite, epoch: 2);
         }
 
-        public static Dtls13CryptoContext CalculateHandshakeKeys(byte[] clientRandom, byte[] helloHash, byte[] sharedSecret)
+        public static Dtls13CryptoContext CalculateApplicationKeys(byte[] clientRandom, byte[] handshakeHash, byte[] handshakeSecret, Dtls13CipherSuite suite)
         {
-            var crypto = new BcTlsCrypto();
-            var hashAlg = CryptoHashAlgorithm.sha256;
-            byte[] zeroKey = new byte[32];
+            int hashAlg = suite.HashAlgorithm;
+            byte[] zeroKey = new byte[suite.HashLength];
 
-            var earlySecret = (new BcTlsSecret(crypto, new byte[] { 0x00 })).HkdfExtract(hashAlg, new BcTlsSecret(crypto, zeroKey)).Extract();
+            var derivedSecret = HkdfExpandLabel(new BcTlsSecret(_crypto, handshakeSecret), hashAlg, "derived", EmptyHash(suite), suite.HashLength).Extract();
+            var masterSecret = new BcTlsSecret(_crypto, derivedSecret).HkdfExtract(hashAlg, new BcTlsSecret(_crypto, zeroKey)).Extract();
 
-            var emptyHash = SHA256.HashData(Array.Empty<byte>());
-            var derivedSecret = HkdfExpandLabel(new BcTlsSecret(crypto, earlySecret), hashAlg, "derived", emptyHash, 32).Extract();
+            var clientSecret = HkdfExpandLabel(new BcTlsSecret(_crypto, masterSecret), hashAlg, "c ap traffic", handshakeHash, suite.HashLength).Extract();
+            var serverSecret = HkdfExpandLabel(new BcTlsSecret(_crypto, masterSecret), hashAlg, "s ap traffic", handshakeHash, suite.HashLength).Extract();
 
-            var handshakeSecret = (new BcTlsSecret(crypto, derivedSecret)).HkdfExtract(hashAlg, new BcTlsSecret(crypto, sharedSecret)).Extract();
-
-            var clientSecret = HkdfExpandLabel(new BcTlsSecret(crypto, handshakeSecret), hashAlg, "c hs traffic", helloHash, 32).Extract();
-            var serverSecret = HkdfExpandLabel(new BcTlsSecret(crypto, handshakeSecret), hashAlg, "s hs traffic", helloHash, 32).Extract();
-            var clientKey = HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "key", new byte[0], 16).Extract();
-            var serverKey = HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "key", new byte[0], 16).Extract();
-            var clientIv = HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "iv", new byte[0], 12).Extract();
-            var serverIv = HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "iv", new byte[0], 12).Extract();
-            var clientSnKey = HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "sn", new byte[0], 16).Extract();
-            var serverSnKey = HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "sn", new byte[0], 16).Extract();
-
-            return new Dtls13CryptoContext(clientRandom, handshakeSecret, clientSecret, serverSecret, clientKey, clientIv, serverKey, serverIv, clientSnKey, serverSnKey);
+            return CreateContext(clientRandom, masterSecret, clientSecret, serverSecret, suite, epoch: 3);
         }
 
-        public static Dtls13CryptoContext CalculateApplicationKeys(byte[] clientRandom, byte[] handshakeHash, byte[] handshakeSecret)
+        /// <summary>exporter_master_secret = Derive-Secret(master_secret, "exp master", ClientHello..server Finished)</summary>
+        public static byte[] CalculateExporterMasterSecret(byte[] masterSecret, byte[] handshakeHash, Dtls13CipherSuite suite)
         {
-            var crypto = new BcTlsCrypto();
-            var hashAlg = CryptoHashAlgorithm.sha256;
-            byte[] zeroKey = new byte[32];
+            return HkdfExpandLabel(new BcTlsSecret(_crypto, masterSecret), suite.HashAlgorithm, "exp master", handshakeHash, suite.HashLength).Extract();
+        }
 
-            var emptyHash = SHA256.HashData(Array.Empty<byte>());
-            var derivedSecret = HkdfExpandLabel(new BcTlsSecret(crypto, handshakeSecret), hashAlg, "derived", emptyHash, 32).Extract();
+        /// <summary>
+        /// RFC 8446 §7.5: TLS-Exporter(label, context, length) =
+        ///   HKDF-Expand-Label(Derive-Secret(exporter_master_secret, label, ""), "exporter", Hash(context), length)
+        /// An absent context is treated as empty, as TLS 1.3 does not distinguish them.
+        /// </summary>
+        public static byte[] ExportKeyingMaterial(byte[] exporterMasterSecret, string label, byte[] context, int length, Dtls13CipherSuite suite)
+        {
+            byte[] derived = HkdfExpandLabel(new BcTlsSecret(_crypto, exporterMasterSecret), suite.HashAlgorithm, label, EmptyHash(suite), suite.HashLength).Extract();
 
-            var masterSecret = (new BcTlsSecret(crypto, derivedSecret)).HkdfExtract(hashAlg, new BcTlsSecret(crypto, zeroKey)).Extract();
+            var digest = suite.CreateDigest();
+            context ??= Array.Empty<byte>();
+            digest.BlockUpdate(context, 0, context.Length);
+            byte[] contextHash = new byte[digest.GetDigestSize()];
+            digest.DoFinal(contextHash, 0);
 
-            var clientSecret = HkdfExpandLabel(new BcTlsSecret(crypto, masterSecret), hashAlg, "c ap traffic", handshakeHash, 32).Extract();
-            var serverSecret = HkdfExpandLabel(new BcTlsSecret(crypto, masterSecret), hashAlg, "s ap traffic", handshakeHash, 32).Extract();
-            var clientKey = HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "key", new byte[0], 16).Extract();
-            var serverKey = HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "key", new byte[0], 16).Extract();
-            var clientIv = HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "iv", new byte[0], 12).Extract();
-            var serverIv = HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "iv", new byte[0], 12).Extract();
-            var clientSnKey = HkdfExpandLabel(new BcTlsSecret(crypto, clientSecret), hashAlg, "sn", new byte[0], 16).Extract();
-            var serverSnKey = HkdfExpandLabel(new BcTlsSecret(crypto, serverSecret), hashAlg, "sn", new byte[0], 16).Extract();
+            return HkdfExpandLabel(new BcTlsSecret(_crypto, derived), suite.HashAlgorithm, "exporter", contextHash, length).Extract();
+        }
 
-            return new Dtls13CryptoContext(clientRandom, masterSecret, clientSecret, serverSecret, clientKey, clientIv, serverKey, serverIv, clientSnKey, serverSnKey);
+        private static Dtls13CryptoContext CreateContext(byte[] clientRandom, byte[] secret, byte[] clientSecret, byte[] serverSecret, Dtls13CipherSuite suite, ulong epoch)
+        {
+            var (clientKey, clientIv, clientSnKey) = DeriveTrafficKeys(clientSecret, suite);
+            var (serverKey, serverIv, serverSnKey) = DeriveTrafficKeys(serverSecret, suite);
+            return new Dtls13CryptoContext(clientRandom, secret, clientSecret, serverSecret, clientKey, clientIv, serverKey, serverIv, clientSnKey, serverSnKey, suite.Id, epoch);
+        }
+
+        private static (byte[] key, byte[] iv, byte[] snKey) DeriveTrafficKeys(byte[] trafficSecret, Dtls13CipherSuite suite)
+        {
+            var secret = new BcTlsSecret(_crypto, trafficSecret);
+            byte[] key   = HkdfExpandLabel(secret, suite.HashAlgorithm, "key", Array.Empty<byte>(), suite.KeyLength).Extract();
+            byte[] iv    = HkdfExpandLabel(new BcTlsSecret(_crypto, trafficSecret), suite.HashAlgorithm, "iv", Array.Empty<byte>(), suite.IvLength).Extract();
+            byte[] snKey = HkdfExpandLabel(new BcTlsSecret(_crypto, trafficSecret), suite.HashAlgorithm, "sn", Array.Empty<byte>(), suite.KeyLength).Extract();
+            return (key, iv, snKey);
+        }
+
+        /// <summary>verify_data = HMAC(finished_key, transcript_hash), finished_key = HKDF-Expand-Label(base_key, "finished", "", Hash.length)</summary>
+        public static byte[] CalculateFinished(byte[] baseKey, byte[] transcriptHash, Dtls13CipherSuite suite)
+        {
+            byte[] finishedKey = HkdfExpandLabel(new BcTlsSecret(_crypto, baseKey), suite.HashAlgorithm, "finished", Array.Empty<byte>(), suite.HashLength).Extract();
+            var hmac = new HMac(suite.CreateDigest());
+            hmac.Init(new KeyParameter(finishedKey));
+            hmac.BlockUpdate(transcriptHash, 0, transcriptHash.Length);
+            byte[] mac = new byte[hmac.GetMacSize()];
+            hmac.DoFinal(mac, 0);
+            return mac;
+        }
+
+        // RFC 8446 §7.2: application_traffic_secret_N+1 = HKDF-Expand-Label(application_traffic_secret_N, "traffic upd", "", Hash.length)
+        // RFC 9147 §8: each KeyUpdate moves that direction to the next epoch.
+        public static Dtls13CryptoContext UpdateClientTrafficSecret(Dtls13CryptoContext current)
+        {
+            var suite = current.Suite;
+            var newClientSecret = HkdfExpandLabel(new BcTlsSecret(_crypto, current.ClientSecret), suite.HashAlgorithm, "traffic upd", Array.Empty<byte>(), suite.HashLength).Extract();
+            var (key, iv, snKey) = DeriveTrafficKeys(newClientSecret, suite);
+
+            return new Dtls13CryptoContext(
+                current.ClientRandom, current.Secret,
+                newClientSecret, current.ServerSecret,
+                key, iv,
+                current.ServerKey, current.ServerIv,
+                snKey, current.ServerSnKey,
+                suite.Id, current.Epoch + 1);
+        }
+
+        public static Dtls13CryptoContext UpdateServerTrafficSecret(Dtls13CryptoContext current)
+        {
+            var suite = current.Suite;
+            var newServerSecret = HkdfExpandLabel(new BcTlsSecret(_crypto, current.ServerSecret), suite.HashAlgorithm, "traffic upd", Array.Empty<byte>(), suite.HashLength).Extract();
+            var (key, iv, snKey) = DeriveTrafficKeys(newServerSecret, suite);
+
+            return new Dtls13CryptoContext(
+                current.ClientRandom, current.Secret,
+                current.ClientSecret, newServerSecret,
+                current.ClientKey, current.ClientIv,
+                key, iv,
+                current.ClientSnKey, snKey,
+                suite.Id, current.Epoch + 1);
+        }
+
+        private static byte[] EmptyHash(Dtls13CipherSuite suite)
+        {
+            var digest = suite.CreateDigest();
+            byte[] hash = new byte[digest.GetDigestSize()];
+            digest.DoFinal(hash, 0);
+            return hash;
         }
 
         // we have to duplicate the HkdfExpandLabel method because we need a different prefix for DTLS 1.3
-        private readonly static byte[] Dtls13Prefix = System.Text.Encoding.ASCII.GetBytes("dtls13");
+        private readonly static byte[] Dtls13Prefix = Encoding.ASCII.GetBytes("dtls13");
 
-        /// <exception cref="IOException"/>
+        /// <exception cref="System.IO.IOException"/>
         public static TlsSecret HkdfExpandLabel(TlsSecret secret, int cryptoHashAlgorithm, string label,
             byte[] context, int length)
         {
-#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
             return HkdfExpandLabel(secret, cryptoHashAlgorithm, label.AsSpan(), context.AsSpan(), length);
-#else
-            int labelLength = label.Length;
-            if (labelLength < 1)
-                throw new TlsFatalAlert(Org.BouncyCastle.Tls.AlertDescription.internal_error);
-
-            int contextLength = context.Length;
-            int expandedLabelLength = Dtls13Prefix.Length + labelLength;
-
-            byte[] hkdfLabel = new byte[2 + (1 + expandedLabelLength) + (1 + contextLength)];
-
-            // uint16 length
-            {
-                TlsUtilities.CheckUint16(length);
-                TlsUtilities.WriteUint16(length, hkdfLabel, 0);
-            }
-
-            // opaque label<7..255>
-            {
-                TlsUtilities.CheckUint8(expandedLabelLength);
-                TlsUtilities.WriteUint8(expandedLabelLength, hkdfLabel, 2);
-
-                Array.Copy(Dtls13Prefix, 0, hkdfLabel, 2 + 1, Dtls13Prefix.Length);
-
-                int labelPos = 2 + (1 + Dtls13Prefix.Length);
-                for (int i = 0; i < labelLength; ++i)
-                {
-                    char c = label[i];
-                    hkdfLabel[labelPos + i] = (byte)c;
-                }
-            }
-
-            // context
-            {
-                TlsUtilities.WriteOpaque8(context, hkdfLabel, 2 + (1 + expandedLabelLength));
-            }
-
-            return secret.HkdfExpand(cryptoHashAlgorithm, hkdfLabel, length);
-#endif
         }
 
-#if NETCOREAPP2_1_OR_GREATER || NETSTANDARD2_1_OR_GREATER
-        /// <exception cref="IOException"/>
+        /// <exception cref="System.IO.IOException"/>
         public static TlsSecret HkdfExpandLabel(TlsSecret secret, int cryptoHashAlgorithm, ReadOnlySpan<char> label,
             ReadOnlySpan<byte> context, int length)
         {
@@ -249,121 +312,21 @@ namespace SharpDTLS.DTLS13
                 : new byte[hkdfLabelLength];
 
             // uint16 length
-            {
-                TlsUtilities.CheckUint16(length);
-                TlsUtilities.WriteUint16(length, hkdfLabel);
-            }
+            TlsUtilities.CheckUint16(length);
+            TlsUtilities.WriteUint16(length, hkdfLabel);
 
             // opaque label<7..255>
-            {
-                TlsUtilities.CheckUint8(expandedLabelLength);
-                TlsUtilities.WriteUint8(expandedLabelLength, hkdfLabel[2..]);
-
-                Dtls13Prefix.CopyTo(hkdfLabel[3..]);
-
-                int labelPos = 2 + (1 + Dtls13Prefix.Length);
-                for (int i = 0; i < labelLength; ++i)
-                {
-                    hkdfLabel[labelPos + i] = (byte)label[i];
-                }
-            }
+            TlsUtilities.CheckUint8(expandedLabelLength);
+            TlsUtilities.WriteUint8(expandedLabelLength, hkdfLabel[2..]);
+            Dtls13Prefix.CopyTo(hkdfLabel[3..]);
+            int labelPos = 2 + (1 + Dtls13Prefix.Length);
+            for (int i = 0; i < labelLength; ++i)
+                hkdfLabel[labelPos + i] = (byte)label[i];
 
             // context
-            {
-                TlsUtilities.WriteOpaque8(context, hkdfLabel.Slice(2 + (1 + expandedLabelLength)));
-            }
+            TlsUtilities.WriteOpaque8(context, hkdfLabel.Slice(2 + (1 + expandedLabelLength)));
 
             return secret.HkdfExpand(cryptoHashAlgorithm, hkdfLabel, length);
-        }
-#endif
-
-        public static byte[] HashAllMessages(List<IDatagram> handshakeMessages)
-        {
-            Sha256Digest hash = new Sha256Digest();
-
-            foreach (IDatagram msg in handshakeMessages)
-            {
-                IDatagram msgToHash = msg;
-                int skip;
-                int last;
-                if (msg is ClientHelloDatagram || msg is ServerHelloDatagram)
-                {
-                    skip = 13;
-                    last = 0;
-                }
-                else
-                {
-                    skip = 0;
-                    last = 1;
-                    if (msg is ServerEncryptedDatagram msgServer)
-                    {
-                        msgToHash = msgServer.Datagram;
-                    }
-                    else if(msg is ClientEncryptedDatagram msgClient)
-                    {
-                        msgToHash = msgClient.Datagram;
-                    }
-                    else
-                    {
-                        throw new NotSupportedException();
-                    }
-                }
-
-                var msgBytes = msgToHash.Bytes.Skip(skip).Take(4).Concat(msgToHash.Bytes.Skip(skip + 4 + 8).Take(msgToHash.Bytes.Length - skip - 4 - 8 - last)).ToArray();
-                hash.BlockUpdate(msgBytes, 0, msgBytes.Length);
-            }
-
-            byte[] h = new byte[hash.GetDigestSize()];
-            hash.DoFinal(h, 0);
-            return h;
-        }
-
-        public static byte[] CalculateHmac(byte[] key, byte[] data)
-        {
-            var hmac = new HMac(new Sha256Digest());
-            hmac.Init(new KeyParameter(key));
-            byte[] mac = new byte[hmac.GetMacSize()];
-            hmac.BlockUpdate(data, 0, data.Length);
-            hmac.DoFinal(mac, 0);
-            return mac;
-        }
-
-        // RFC 8446 §7.2: application_traffic_secret_N+1 =
-        //   HKDF-Expand-Label(application_traffic_secret_N, "traffic upd", "", Hash.length)
-        public static Dtls13CryptoContext UpdateClientTrafficSecret(Dtls13CryptoContext current)
-        {
-            var crypto  = new BcTlsCrypto();
-            var hashAlg = CryptoHashAlgorithm.sha256;
-
-            var newClientSecret = HkdfExpandLabel(new BcTlsSecret(crypto, current.ClientSecret), hashAlg, "traffic upd", new byte[0], 32).Extract();
-            var newClientKey    = HkdfExpandLabel(new BcTlsSecret(crypto, newClientSecret),      hashAlg, "key",         new byte[0], 16).Extract();
-            var newClientIv     = HkdfExpandLabel(new BcTlsSecret(crypto, newClientSecret),      hashAlg, "iv",          new byte[0], 12).Extract();
-            var newClientSnKey  = HkdfExpandLabel(new BcTlsSecret(crypto, newClientSecret),      hashAlg, "sn",          new byte[0], 16).Extract();
-
-            return new Dtls13CryptoContext(
-                current.ClientRandom, current.Secret,
-                newClientSecret, current.ServerSecret,
-                newClientKey,    newClientIv,
-                current.ServerKey, current.ServerIv,
-                newClientSnKey,  current.ServerSnKey);
-        }
-
-        public static Dtls13CryptoContext UpdateServerTrafficSecret(Dtls13CryptoContext current)
-        {
-            var crypto  = new BcTlsCrypto();
-            var hashAlg = CryptoHashAlgorithm.sha256;
-
-            var newServerSecret = HkdfExpandLabel(new BcTlsSecret(crypto, current.ServerSecret), hashAlg, "traffic upd", new byte[0], 32).Extract();
-            var newServerKey    = HkdfExpandLabel(new BcTlsSecret(crypto, newServerSecret),      hashAlg, "key",         new byte[0], 16).Extract();
-            var newServerIv     = HkdfExpandLabel(new BcTlsSecret(crypto, newServerSecret),      hashAlg, "iv",          new byte[0], 12).Extract();
-            var newServerSnKey  = HkdfExpandLabel(new BcTlsSecret(crypto, newServerSecret),      hashAlg, "sn",          new byte[0], 16).Extract();
-
-            return new Dtls13CryptoContext(
-                current.ClientRandom, current.Secret,
-                current.ClientSecret, newServerSecret,
-                current.ClientKey,    current.ClientIv,
-                newServerKey,         newServerIv,
-                current.ClientSnKey,  newServerSnKey);
         }
     }
 }

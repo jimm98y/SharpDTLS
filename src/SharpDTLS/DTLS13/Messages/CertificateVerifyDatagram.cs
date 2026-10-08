@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace SharpDTLS.DTLS13.Messages
 {
-    public class CertificateVerifyDatagram : IDatagram
+    public class CertificateVerifyDatagram : IHandshakeDatagram
     {
         public int SequenceNumber { get; set; } = 3;
         public uint SignatureType { get; set; } = 0x0804; // assigned value for RSA-PSS-RSAE-SHA256 signature

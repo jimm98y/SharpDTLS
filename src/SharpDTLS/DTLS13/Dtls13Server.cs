@@ -1,354 +1,521 @@
 using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Crypto.Parameters;
-using Org.BouncyCastle.Security;
-using Org.BouncyCastle.Tls.Crypto;
-using Org.BouncyCastle.Tls.Crypto.Impl.BC;
 using Org.BouncyCastle.X509;
 using SharpDTLS.DTLS13.Messages;
 using SharpSRTP.UDP;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Net;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace SharpDTLS.DTLS13
 {
+    public class Dtls13ConnectionEventArgs : EventArgs
+    {
+        public Dtls13ConnectionEventArgs(EndPoint remoteEndPoint, Dtls13ServerConnection connection)
+        {
+            RemoteEndPoint = remoteEndPoint;
+            Connection = connection;
+        }
+
+        public EndPoint RemoteEndPoint { get; }
+        public Dtls13ServerConnection Connection { get; }
+    }
+
+    public class Dtls13DataReceivedEventArgs : Dtls13ConnectionEventArgs
+    {
+        public Dtls13DataReceivedEventArgs(EndPoint remoteEndPoint, Dtls13ServerConnection connection, byte[] data)
+            : base(remoteEndPoint, connection)
+        {
+            Data = data;
+        }
+
+        public byte[] Data { get; }
+    }
+
+    /// <summary>
+    /// DTLS 1.3 server. Answers new clients statelessly (HelloRetryRequest with cookie) and keeps
+    /// one <see cref="Dtls13ServerConnection"/> per remote endpoint once the cookie has been verified.
+    /// </summary>
     public class Dtls13Server
     {
-        // Maximum HS body bytes per encrypted fragment. Keeps each datagram under ~1200 bytes
-        // (5 B record header + 16 B AEAD tag + 12 B HS header + 1167 B body ≈ 1200 B).
-        private const int MaxHandshakeBodyPerRecord = 1167;
+        private const ushort GroupX25519 = 0x001d;
 
-        private readonly AsymmetricCipherKeyPair _serverCertificateKeyPair;
-        private readonly X509Certificate _serverX509Certificate;
-        Dictionary<string, Dtls13Session> _sessions = new Dictionary<string, Dtls13Session>();
-        public event EventHandler<EventArgs>                 HandshakeFinished;
-        public event EventHandler<KeyUpdateDatagram>        KeyUpdateReceived;
+        private readonly ConcurrentDictionary<string, Dtls13ServerConnection> _connections = new();
+        private readonly ClientHelloReassembler _clientHelloReassembler = new();
+
+        internal AsymmetricCipherKeyPair ServerKeyPair { get; }
+        internal X509Certificate ServerCertificate { get; }
 
         public IServerTransport ServerTransport { get; }
+
+        /// <summary>Send a HelloRetryRequest with a cookie before allocating state (address validation, RFC 9147 §5.1).</summary>
         public bool ShouldSendHelloRetry { get; set; } = true;
+
+        /// <summary>Request a client certificate and abort with certificate_required if none is sent.</summary>
         public bool RequireClientCertificate { get; set; } = false;
 
-        public Dtls13Server(IServerTransport serverTransport)
-        {
-            (_serverCertificateKeyPair, _serverX509Certificate) = Dtls13CryptoUtils.GenerateSelfSignedCertificate();
+        /// <summary>Cipher suites in server preference order. Must be a subset of <see cref="Dtls13CipherSuite.Supported"/>.</summary>
+        public IList<ushort> CipherSuites { get; set; } = new List<ushort>(Dtls13CipherSuite.Supported);
 
-            ServerTransport = serverTransport;
-            ServerTransport.OnDataReceived += ServerTransport_OnDataReceived;
+        /// <summary>SRTP protection profiles in server preference order; null to never negotiate use_srtp.</summary>
+        public ushort[] SrtpProtectionProfiles { get; set; } = { 0x0007, 0x0001 };
+
+        /// <summary>Optional client certificate validation. Return false to abort with bad_certificate.</summary>
+        public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ClientCertificateValidator { get; set; }
+
+        public TimeSpan InitialRetransmitTimeout { get; set; } = TimeSpan.FromSeconds(1);
+
+        /// <summary>Optional NSS key log sink (SSLKEYLOGFILE format).</summary>
+        public Action<string> KeyLogWriter { get; set; }
+
+        public event EventHandler<EventArgs> HandshakeFinished;
+        public event EventHandler<KeyUpdateDatagram> KeyUpdateReceived;
+        public event EventHandler<Dtls13DataReceivedEventArgs> ApplicationDataReceived;
+        public event EventHandler<Dtls13ConnectionEventArgs> ConnectionClosed;
+
+        public Dtls13Server(IServerTransport serverTransport)
+            : this(serverTransport, Dtls13CryptoUtils.GenerateSelfSignedCertificate())
+        {
         }
 
         public Dtls13Server(IServerTransport serverTransport, AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
         {
-            _serverCertificateKeyPair = keyPair;
-            _serverX509Certificate = certificate;
+            ServerKeyPair = keyPair ?? throw new ArgumentNullException(nameof(keyPair));
+            ServerCertificate = certificate ?? throw new ArgumentNullException(nameof(certificate));
 
             ServerTransport = serverTransport;
             ServerTransport.OnDataReceived += ServerTransport_OnDataReceived;
         }
 
-        private async void ServerTransport_OnDataReceived(object sender, byte[] data)
+        private Dtls13Server(IServerTransport serverTransport, (AsymmetricCipherKeyPair keyPair, X509Certificate certificate) credentials)
+            : this(serverTransport, credentials.keyPair, credentials.certificate)
         {
-            var endpoint = (EndPoint)sender;
-            Console.WriteLine($"The server received: {Convert.ToHexString(data)}");
-
-            if (!_sessions.TryGetValue(endpoint.ToString(), out var session))
-            {
-                await HandleInitialClientHello(endpoint, data);
-            }
-            else if (session.RequiresClientAuth && !session.ReceivedClientCertificate)
-            {
-                HandleClientCertificate(endpoint, session, data);
-            }
-            else if (session.RequiresClientAuth && !session.ReceivedClientCertificateVerify)
-            {
-                HandleClientCertificateVerify(endpoint, session, data);
-            }
-            else if (session.ServerApplicationKeys == null)
-            {
-                await HandleClientFinished(endpoint, session, data);
-            }
-            else
-            {
-                await HandleApplicationData(endpoint, session, data);
-            }
         }
 
-        private async Task HandleInitialClientHello(EndPoint endpoint, byte[] data)
-        {
-            var clientHello = new ClientHelloDatagram();
+        public IReadOnlyCollection<Dtls13ServerConnection> Connections => _connections.Values.ToList();
 
-            try
+        public Dtls13ServerConnection GetConnection(EndPoint endpoint)
+            => _connections.TryGetValue(endpoint.ToString(), out var connection) ? connection : null;
+
+        public void SendApplicationData(EndPoint endpoint, byte[] data)
+            => RequireConnection(endpoint).SendApplicationData(data);
+
+        public void SendKeyUpdate(EndPoint endpoint, bool requestUpdate = false)
+            => RequireConnection(endpoint).SendKeyUpdate(requestUpdate);
+
+        public void Close(EndPoint endpoint)
+            => GetConnection(endpoint)?.Close();
+
+        private Dtls13ServerConnection RequireConnection(EndPoint endpoint)
+            => GetConnection(endpoint) ?? throw new InvalidOperationException($"No DTLS connection for {endpoint}.");
+
+        private void ServerTransport_OnDataReceived(object sender, byte[] data)
+        {
+            var endpoint = (EndPoint)sender;
+
+            if (_connections.TryGetValue(endpoint.ToString(), out var connection))
             {
-                clientHello.FromBytes(data);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Failed to parse ClientHello from {endpoint}: {ex.Message}");
+                connection.ProcessDatagram(data);
                 return;
             }
 
-            if (ShouldSendHelloRetry)
+            try
             {
-                if (clientHello.Extensions.OfType<CookieExtension>().FirstOrDefault() == null)
+                HandleNewClient(endpoint, data);
+            }
+            catch (DtlsException ex)
+            {
+                Debug.WriteLine($"[DTLS13 Server] Rejected ClientHello from {endpoint}: {ex.Message}");
+                SendPlaintextAlert(endpoint, ex.Alert);
+            }
+            catch (Exception ex)
+            {
+                // Malformed datagrams from unknown peers are dropped silently.
+                Debug.WriteLine($"[DTLS13 Server] Dropped datagram from {endpoint}: {ex.Message}");
+            }
+        }
+
+        // ── Stateless ClientHello processing ─────────────────────────────────────────────────
+
+        private void HandleNewClient(EndPoint endpoint, byte[] datagram)
+        {
+            foreach (var fragment in DtlsRecordSplitter.Split(datagram))
+            {
+                if (fragment.Length < 25 || fragment[0] != 0x16 || fragment[13] != 0x01)
+                    continue; // only a ClientHello can start an association
+
+                // A ClientHello larger than the path MTU arrives fragmented.
+                if (_clientHelloReassembler.TryAdd(endpoint.ToString(), fragment, out byte[] record))
                 {
-                    var serverHelloRetry = new HelloRetryRequest(DateTime.UtcNow, ((IPEndPoint)endpoint).Address.ToString(), ((IPEndPoint)endpoint).Port);
-                    ServerTransport.Send(endpoint, serverHelloRetry.ToBytes());
+                    HandleClientHello(endpoint, datagram, record);
                     return;
                 }
-                else
-                {
-                    if (!Dtls13CryptoUtils.ValidateCookie(DateTime.UtcNow, ((IPEndPoint)endpoint).Address.ToString(), ((IPEndPoint)endpoint).Port, clientHello.Extensions.OfType<CookieExtension>().FirstOrDefault().Cookie))
-                        throw new Exception("Invalid cookie!");
-                }
+            }
+        }
+
+        private void HandleClientHello(EndPoint endpoint, byte[] datagram, byte[] record)
+        {
+
+            var clientHello = new ClientHelloDatagram();
+            clientHello.FromBytes(record);
+
+            var versions = clientHello.Extensions.OfType<ClientSupportedVersions>().FirstOrDefault();
+            if (versions == null || !versions.Versions.Contains(ClientSupportedVersions.Dtls13))
+                throw new DtlsException(AlertDescription.ProtocolVersion, "Client does not support DTLS 1.3.");
+            if (clientHello.LegacyCookie.Length != 0)
+                throw new DtlsException(AlertDescription.IllegalParameter, "DTLS 1.3 ClientHello has a legacy_cookie.");
+
+            var groups = clientHello.Extensions.OfType<SupportedGroups>().FirstOrDefault();
+            if (groups == null || !groups.Groups.Contains(GroupX25519))
+                throw new DtlsException(AlertDescription.HandshakeFailure, "No supported key exchange group in common.");
+
+            ushort suiteId = CipherSuites.FirstOrDefault(s => clientHello.CipherSuites.Contains(s));
+            if (suiteId == 0)
+                throw new DtlsException(AlertDescription.HandshakeFailure, "No cipher suite in common.");
+
+            bool hasKeyShare = clientHello.PublicKey != null;
+            var ipEndpoint = (IPEndPoint)endpoint;
+            string ip = ipEndpoint.Address.ToString();
+
+            HelloRetryState retry = null;
+            var cookie = clientHello.Extensions.OfType<CookieExtension>().FirstOrDefault();
+            if (cookie != null && Dtls13CryptoUtils.ValidateCookie(DateTime.UtcNow, ip, ipEndpoint.Port, cookie.Cookie,
+                    out ushort cookieSuite, out byte[] clientHello1Hash, out bool keyShareRequested))
+            {
+                if (!clientHello.CipherSuites.Contains(cookieSuite) || !CipherSuites.Contains(cookieSuite))
+                    throw new DtlsException(AlertDescription.IllegalParameter, "ClientHello2 does not offer the cipher suite selected in HelloRetryRequest.");
+                if (!hasKeyShare)
+                    throw new DtlsException(AlertDescription.IllegalParameter, "ClientHello2 has no x25519 key share.");
+
+                suiteId = cookieSuite;
+                retry = new HelloRetryState(clientHello1Hash, cookie.Cookie, keyShareRequested);
+            }
+            else if (ShouldSendHelloRetry || !hasKeyShare)
+            {
+                SendHelloRetryRequest(endpoint, record, clientHello, suiteId, requestKeyShare: !hasKeyShare);
+                return;
             }
 
-            var session = new Dtls13Session();
-            session.HandshakeMessages.Add(clientHello);
-
-            var (ecdhPrivateKey, ecdhPublicKey) = Dtls13CryptoUtils.CreateX25519KeyPair();
-            session.PrivateKey = ecdhPrivateKey.GetEncoded();
-            session.PublicKey  = ecdhPublicKey.GetEncoded();
-
-            if (!_sessions.TryAdd(endpoint.ToString(), session))
-                throw new Exception("Failed to add new session");
-
-            var serverHello = new ServerHelloDatagram(session.PublicKey, clientHello.CipherSuites.First(), Dtls13CryptoUtils.GenerateRandom(32));
-            var serverHelloBytes = serverHello.ToBytes();
-            session.HandshakeMessages.Add(serverHello);
-            ServerTransport.Send(endpoint, serverHelloBytes);
-
-            byte[] helloHash    = Dtls13CryptoUtils.CalculateHelloHash(clientHello.Bytes, serverHelloBytes);
-            byte[] sharedSecret = Dtls13CryptoUtils.DeriveSharedSecretX25519(session.PrivateKey, clientHello.PublicKey);
-
-            session.ServerHandshakeKeys = Dtls13CryptoUtils.CalculateHandshakeKeys(clientHello.ClientRandom, helloHash, sharedSecret);
-
-            session.Epoch = 2;
-
-            SendEncryptedHandshake(endpoint, session, new EncryptedExtensionsDatagram());
-
-            if (RequireClientCertificate)
+            var connection = new Dtls13ServerConnection(this, endpoint);
+            if (!_connections.TryAdd(endpoint.ToString(), connection))
             {
-                SendEncryptedHandshake(endpoint, session, new CertificateRequestDatagram());
-                session.RequiresClientAuth = true;
-                Debug.WriteLine($"[DTLS13 Server] Sent CertificateRequest to {endpoint}");
+                _connections[endpoint.ToString()].ProcessDatagram(datagram);
+                return;
             }
 
-            var derCertificate = _serverX509Certificate.GetEncoded();
-            SendEncryptedHandshake(endpoint, session, new CertificateDatagram(derCertificate));
-
-            byte[] h = Dtls13CryptoUtils.HashAllMessages(session.HandshakeMessages);
-            byte[] toSign = Encoding.UTF8.GetBytes("                                                                TLS 1.3, server CertificateVerify\0").Concat(h).ToArray();
-
-            bool isEcKey = _serverCertificateKeyPair.Private is ECPrivateKeyParameters;
-            ISigner signer = SignerUtilities.GetSigner(isEcKey ? "SHA256WITHECDSA" : "SHA256WITHRSA/PSS");
-            signer.Init(true, _serverCertificateKeyPair.Private);
-            signer.BlockUpdate(toSign);
-            byte[] signature = signer.GenerateSignature();
-
-            uint sigType = isEcKey ? 0x0403u : 0x0804u;
-            SendEncryptedHandshake(endpoint, session, new CertificateVerifyDatagram(signature, sigType));
-
-            var crypto          = new BcTlsCrypto();
-            var hashAlg         = CryptoHashAlgorithm.sha256;
-            var finishedServerKey = Dtls13CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, session.ServerHandshakeKeys.ServerSecret), hashAlg, "finished", new byte[0], 32).Extract();
-            byte[] finishedHash = Dtls13CryptoUtils.HashAllMessages(session.HandshakeMessages);
-            byte[] verifyServerData = Dtls13CryptoUtils.CalculateHmac(finishedServerKey, finishedHash);
-
-            SendEncryptedHandshake(endpoint, session, new FinishedDatagram() { VerifyData = verifyServerData });
-
-            await Task.CompletedTask;
+            connection.Start(record, clientHello, Dtls13CipherSuite.Get(suiteId), retry);
         }
 
-        private void HandleClientCertificate(EndPoint endpoint, Dtls13Session session, byte[] data)
+        private void SendHelloRetryRequest(EndPoint endpoint, byte[] record, ClientHelloDatagram clientHello, ushort suiteId, bool requestKeyShare)
         {
-            var encClientCert = new ClientEncryptedDatagram(session.ServerHandshakeKeys);
-            encClientCert.FromBytes(data);
-            session.ServerHandshakeKeys.ClientKeyUseCounter++;
+            var suite = Dtls13CipherSuite.Get(suiteId);
+            var transcript = new Dtls13Transcript();
+            transcript.AddPlaintextRecord(record);
 
-            var clientCertDatagram = encClientCert.Datagram as CertificateDatagram;
-            if (clientCertDatagram?.Certificate == null || clientCertDatagram.Certificate.Length == 0)
-                throw new Exception("Client sent empty Certificate; RequireClientCertificate is set.");
+            var ipEndpoint = (IPEndPoint)endpoint;
+            byte[] cookie = Dtls13CryptoUtils.CreateCookie(DateTime.UtcNow, ipEndpoint.Address.ToString(), ipEndpoint.Port,
+                suiteId, transcript.Hash(suite), requestKeyShare);
 
-            session.ClientCertificateBytes = clientCertDatagram.Certificate;
-            session.HandshakeMessages.Add(encClientCert);
-            session.ReceivedClientCertificate = true;
-            Debug.WriteLine($"[DTLS13 Server] Received client Certificate ({clientCertDatagram.Certificate.Length} bytes) from {endpoint}");
-        }
-
-        private void HandleClientCertificateVerify(EndPoint endpoint, Dtls13Session session, byte[] data)
-        {
-            var encCertVerify = new ClientEncryptedDatagram(session.ServerHandshakeKeys);
-            encCertVerify.FromBytes(data);
-            session.ServerHandshakeKeys.ClientKeyUseCounter++;
-
-            var clientCertVerify = encCertVerify.Datagram as CertificateVerifyDatagram;
-
-            byte[] h = Dtls13CryptoUtils.HashAllMessages(session.HandshakeMessages);
-            byte[] toSign = Encoding.UTF8.GetBytes("                                                                TLS 1.3, client CertificateVerify\0").Concat(h).ToArray();
-
-            X509Certificate clientX509 = new X509CertificateParser().ReadCertificate(session.ClientCertificateBytes);
-            AsymmetricKeyParameter pubKey = clientX509.GetPublicKey();
-            bool isEcKey = pubKey is ECPublicKeyParameters;
-
-            ISigner signer = SignerUtilities.GetSigner(isEcKey ? "SHA256WITHECDSA" : "SHA256WITHRSA/PSS");
-            signer.Init(false, pubKey);
-            signer.BlockUpdate(toSign);
-
-            if (!signer.VerifySignature(clientCertVerify.Signature))
-                throw new Exception("Client CertificateVerify signature invalid!");
-
-            session.HandshakeMessages.Add(encCertVerify);
-            session.ReceivedClientCertificateVerify = true;
-            Debug.WriteLine($"[DTLS13 Server] Client CertificateVerify verified from {endpoint}");
-        }
-
-        private async Task HandleClientFinished(EndPoint endpoint, Dtls13Session session, byte[] data)
-        {
-            var encryptedFinishedDatagram = new ClientEncryptedDatagram(session.ServerHandshakeKeys);
-            encryptedFinishedDatagram.FromBytes(data);
-            var clientFinishedDatagram = encryptedFinishedDatagram.Datagram as FinishedDatagram;
-
-            var crypto          = new BcTlsCrypto();
-            var hashAlg         = CryptoHashAlgorithm.sha256;
-            var finishedClientKey = Dtls13CryptoUtils.HkdfExpandLabel(new BcTlsSecret(crypto, session.ServerHandshakeKeys.ClientSecret), hashAlg, "finished", new byte[0], 32).Extract();
-            byte[] finishedHash = Dtls13CryptoUtils.HashAllMessages(session.HandshakeMessages);
-            byte[] verifyClientData = Dtls13CryptoUtils.CalculateHmac(finishedClientKey, finishedHash);
-
-            if (!verifyClientData.SequenceEqual(clientFinishedDatagram.VerifyData))
-                throw new Exception("Client verify failed!");
-
-            Debug.WriteLine($"Client verify successful!");
-
-            session.ServerHandshakeKeys.ClientKeyUseCounter++;
-
-            var clientHello = session.HandshakeMessages.OfType<ClientHelloDatagram>().Last();
-            session.ServerApplicationKeys = Dtls13CryptoUtils.CalculateApplicationKeys(clientHello.ClientRandom, finishedHash, session.ServerHandshakeKeys.Secret);
-
-            // reset
-            session.RecordNumber = 0;
-            session.Epoch = 3;
-
-            var ack = new AcknowledgementDatagram();
-            var serverAckDatagram = new ServerEncryptedDatagram(session.ServerApplicationKeys, ack)
+            var hrr = new HelloRetryRequest(suiteId, cookie, requestKeyShare ? GroupX25519 : null, clientHello.LegacySessionId)
             {
-                Epoch = session.Epoch,
-                RecordNumber = session.RecordNumber++,
+                SequenceNumber = clientHello.SequenceNumber,
+                // RFC 9147 §5.1: reuse the ClientHello's record sequence number so a stateless server never repeats one.
+                RecordSequenceNumber = clientHello.RecordSequenceNumber,
             };
-            var encryptedAckDatagramBytes = serverAckDatagram.ToBytes();
-            session.ServerApplicationKeys.ServerKeyUseCounter++;
-            ServerTransport.Send(endpoint, encryptedAckDatagramBytes);
 
-            HandshakeFinished?.Invoke(this, EventArgs.Empty);
-            KeylogUtils.WriteKeys(
-                Convert.ToHexString(session.ServerHandshakeKeys.ClientRandom),
-                Convert.ToHexString(session.ServerHandshakeKeys.ClientSecret),
-                Convert.ToHexString(session.ServerApplicationKeys.ClientSecret),
-                Convert.ToHexString(session.ServerHandshakeKeys.ServerSecret),
-                Convert.ToHexString(session.ServerApplicationKeys.ServerSecret));
-
-            await Task.CompletedTask;
+            Debug.WriteLine($"[DTLS13 Server] Sending HelloRetryRequest to {endpoint}");
+            ServerTransport.Send(endpoint, hrr.ToBytes());
         }
 
-        private async Task HandleApplicationData(EndPoint endpoint, Dtls13Session session, byte[] data)
+        private void SendPlaintextAlert(EndPoint endpoint, AlertDescription alert)
         {
-            var enc = new ClientEncryptedDatagram(session.ServerApplicationKeys);
-            enc.FromBytes(data);
-            session.ServerApplicationKeys.ClientKeyUseCounter++;
+            byte[] record = { 0x15, 0xFE, 0xFD, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, (byte)alert };
+            try { ServerTransport.Send(endpoint, record); }
+            catch (Exception ex) { Debug.WriteLine($"[DTLS13 Server] Failed to send alert: {ex.Message}"); }
+        }
 
-            switch (enc.Datagram)
+        // ── Callbacks from connections ───────────────────────────────────────────────────────
+
+        internal void OnConnectionEstablished(Dtls13ServerConnection connection)
+            => HandshakeFinished?.Invoke(this, new Dtls13ConnectionEventArgs(connection.RemoteEndPoint, connection));
+
+        internal void OnApplicationData(Dtls13ServerConnection connection, byte[] data)
+            => ApplicationDataReceived?.Invoke(this, new Dtls13DataReceivedEventArgs(connection.RemoteEndPoint, connection, data));
+
+        internal void OnKeyUpdate(KeyUpdateDatagram keyUpdate)
+            => KeyUpdateReceived?.Invoke(this, keyUpdate);
+
+        internal void OnConnectionClosed(Dtls13ServerConnection connection)
+        {
+            _connections.TryRemove(new KeyValuePair<string, Dtls13ServerConnection>(connection.RemoteEndPoint.ToString(), connection));
+            ConnectionClosed?.Invoke(this, new Dtls13ConnectionEventArgs(connection.RemoteEndPoint, connection));
+        }
+
+        internal sealed class HelloRetryState
+        {
+            public HelloRetryState(byte[] clientHello1Hash, byte[] cookie, bool keyShareRequested)
             {
-                case ApplicationDataDatagram appData:
-                    Debug.WriteLine($"[DTLS13 Server] Received app data from {endpoint}: {Encoding.UTF8.GetString(appData.Data)}");
-                    await Task.Delay(1000);
-                    SendApplicationData(endpoint, session, Encoding.UTF8.GetBytes("Hello from server!"));
+                ClientHello1Hash = clientHello1Hash;
+                Cookie = cookie;
+                KeyShareRequested = keyShareRequested;
+            }
+
+            public byte[] ClientHello1Hash { get; }
+            public byte[] Cookie { get; }
+            public bool KeyShareRequested { get; }
+        }
+    }
+
+    /// <summary>
+    /// Server side of one DTLS 1.3 association.
+    /// </summary>
+    public class Dtls13ServerConnection : Dtls13Connection
+    {
+        private const ushort GroupX25519 = 0x001d;
+
+        private enum State
+        {
+            Start,
+            WaitClientCertificate,
+            WaitClientCertificateVerify,
+            WaitClientFinished,
+            Connected,
+        }
+
+        private readonly Dtls13Server _server;
+        private State _state = State.Start;
+        private ClientHelloDatagram _clientHello;
+        private CertificateRequestDatagram _certificateRequest;
+        private X509Certificate _clientCertificate;
+
+        public EndPoint RemoteEndPoint { get; }
+
+        /// <summary>The client's certificate, when one was sent.</summary>
+        public X509Certificate ClientCertificate => _clientCertificate;
+
+        internal Dtls13ServerConnection(Dtls13Server server, EndPoint remoteEndPoint)
+            : base(isClient: false, send: data => server.ServerTransport.Send(remoteEndPoint, data))
+        {
+            _server = server;
+            RemoteEndPoint = remoteEndPoint;
+            InitialRetransmitTimeout = server.InitialRetransmitTimeout;
+            KeyLogWriter = server.KeyLogWriter;
+
+            ApplicationDataReceived += (_, data) => _server.OnApplicationData(this, data);
+            KeyUpdateReceived += (_, keyUpdate) => _server.OnKeyUpdate(keyUpdate);
+            Closed += (_, _) => _server.OnConnectionClosed(this);
+        }
+
+        internal void Start(byte[] record, ClientHelloDatagram clientHello, Dtls13CipherSuite suite, Dtls13Server.HelloRetryState retry)
+        {
+            Run(() =>
+            {
+                _clientHello = clientHello;
+                Session.CipherSuite = suite;
+
+                if (retry != null)
+                {
+                    // Rebuild the transcript the client has: message_hash(ClientHello1) || HelloRetryRequest || ClientHello2.
+                    // The HelloRetryRequest is deterministic given the cookie, so it can be recreated byte for byte.
+                    var hrr = new HelloRetryRequest(suite.Id, retry.Cookie, retry.KeyShareRequested ? GroupX25519 : null, clientHello.LegacySessionId);
+                    Session.Transcript.AddMessageHash(retry.ClientHello1Hash);
+                    Session.Transcript.AddPlaintextRecord(hrr.ToBytes());
+                }
+                Session.Transcript.AddPlaintextRecord(record);
+
+                // Message sequence numbers continue after the stateless HelloRetryRequest (RFC 9147 §5.2).
+                NextReceiveMessageSeq = clientHello.SequenceNumber + 1;
+                NextSendMessageSeq = clientHello.SequenceNumber;
+                SetPlaintextRecordSequence(clientHello.RecordSequenceNumber);
+
+                SendServerFlight();
+            });
+        }
+
+        private void SendServerFlight()
+        {
+            var suite = Session.CipherSuite;
+
+            var (privateKey, publicKey) = Dtls13CryptoUtils.CreateX25519KeyPair();
+            Session.PrivateKey = privateKey.GetEncoded();
+            Session.PublicKey = publicKey.GetEncoded();
+
+            BeginFlight();
+
+            var serverHello = new ServerHelloDatagram(Session.PublicKey, suite.Id, Dtls13CryptoUtils.GenerateRandom(32))
+            {
+                LegacySessionIdEcho = _clientHello.LegacySessionId,
+            };
+            Session.Transcript.AddPlaintextRecord(SendPlaintextHandshake(serverHello));
+
+            byte[] sharedSecret = Dtls13CryptoUtils.DeriveSharedSecretX25519(Session.PrivateKey, _clientHello.PublicKey);
+            var handshakeKeys = Dtls13CryptoUtils.CalculateHandshakeKeys(_clientHello.ClientRandom, Session.Transcript.Hash(suite), sharedSecret, suite);
+            Session.ServerHandshakeKeys = handshakeKeys;
+            Session.WriteKeys = handshakeKeys;
+            AddReadKeys(handshakeKeys);
+
+            SendHandshake(BuildEncryptedExtensions(), handshakeKeys);
+
+            if (_server.RequireClientCertificate)
+            {
+                _certificateRequest = new CertificateRequestDatagram();
+                SendHandshake(_certificateRequest, handshakeKeys);
+                Session.RequiresClientAuth = true;
+            }
+
+            SendHandshake(new CertificateDatagram(_server.ServerCertificate.GetEncoded()), handshakeKeys);
+
+            var clientSchemes = _clientHello.Extensions.OfType<ClientSignatureAlgorithms>().FirstOrDefault()?.SignatureAlgorithms;
+            ushort scheme = Dtls13Signatures.SelectScheme(_server.ServerKeyPair.Private, clientSchemes)
+                ?? throw new DtlsException(AlertDescription.HandshakeFailure, "No signature scheme in common with the client.");
+            byte[] content = Dtls13Signatures.BuildSignedContent(server: true, Session.Transcript.Hash(suite));
+            SendHandshake(new CertificateVerifyDatagram(Dtls13Signatures.Sign(scheme, _server.ServerKeyPair.Private, content), scheme), handshakeKeys);
+
+            byte[] verifyData = Dtls13CryptoUtils.CalculateFinished(handshakeKeys.ServerSecret, Session.Transcript.Hash(suite), suite);
+            SendHandshake(new FinishedDatagram { VerifyData = verifyData }, handshakeKeys);
+
+            byte[] serverFinishedHash = Session.Transcript.Hash(suite);
+            Session.ServerApplicationKeys = Dtls13CryptoUtils.CalculateApplicationKeys(_clientHello.ClientRandom, serverFinishedHash, handshakeKeys.Secret, suite);
+            Session.ExporterMasterSecret = Dtls13CryptoUtils.CalculateExporterMasterSecret(Session.ServerApplicationKeys.Secret, serverFinishedHash, suite);
+
+            ArmRetransmission();
+            _state = _certificateRequest != null ? State.WaitClientCertificate : State.WaitClientFinished;
+        }
+
+        private EncryptedExtensionsDatagram BuildEncryptedExtensions()
+        {
+            var extensions = new EncryptedExtensionsDatagram();
+
+            var offered = _clientHello.Extensions.OfType<UseSrtpExtension>().FirstOrDefault();
+            ushort? profile = DtlsSrtp.Select(_server.SrtpProtectionProfiles, offered?.SrtpProtectionProfiles);
+            if (profile.HasValue)
+            {
+                SelectedSrtpProtectionProfile = profile;
+                extensions.Extensions.Add(new UseSrtpExtension(new[] { profile.Value }, offered.MasterKeyIdentifier));
+            }
+
+            return extensions;
+        }
+
+        protected override void OnPlaintextHandshake(byte[] record)
+        {
+            if (record[13] != 0x01)
+                throw new DtlsException(AlertDescription.UnexpectedMessage, $"Unexpected plaintext handshake message 0x{record[13]:X2}");
+
+            int messageSeq = (record[17] << 8) | record[18];
+            if (messageSeq < NextReceiveMessageSeq && !IsHandshakeComplete)
+                OnDuplicatePlaintextHandshake(record); // our flight was lost: retransmit it
+        }
+
+        protected override void OnHandshakeMessage(byte[] message, IHandshakeDatagram parsed)
+        {
+            var suite = Session.CipherSuite;
+
+            switch (_state)
+            {
+                case State.WaitClientCertificate when parsed is CertificateDatagram certificate:
+                    if (!certificate.RequestContext.AsSpan().SequenceEqual(_certificateRequest.RequestContext))
+                        throw new DtlsException(AlertDescription.IllegalParameter, "Certificate request context does not match.");
+
+                    if (certificate.CertificateChain.Count == 0)
+                    {
+                        if (_server.RequireClientCertificate)
+                            throw new DtlsException(AlertDescription.CertificateRequired, "Client did not send a certificate.");
+                        Session.Transcript.AddHandshake(message);
+                        _state = State.WaitClientFinished;
+                        break;
+                    }
+
+                    try
+                    {
+                        _clientCertificate = new X509CertificateParser().ReadCertificate(certificate.Certificate);
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new DtlsException(AlertDescription.BadCertificate, "Client certificate could not be parsed.", ex);
+                    }
+                    if (_clientCertificate == null)
+                        throw new DtlsException(AlertDescription.BadCertificate, "Client certificate could not be parsed.");
+                    if (_server.ClientCertificateValidator != null && !_server.ClientCertificateValidator(_clientCertificate, certificate.CertificateChain))
+                        throw new DtlsException(AlertDescription.BadCertificate, "Client certificate was rejected.");
+
+                    Session.ClientCertificateBytes = certificate.Certificate;
+                    Session.PeerCertificate = certificate.Certificate;
+                    Session.ReceivedClientCertificate = true;
+                    Session.Transcript.AddHandshake(message);
+                    _state = State.WaitClientCertificateVerify;
                     break;
 
-                case KeyUpdateDatagram keyUpdate:
-                    Debug.WriteLine($"[DTLS13 Server] Received KeyUpdate from {endpoint} (update_request=0x{keyUpdate.UpdateRequest:X2})");
-                    session.ServerApplicationKeys = Dtls13CryptoUtils.UpdateClientTrafficSecret(session.ServerApplicationKeys);
-                    KeyUpdateReceived?.Invoke(this, keyUpdate);
-                    if (keyUpdate.UpdateRequest == 0x01)
-                        SendKeyUpdate(endpoint, session, requestUpdate: false);
+                case State.WaitClientCertificateVerify when parsed is CertificateVerifyDatagram certificateVerify:
+                {
+                    ushort scheme = (ushort)certificateVerify.SignatureType;
+                    if (!_certificateRequest.SignatureAlgorithms.Contains(scheme))
+                        throw new DtlsException(AlertDescription.IllegalParameter, $"Client used signature scheme 0x{scheme:X4}, which was not requested.");
+
+                    byte[] content = Dtls13Signatures.BuildSignedContent(server: false, Session.Transcript.Hash(suite));
+                    if (!Dtls13Signatures.Verify(scheme, _clientCertificate.GetPublicKey(), content, certificateVerify.Signature))
+                        throw new DtlsException(AlertDescription.DecryptError, "Client CertificateVerify signature is invalid.");
+
+                    Session.ReceivedClientCertificateVerify = true;
+                    Session.Transcript.AddHandshake(message);
+                    _state = State.WaitClientFinished;
+                    break;
+                }
+
+                case State.WaitClientFinished when parsed is FinishedDatagram finished:
+                    OnClientFinished(message, finished);
                     break;
 
                 default:
-                    Debug.WriteLine($"[DTLS13 Server] Received unknown post-handshake record from {endpoint}, ignoring");
-                    break;
+                    throw new DtlsException(AlertDescription.UnexpectedMessage, $"Unexpected handshake message 0x{message[0]:X2} in state {_state}.");
             }
         }
 
-        // Sends an encrypted application-data record to the peer.
-        public void SendApplicationData(EndPoint endpoint, Dtls13Session session, byte[] data)
+        private void OnClientFinished(byte[] message, FinishedDatagram finished)
         {
-            var enc = new ServerEncryptedDatagram(session.ServerApplicationKeys,
-                new ApplicationDataDatagram(data))
-            {
-                Epoch        = session.Epoch,
-                RecordNumber = session.RecordNumber++,
-            };
-            ServerTransport.Send(endpoint, enc.ToBytes());
-            session.ServerApplicationKeys.ServerKeyUseCounter++;
+            var suite = Session.CipherSuite;
+            var handshakeKeys = Session.ServerHandshakeKeys;
+
+            byte[] expected = Dtls13CryptoUtils.CalculateFinished(handshakeKeys.ClientSecret, Session.Transcript.Hash(suite), suite);
+            if (!System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(expected, finished.VerifyData))
+                throw new DtlsException(AlertDescription.DecryptError, "Client Finished verification failed.");
+
+            Session.Transcript.AddHandshake(message);
+            StopRetransmission();
+
+            var applicationKeys = Session.ServerApplicationKeys;
+            Session.WriteKeys = applicationKeys;
+            AddReadKeys(applicationKeys);
+
+            _state = State.Connected;
+            IsHandshakeComplete = true;
+
+            // ACK the client's final flight (RFC 9147 §7.1) in the application epoch.
+            SendAck();
+
+            WriteKeyLog(Convert.ToHexString(_clientHello.ClientRandom), handshakeKeys, applicationKeys);
+            Debug.WriteLine($"[DTLS13 Server] Handshake complete with {RemoteEndPoint}");
+            RaiseEvent(() => _server.OnConnectionEstablished(this));
         }
 
-        // Sends a NewSessionTicket post-handshake message to the peer.
-        public void SendNewSessionTicket(EndPoint endpoint, Dtls13Session session,
-            byte[] ticket, byte[] nonce = null, uint lifetime = 7200, uint ageAdd = 0)
+        /// <summary>Sends a NewSessionTicket. Note: resumption with these tickets is not implemented yet.</summary>
+        public void SendNewSessionTicket(byte[] ticket, byte[] nonce = null, uint lifetime = 7200, uint ageAdd = 0)
         {
-            nonce ??= Dtls13CryptoUtils.GenerateRandom(8);
-            if (ageAdd == 0)
+            Run(() =>
             {
-                var rng = new byte[4];
-                System.Security.Cryptography.RandomNumberGenerator.Fill(rng);
-                ageAdd = (uint)((rng[0] << 24) | (rng[1] << 16) | (rng[2] << 8) | rng[3]);
-            }
+                if (!IsHandshakeComplete)
+                    throw new InvalidOperationException("The handshake has not completed.");
 
-            var nst = new NewSessionTicketDatagram(ticket, nonce, lifetime, ageAdd);
-            var enc = new ServerEncryptedDatagram(session.ServerApplicationKeys, nst)
-            {
-                Epoch        = session.Epoch,
-                RecordNumber = session.RecordNumber++,
-            };
-            ServerTransport.Send(endpoint, enc.ToBytes());
-            session.ServerApplicationKeys.ServerKeyUseCounter++;
-            Debug.WriteLine($"[DTLS13 Server] Sent NewSessionTicket to {endpoint} (lifetime={lifetime}s)");
-        }
+                nonce ??= Dtls13CryptoUtils.GenerateRandom(8);
+                if (ageAdd == 0)
+                    ageAdd = BitConverter.ToUInt32(Dtls13CryptoUtils.GenerateRandom(4), 0);
 
-        // Sends a KeyUpdate handshake message and updates the server write keys.
-        // Set requestUpdate=true to ask the peer to perform a key update as well.
-        public void SendKeyUpdate(EndPoint endpoint, Dtls13Session session, bool requestUpdate = false)
-        {
-            var keyUpdate = new KeyUpdateDatagram(requestUpdate ? (byte)0x01 : (byte)0x00);
-            var enc = new ServerEncryptedDatagram(session.ServerApplicationKeys, keyUpdate)
-            {
-                Epoch        = session.Epoch,
-                RecordNumber = session.RecordNumber++,
-            };
-            ServerTransport.Send(endpoint, enc.ToBytes());
-            session.ServerApplicationKeys.ServerKeyUseCounter++;
-            session.ServerApplicationKeys = Dtls13CryptoUtils.UpdateServerTrafficSecret(session.ServerApplicationKeys);
-            Debug.WriteLine($"[DTLS13 Server] Sent KeyUpdate to {endpoint} (update_request=0x{keyUpdate.UpdateRequest:X2}), rotated server write keys");
-        }
-
-        private void SendEncryptedHandshake(EndPoint endpoint, Dtls13Session session, IDatagram datagram)
-        {
-            byte[] fullPlaintext = datagram.ToBytes();
-
-            var sessionEntry = new ServerEncryptedDatagram(session.ServerHandshakeKeys, datagram);
-            session.HandshakeMessages.Add(sessionEntry);
-
-            foreach (var fragment in HandshakeFragmenter.FragmentHandshakePlaintext(fullPlaintext, MaxHandshakeBodyPerRecord))
-            {
-                var fragEnc = new ServerEncryptedDatagram(session.ServerHandshakeKeys, new RawPlaintextDatagram(fragment))
-                {
-                    Epoch = session.Epoch,
-                    RecordNumber = session.RecordNumber++,
-                };
-                ServerTransport.Send(endpoint, fragEnc.ToBytes());
-                session.ServerHandshakeKeys.ServerKeyUseCounter++;
-            }
+                BeginFlight();
+                SendHandshake(new NewSessionTicketDatagram(ticket, nonce, lifetime, ageAdd), Session.WriteKeys, addToTranscript: false);
+                ArmRetransmission();
+            });
         }
     }
 }
