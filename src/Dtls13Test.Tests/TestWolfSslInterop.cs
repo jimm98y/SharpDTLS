@@ -197,10 +197,10 @@ namespace Dtls13Test.Tests
             Assert.DoesNotContain("NOT RESUMED", client.Output, "wolfSSL did not resume:\n" + client.Output);
             Assert.IsTrue(WaitFor(() => server.Connections.Any(c => c.IsResumed && c.IsHandshakeComplete)), "server did not resume:\n" + client.Output);
 
-            client.WriteLine("after-resumption");
-            var connection = server.Connections.First(c => c.IsResumed);
+            // Subscribe before sending: the data can arrive before the next statement runs.
             var received = new List<string>();
             server.ApplicationDataReceived += (_, e) => { lock (received) received.Add(Encoding.UTF8.GetString(e.Data)); };
+            client.WriteLine("after-resumption");
             Assert.IsTrue(WaitFor(() => Contains(received, "after-resumption")), client.Output);
         }
 
