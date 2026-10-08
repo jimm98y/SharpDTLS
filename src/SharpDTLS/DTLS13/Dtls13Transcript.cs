@@ -53,6 +53,18 @@ namespace SharpDTLS.DTLS13
             _messages.Add(messageHash);
         }
 
+        /// <summary>The hash of the transcript followed by one more message in TLS form (e.g. a truncated ClientHello).</summary>
+        public byte[] HashWith(Dtls13CipherSuite suite, byte[] tlsMessage)
+        {
+            var digest = suite.CreateDigest();
+            foreach (var message in _messages)
+                digest.BlockUpdate(message, 0, message.Length);
+            digest.BlockUpdate(tlsMessage, 0, tlsMessage.Length);
+            byte[] hash = new byte[digest.GetDigestSize()];
+            digest.DoFinal(hash, 0);
+            return hash;
+        }
+
         public byte[] Hash(Dtls13CipherSuite suite)
         {
             var digest = suite.CreateDigest();

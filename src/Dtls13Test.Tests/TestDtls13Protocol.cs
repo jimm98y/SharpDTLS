@@ -278,7 +278,8 @@ namespace Dtls13Test.Tests
         [TestMethod]
         public void LostServerFlight_IsRetransmitted()
         {
-            var h = new Harness(configureServer: s => s.ShouldSendHelloRetry = false);
+            // Without tickets, so a NewSessionTicket does not count as a retransmission.
+            var h = new Harness(configureServer: s => { s.ShouldSendHelloRetry = false; s.TicketKeys = null; });
             int serverDatagrams = 0;
             h.Pair.ServerToClient = d => Interlocked.Increment(ref serverDatagrams) == 3 ? Array.Empty<byte[]>() : new[] { d };
 
@@ -345,7 +346,7 @@ namespace Dtls13Test.Tests
         {
             // long timeouts: reordering alone must complete the handshake, without retransmission
             var h = new Harness(
-                configureServer: s => { s.ShouldSendHelloRetry = false; s.InitialRetransmitTimeout = TimeSpan.FromSeconds(30); },
+                configureServer: s => { s.ShouldSendHelloRetry = false; s.TicketKeys = null; s.InitialRetransmitTimeout = TimeSpan.FromSeconds(30); },
                 configureClient: c => c.InitialRetransmitTimeout = TimeSpan.FromSeconds(30));
             var held = new List<byte[]>();
             int count = 0;

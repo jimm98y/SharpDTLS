@@ -101,6 +101,7 @@ namespace SharpDTLS.DTLS13.Messages
                     0x002b => new ServerSupportedVersions(),
                     0x002c => new CookieExtension(),
                     0x000e => new UseSrtpExtension(),
+                    ClientPreSharedKeyExtension.Type => new ServerPreSharedKeyExtension(),
                     _ => new UnknownExtension()
                 };
 

@@ -15,6 +15,9 @@ namespace SharpDTLS.DTLS13
         public Dtls13CryptoContext ServerHandshakeKeys { get; internal set; }
         public Dtls13CryptoContext ServerApplicationKeys { get; internal set; }
 
+        /// <summary>resumption_master_secret (RFC 8446 §7.1), available once the client Finished is processed.</summary>
+        internal byte[] ResumptionMasterSecret { get; set; }
+
         /// <summary>Exporter master secret (RFC 8446 §7.1), available once the server Finished is processed.</summary>
         public byte[] ExporterMasterSecret { get; internal set; }
 

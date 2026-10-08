@@ -13,6 +13,9 @@
  *   -group <name>       client: initial key share (x25519 | p256)
  *   -srtp <profiles>    offer/accept DTLS-SRTP, e.g. SRTP_AES128_CM_SHA1_80; prints "SRTP:<hex keying material>"
  *   -export <label> <n> print "EXPORT:<hex>" of n bytes exported with label (empty context)
+ *   -resume             two connections: the client resumes the first one's session ticket, the server
+ *                       accepts the second connection with the same context; both print "RESUMED" or
+ *                       "NOT RESUMED" after the second handshake
  *
  * Prints "ACCEPT" once listening, "CONNECTED <cipher>" after the handshake and "RECV:<data>" for
  * every application record. Each stdin line is sent as application data; the line "KEYUPDATE"
@@ -51,7 +54,7 @@ int main(int argc, char **argv)
     int port = atoi(argv[2]);
     const char *cert = NULL, *key = NULL, *cipher = NULL, *verify = NULL, *group = NULL, *srtp = NULL, *exportLabel = NULL;
     int exportLength = 0;
-    int hrr = 0, argi = 3;
+    int hrr = 0, resume = 0, argi = 3;
 
     if (server) {
         if (argc < 5) { fprintf(stderr, "server needs cert and key\n"); return 2; }
@@ -62,6 +65,7 @@ int main(int argc, char **argv)
     for (; argi < argc; argi++) {
         if (!strcmp(argv[argi], "-cipher") && argi + 1 < argc) cipher = argv[++argi];
         else if (!strcmp(argv[argi], "-hrr")) hrr = 1;
+        else if (!strcmp(argv[argi], "-resume")) resume = 1;
         else if (!strcmp(argv[argi], "-verify") && argi + 1 < argc) verify = argv[++argi];
         else if (!strcmp(argv[argi], "-cert") && argi + 1 < argc) cert = argv[++argi];
         else if (!strcmp(argv[argi], "-key") && argi + 1 < argc) key = argv[++argi];
@@ -92,7 +96,12 @@ int main(int argc, char **argv)
         wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_NONE, NULL);
     }
 
-    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    WOLFSSL_SESSION *session = NULL;
+    int rounds = resume ? 2 : 1;
+    int fd = -1, ret;
+    WOLFSSL *ssl = NULL;
+    for (int round = 0; round < rounds; round++) {
+    fd = socket(AF_INET, SOCK_DGRAM, 0);
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
@@ -103,9 +112,13 @@ int main(int argc, char **argv)
     socklen_t peerLen = sizeof(peer);
 
     if (server) {
+        int one = 1;
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
         if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) { perror("bind"); return 1; }
-        printf("ACCEPT\n");
-        fflush(stdout);
+        if (round == 0) {
+            printf("ACCEPT\n");
+            fflush(stdout);
+        }
 
         char probe[1];
         if (recvfrom(fd, probe, sizeof(probe), MSG_PEEK, (struct sockaddr *)&peer, &peerLen) < 0) { perror("recvfrom"); return 1; }
@@ -115,8 +128,10 @@ int main(int argc, char **argv)
         if (connect(fd, (struct sockaddr *)&peer, sizeof(peer)) != 0) { perror("connect"); return 1; }
     }
 
-    WOLFSSL *ssl = wolfSSL_new(ctx);
+    ssl = wolfSSL_new(ctx);
     if (!ssl) fail("new", NULL, 0);
+    if (session && wolfSSL_set_session(ssl, session) != WOLFSSL_SUCCESS)
+        fail("set session", NULL, 0);
     /* the socket is connect()ed, so wolfSSL must use send/recv rather than sendto (EISCONN on macOS) */
     if (wolfSSL_set_dtls_fd_connected(ssl, fd) != WOLFSSL_SUCCESS)
         fail("set fd", NULL, 0);
@@ -129,13 +144,47 @@ int main(int argc, char **argv)
             fail("key share", NULL, 0);
     }
 
-    int ret = server ? wolfSSL_accept(ssl) : wolfSSL_connect(ssl);
+    ret = server ? wolfSSL_accept(ssl) : wolfSSL_connect(ssl);
     if (ret != WOLFSSL_SUCCESS)
         fail(server ? "accept" : "connect", ssl, ret);
 
     wolfSSL_dtls_set_using_nonblock(ssl, 1);
     fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
+    if (round > 0)
+        printf("%s\n", wolfSSL_session_reused(ssl) ? "RESUMED" : "NOT RESUMED");
     printf("CONNECTED %s\n", wolfSSL_get_cipher_name(ssl));
+    fflush(stdout);
+
+    if (round + 1 < rounds) {
+        /* First of two connections: let the ticket (client) or the peer's close (server) arrive, then reconnect. */
+        char drain[4096];
+        for (int i = 0; i < 50; i++) {
+            fd_set rfds;
+            FD_ZERO(&rfds);
+            FD_SET(fd, &rfds);
+            struct timeval wait = { 0, 100000 };
+            if (select(fd + 1, &rfds, NULL, NULL, &wait) <= 0) {
+                wolfSSL_dtls_got_timeout(ssl);
+                if (!server && i >= 5) break; /* the ticket follows the handshake closely */
+                continue;
+            }
+            ret = wolfSSL_read(ssl, drain, sizeof(drain));
+            if (ret <= 0) {
+                int err = wolfSSL_get_error(ssl, ret);
+                if (err == WOLFSSL_ERROR_ZERO_RETURN) break;
+                if (err != WOLFSSL_ERROR_WANT_READ && err != WOLFSSL_ERROR_WANT_WRITE)
+                    fail("read before reconnect", ssl, ret);
+            }
+        }
+        if (!server) {
+            session = wolfSSL_get1_session(ssl);
+            if (!session) fail("get1_session", NULL, 0);
+            wolfSSL_shutdown(ssl);
+        }
+        wolfSSL_free(ssl);
+        close(fd);
+        continue;
+    }
 
     if (srtp) {
         unsigned char material[128];
@@ -159,6 +208,7 @@ int main(int argc, char **argv)
         printf("\n");
     }
     fflush(stdout);
+    }
 
     char buf[4096];
     char line[4096];
@@ -221,6 +271,7 @@ int main(int argc, char **argv)
     }
 
 done:
+    if (session) wolfSSL_SESSION_free(session);
     wolfSSL_free(ssl);
     wolfSSL_CTX_free(ctx);
     wolfSSL_Cleanup();

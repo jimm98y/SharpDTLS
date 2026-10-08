@@ -70,6 +70,12 @@ namespace SharpDTLS.DTLS13
         /// <summary>Optional NSS key log sink (SSLKEYLOGFILE format).</summary>
         public Action<string> KeyLogWriter { get; set; }
 
+        /// <summary>
+        /// Keys for session tickets (random per server by default): after each full or resumed handshake a client
+        /// that offers psk_dhe_ke gets a ticket it can resume with. Null disables tickets and resumption.
+        /// </summary>
+        public SessionTicketKeys TicketKeys { get; set; } = new SessionTicketKeys();
+
         public event EventHandler<EventArgs> HandshakeFinished;
         public event EventHandler<KeyUpdateDatagram> KeyUpdateReceived;
         public event EventHandler<Dtls13DataReceivedEventArgs> ApplicationDataReceived;
@@ -290,8 +296,13 @@ namespace SharpDTLS.DTLS13
         private ClientHelloDatagram _clientHello;
         private CertificateRequestDatagram _certificateRequest;
         private X509Certificate _clientCertificate;
+        private byte[] _psk;
+        private int _pskIdentity;
 
         public EndPoint RemoteEndPoint { get; }
+
+        /// <summary>Whether the client resumed with a ticket (PSK handshake).</summary>
+        public bool IsResumed => _psk != null;
 
         /// <summary>The client's certificate, when one was sent.</summary>
         public X509Certificate ClientCertificate => _clientCertificate;
@@ -324,6 +335,7 @@ namespace SharpDTLS.DTLS13
                     Session.Transcript.AddMessageHash(retry.ClientHello1Hash);
                     Session.Transcript.AddPlaintextRecord(hrr.ToBytes());
                 }
+                SelectPsk(record);
                 Session.Transcript.AddPlaintextRecord(record);
 
                 // Message sequence numbers continue after the stateless HelloRetryRequest (RFC 9147 §5.2).
@@ -333,6 +345,51 @@ namespace SharpDTLS.DTLS13
 
                 SendServerFlight();
             });
+        }
+
+        /// <summary>
+        /// Accepts the first offered ticket we can open whose suite has the selected suite's hash, after checking its
+        /// binder (RFC 8446 §4.2.11). Unknown tickets fall back to a full handshake; a wrong binder aborts.
+        /// </summary>
+        private void SelectPsk(byte[] record)
+        {
+            var keys = _server.TicketKeys;
+            var offered = _clientHello.Extensions.OfType<ClientPreSharedKeyExtension>().FirstOrDefault();
+            if (offered == null)
+                return;
+            if (_clientHello.Extensions[^1] != offered)
+                throw new DtlsException(AlertDescription.IllegalParameter, "pre_shared_key is not the last extension.");
+
+            var modes = _clientHello.Extensions.OfType<PskKeyExchangeModesExtension>().FirstOrDefault();
+            if (modes == null)
+                throw new DtlsException(AlertDescription.MissingExtension, "pre_shared_key without psk_key_exchange_modes.");
+            if (keys == null || !modes.Modes.Contains(PskKeyExchangeModesExtension.PskDheKe))
+                return;
+
+            var suite = Session.CipherSuite;
+            for (int i = 0; i < offered.Identities.Count; i++)
+            {
+                var state = Dtls13TicketState.Open(keys, offered.Identities[i].Identity);
+                if (state == null || Dtls13CipherSuite.Get(state.CipherSuite).HashAlgorithm != suite.HashAlgorithm)
+                    continue;
+                if (_server.RequireClientCertificate && state.ClientCertificate == null)
+                    continue;
+
+                byte[] truncated = PskBinders.TruncatedClientHello(record, offered.BindersLength);
+                byte[] expected = Dtls13CryptoUtils.CalculateBinder(state.Psk, Session.Transcript.HashWith(suite, truncated), suite);
+                if (!System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(expected, offered.Binders[i]))
+                    throw new DtlsException(AlertDescription.DecryptError, "PSK binder verification failed.");
+
+                _psk = state.Psk;
+                _pskIdentity = i;
+                if (state.ClientCertificate != null)
+                {
+                    _clientCertificate = new X509CertificateParser().ReadCertificate(state.ClientCertificate);
+                    Session.ClientCertificateBytes = state.ClientCertificate;
+                    Session.PeerCertificate = state.ClientCertificate;
+                }
+                return;
+            }
         }
 
         private void SendServerFlight()
@@ -347,30 +404,36 @@ namespace SharpDTLS.DTLS13
 
             // RFC 9147 §5: legacy_session_id_echo stays empty, whatever the client sent (no compatibility mode).
             var serverHello = new ServerHelloDatagram(Session.PublicKey, suite.Id, Dtls13CryptoUtils.GenerateRandom(32));
+            if (IsResumed)
+                serverHello.Extensions.Add(new ServerPreSharedKeyExtension((ushort)_pskIdentity));
             Session.Transcript.AddPlaintextRecord(SendPlaintextHandshake(serverHello));
 
             byte[] sharedSecret = Dtls13CryptoUtils.DeriveSharedSecretX25519(Session.PrivateKey, _clientHello.PublicKey);
-            var handshakeKeys = Dtls13CryptoUtils.CalculateHandshakeKeys(_clientHello.ClientRandom, Session.Transcript.Hash(suite), sharedSecret, suite);
+            var handshakeKeys = Dtls13CryptoUtils.CalculateHandshakeKeys(_clientHello.ClientRandom, Session.Transcript.Hash(suite), sharedSecret, suite, _psk);
             Session.ServerHandshakeKeys = handshakeKeys;
             Session.WriteKeys = handshakeKeys;
             AddReadKeys(handshakeKeys);
 
             SendHandshake(BuildEncryptedExtensions(), handshakeKeys);
 
-            if (_server.RequireClientCertificate)
+            // A PSK handshake is authenticated by the PSK: no CertificateRequest, Certificate or CertificateVerify.
+            if (!IsResumed)
             {
-                _certificateRequest = new CertificateRequestDatagram();
-                SendHandshake(_certificateRequest, handshakeKeys);
-                Session.RequiresClientAuth = true;
+                if (_server.RequireClientCertificate)
+                {
+                    _certificateRequest = new CertificateRequestDatagram();
+                    SendHandshake(_certificateRequest, handshakeKeys);
+                    Session.RequiresClientAuth = true;
+                }
+
+                SendHandshake(new CertificateDatagram(_server.ServerCertificate.GetEncoded()), handshakeKeys);
+
+                var clientSchemes = _clientHello.Extensions.OfType<ClientSignatureAlgorithms>().FirstOrDefault()?.SignatureAlgorithms;
+                ushort scheme = Dtls13Signatures.SelectScheme(_server.ServerKeyPair.Private, clientSchemes)
+                    ?? throw new DtlsException(AlertDescription.HandshakeFailure, "No signature scheme in common with the client.");
+                byte[] content = Dtls13Signatures.BuildSignedContent(server: true, Session.Transcript.Hash(suite));
+                SendHandshake(new CertificateVerifyDatagram(Dtls13Signatures.Sign(scheme, _server.ServerKeyPair.Private, content), scheme), handshakeKeys);
             }
-
-            SendHandshake(new CertificateDatagram(_server.ServerCertificate.GetEncoded()), handshakeKeys);
-
-            var clientSchemes = _clientHello.Extensions.OfType<ClientSignatureAlgorithms>().FirstOrDefault()?.SignatureAlgorithms;
-            ushort scheme = Dtls13Signatures.SelectScheme(_server.ServerKeyPair.Private, clientSchemes)
-                ?? throw new DtlsException(AlertDescription.HandshakeFailure, "No signature scheme in common with the client.");
-            byte[] content = Dtls13Signatures.BuildSignedContent(server: true, Session.Transcript.Hash(suite));
-            SendHandshake(new CertificateVerifyDatagram(Dtls13Signatures.Sign(scheme, _server.ServerKeyPair.Private, content), scheme), handshakeKeys);
 
             byte[] verifyData = Dtls13CryptoUtils.CalculateFinished(handshakeKeys.ServerSecret, Session.Transcript.Hash(suite), suite);
             SendHandshake(new FinishedDatagram { VerifyData = verifyData }, handshakeKeys);
@@ -483,6 +546,8 @@ namespace SharpDTLS.DTLS13
 
             Session.Transcript.AddHandshake(message);
             StopRetransmission();
+            Session.ResumptionMasterSecret = Dtls13CryptoUtils.CalculateResumptionMasterSecret(
+                Session.ServerApplicationKeys.Secret, Session.Transcript.Hash(suite), suite);
 
             var applicationKeys = Session.ServerApplicationKeys;
             Session.WriteKeys = applicationKeys;
@@ -494,27 +559,50 @@ namespace SharpDTLS.DTLS13
             // ACK the client's final flight (RFC 9147 §7.1) in the application epoch.
             SendAck();
 
+            // A client that offers psk_dhe_ke can resume: give it a ticket.
+            var modes = _clientHello.Extensions.OfType<PskKeyExchangeModesExtension>().FirstOrDefault();
+            if (_server.TicketKeys != null && modes != null && modes.Modes.Contains(PskKeyExchangeModesExtension.PskDheKe))
+                IssueTicket();
+
             WriteKeyLog(Convert.ToHexString(_clientHello.ClientRandom), handshakeKeys, applicationKeys);
             Debug.WriteLine($"[DTLS13 Server] Handshake complete with {RemoteEndPoint}");
             RaiseEvent(() => _server.OnConnectionEstablished(this));
         }
 
-        /// <summary>Sends a NewSessionTicket. Note: resumption with these tickets is not implemented yet.</summary>
-        public void SendNewSessionTicket(byte[] ticket, byte[] nonce = null, uint lifetime = 7200, uint ageAdd = 0)
+        /// <summary>Sends another session ticket (RFC 8446 §4.6.1); one is sent automatically after the handshake.</summary>
+        public void SendNewSessionTicket()
         {
             Run(() =>
             {
                 if (!IsHandshakeComplete)
                     throw new InvalidOperationException("The handshake has not completed.");
-
-                nonce ??= Dtls13CryptoUtils.GenerateRandom(8);
-                if (ageAdd == 0)
-                    ageAdd = BitConverter.ToUInt32(Dtls13CryptoUtils.GenerateRandom(4), 0);
-
-                BeginFlight();
-                SendHandshake(new NewSessionTicketDatagram(ticket, nonce, lifetime, ageAdd), Session.WriteKeys, addToTranscript: false);
-                ArmRetransmission();
+                if (_server.TicketKeys == null)
+                    throw new InvalidOperationException("Session tickets are disabled (TicketKeys is null).");
+                IssueTicket();
             });
+        }
+
+        // The ticket seals the PSK derived from the resumption master secret and a fresh nonce.
+        private void IssueTicket()
+        {
+            var keys = _server.TicketKeys;
+            var suite = Session.CipherSuite;
+            byte[] nonce = Dtls13CryptoUtils.GenerateRandom(8);
+            uint ageAdd = BitConverter.ToUInt32(Dtls13CryptoUtils.GenerateRandom(4), 0);
+            uint lifetime = (uint)Math.Min(604800, keys.Lifetime.TotalSeconds);
+            var state = new Dtls13TicketState
+            {
+                CipherSuite = suite.Id,
+                Psk = Dtls13CryptoUtils.CalculateResumptionPsk(Session.ResumptionMasterSecret, nonce, suite),
+                AgeAdd = ageAdd,
+                IssuedUtc = DateTime.UtcNow,
+                ClientCertificate = Session.ClientCertificateBytes,
+            };
+
+            // Retransmitted until the client ACKs it (RFC 9147 §5.8).
+            BeginFlight();
+            SendHandshake(new NewSessionTicketDatagram(state.Seal(keys), nonce, lifetime, ageAdd), Session.WriteKeys, addToTranscript: false);
+            ArmRetransmission();
         }
     }
 }

@@ -164,14 +164,19 @@ namespace SharpDTLS.DTLS13
 
         // ── Key schedule (RFC 8446 §7.1 with the "dtls13" label prefix of RFC 9147 §5.9) ─────────
 
-        public static Dtls13CryptoContext CalculateHandshakeKeys(byte[] clientRandom, byte[] helloHash, byte[] sharedSecret, Dtls13CipherSuite suite)
+        /// <summary>
+        /// Handshake traffic keys. <paramref name="psk"/> is the resumption PSK (null for a full handshake) and
+        /// <paramref name="sharedSecret"/> the (EC)DHE secret (null for psk_ke, which has none).
+        /// </summary>
+        public static Dtls13CryptoContext CalculateHandshakeKeys(byte[] clientRandom, byte[] helloHash, byte[] sharedSecret, Dtls13CipherSuite suite,
+            byte[] psk = null)
         {
             int hashAlg = suite.HashAlgorithm;
             byte[] zeroKey = new byte[suite.HashLength];
 
-            var earlySecret = new BcTlsSecret(_crypto, new byte[suite.HashLength]).HkdfExtract(hashAlg, new BcTlsSecret(_crypto, zeroKey)).Extract();
+            var earlySecret = CalculateEarlySecret(psk, suite);
             var derivedSecret = HkdfExpandLabel(new BcTlsSecret(_crypto, earlySecret), hashAlg, "derived", EmptyHash(suite), suite.HashLength).Extract();
-            var handshakeSecret = new BcTlsSecret(_crypto, derivedSecret).HkdfExtract(hashAlg, new BcTlsSecret(_crypto, sharedSecret)).Extract();
+            var handshakeSecret = new BcTlsSecret(_crypto, derivedSecret).HkdfExtract(hashAlg, new BcTlsSecret(_crypto, sharedSecret ?? zeroKey)).Extract();
 
             var clientSecret = HkdfExpandLabel(new BcTlsSecret(_crypto, handshakeSecret), hashAlg, "c hs traffic", helloHash, suite.HashLength).Extract();
             var serverSecret = HkdfExpandLabel(new BcTlsSecret(_crypto, handshakeSecret), hashAlg, "s hs traffic", helloHash, suite.HashLength).Extract();
@@ -192,6 +197,30 @@ namespace SharpDTLS.DTLS13
 
             return CreateContext(clientRandom, masterSecret, clientSecret, serverSecret, suite, epoch: 3);
         }
+
+        /// <summary>early_secret = HKDF-Extract(0, PSK), with a zero PSK when there is none (RFC 8446 §7.1).</summary>
+        public static byte[] CalculateEarlySecret(byte[] psk, Dtls13CipherSuite suite)
+            => new BcTlsSecret(_crypto, new byte[suite.HashLength])
+                .HkdfExtract(suite.HashAlgorithm, new BcTlsSecret(_crypto, psk ?? new byte[suite.HashLength])).Extract();
+
+        /// <summary>
+        /// PSK binder (RFC 8446 §4.2.11.2): HMAC(finished_key(Derive-Secret(early_secret, "res binder", "")),
+        /// Transcript-Hash(truncated ClientHello)).
+        /// </summary>
+        public static byte[] CalculateBinder(byte[] psk, byte[] truncatedTranscriptHash, Dtls13CipherSuite suite)
+        {
+            byte[] earlySecret = CalculateEarlySecret(psk, suite);
+            byte[] binderKey = HkdfExpandLabel(new BcTlsSecret(_crypto, earlySecret), suite.HashAlgorithm, "res binder", EmptyHash(suite), suite.HashLength).Extract();
+            return CalculateFinished(binderKey, truncatedTranscriptHash, suite);
+        }
+
+        /// <summary>resumption_master_secret = Derive-Secret(master_secret, "res master", ClientHello..client Finished)</summary>
+        public static byte[] CalculateResumptionMasterSecret(byte[] masterSecret, byte[] clientFinishedHash, Dtls13CipherSuite suite)
+            => HkdfExpandLabel(new BcTlsSecret(_crypto, masterSecret), suite.HashAlgorithm, "res master", clientFinishedHash, suite.HashLength).Extract();
+
+        /// <summary>The PSK of one ticket: HKDF-Expand-Label(resumption_master_secret, "resumption", ticket_nonce, Hash.length).</summary>
+        public static byte[] CalculateResumptionPsk(byte[] resumptionMasterSecret, byte[] ticketNonce, Dtls13CipherSuite suite)
+            => HkdfExpandLabel(new BcTlsSecret(_crypto, resumptionMasterSecret), suite.HashAlgorithm, "resumption", ticketNonce, suite.HashLength).Extract();
 
         /// <summary>exporter_master_secret = Derive-Secret(master_secret, "exp master", ClientHello..server Finished)</summary>
         public static byte[] CalculateExporterMasterSecret(byte[] masterSecret, byte[] handshakeHash, Dtls13CipherSuite suite)

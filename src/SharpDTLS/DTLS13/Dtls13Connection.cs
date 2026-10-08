@@ -256,12 +256,16 @@ namespace SharpDTLS.DTLS13
 
         // ── Post-handshake messages ──────────────────────────────────────────────────────────
 
+        /// <summary>A NewSessionTicket arrived (client only), before NewSessionTicketReceived is raised.</summary>
+        protected virtual void OnNewSessionTicket(NewSessionTicketDatagram ticket) { }
+
         private void OnPostHandshakeMessage(byte[] message, IHandshakeDatagram parsed)
         {
             switch (parsed)
             {
                 case NewSessionTicketDatagram nst when IsClient:
                     SendAck();
+                    OnNewSessionTicket(nst);
                     RaiseEvent(() => NewSessionTicketReceived?.Invoke(this, nst));
                     break;
 

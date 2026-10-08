@@ -181,6 +181,74 @@ namespace Dtls13Test.Tests
             Assert.IsTrue(client.WaitForOutput("RECV:after-server-keyupdate", Timeout), client.Output);
         }
 
+        [DataRow("TLS13-AES128-GCM-SHA256", true)]
+        [DataRow("TLS13-AES256-GCM-SHA384", false)]
+        [DataRow("TLS13-CHACHA20-POLY1305-SHA256", false)]
+        [TestMethod]
+        public void WolfSslClient_ResumesWithTicket_FromSharpDtlsServer(string cipher, bool helloRetry)
+        {
+            WolfSsl.RequireWolfSsl();
+            string dir = OpenSsl.NewTempDirectory();
+            using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
+            var server = new Dtls13Server(transport) { ShouldSendHelloRetry = helloRetry, CipherSuites = new List<ushort> { SuiteIds[cipher] } };
+
+            using var client = new OpenSslProcess($"client {transport.LocalEndpoint.Port} -cipher {cipher} -resume", dir, WolfSsl.Harness);
+            Assert.IsTrue(client.WaitForOutput("RESUMED", Timeout), "second handshake did not complete:\n" + client.Output);
+            Assert.DoesNotContain("NOT RESUMED", client.Output, "wolfSSL did not resume:\n" + client.Output);
+            Assert.IsTrue(WaitFor(() => server.Connections.Any(c => c.IsResumed && c.IsHandshakeComplete)), "server did not resume:\n" + client.Output);
+
+            client.WriteLine("after-resumption");
+            var connection = server.Connections.First(c => c.IsResumed);
+            var received = new List<string>();
+            server.ApplicationDataReceived += (_, e) => { lock (received) received.Add(Encoding.UTF8.GetString(e.Data)); };
+            Assert.IsTrue(WaitFor(() => Contains(received, "after-resumption")), client.Output);
+        }
+
+        [DataRow("TLS13-AES128-GCM-SHA256", true)]
+        [DataRow("TLS13-AES256-GCM-SHA384", false)]
+        [TestMethod]
+        public void SharpDtlsClient_ResumesWithTicket_FromWolfSslServer(string cipher, bool helloRetry)
+        {
+            WolfSsl.RequireWolfSsl();
+            string dir = OpenSsl.NewTempDirectory();
+            var (kp, cert) = Credentials(ec: true);
+            string certPath = OpenSsl.WritePem(dir, "cert.pem", cert);
+            string keyPath = OpenSsl.WritePem(dir, "key.pem", kp.Private);
+            using var server = OpenSslProcess.StartServer(p => $"server {p} {certPath} {keyPath} -cipher {cipher} -resume{(helloRetry ? " -hrr" : "")}",
+                dir, Timeout, out int port, WolfSsl.Harness);
+            Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), "server did not start:\n" + server.Output);
+
+            Dtls13SessionTicket ticket;
+            using (var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port)))
+            {
+                var first = Handshake(new Dtls13Client(transport) { CipherSuites = new List<ushort> { SuiteIds[cipher] } }, server);
+                Assert.IsTrue(WaitFor(() => first.SessionTicket != null), "wolfSSL issued no ticket:\n" + server.Output);
+                ticket = first.SessionTicket;
+                Assert.IsFalse(first.IsResumed);
+                first.Close();
+            }
+
+            using (var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port)))
+            {
+                var second = Handshake(new Dtls13Client(transport) { CipherSuites = new List<ushort> { SuiteIds[cipher] }, ResumptionTicket = ticket }, server);
+                Assert.IsTrue(second.IsResumed, "wolfSSL did not accept the ticket:\n" + server.Output);
+                Assert.IsTrue(server.WaitForOutput("RESUMED", Timeout), server.Output);
+                Assert.DoesNotContain("NOT RESUMED", server.Output);
+                second.SendApplicationData(Encoding.UTF8.GetBytes("after-resumption\n"));
+                Assert.IsTrue(server.WaitForOutput("RECV:after-resumption", Timeout), server.Output);
+            }
+        }
+
+        private static Dtls13Client Handshake(Dtls13Client client, OpenSslProcess peer)
+        {
+            var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            client.HandshakeFinished += (_, _) => done.TrySetResult(true);
+            client.Failed += (_, ex) => done.TrySetException(ex);
+            client.BeginHandshake();
+            Assert.IsTrue(done.Task.Wait(Timeout), "handshake did not complete:\n" + peer.Output);
+            return client;
+        }
+
         [TestMethod]
         public void SharpDtlsClient_WithClientCertificate_To_WolfSslServerRequiringIt()
         {
