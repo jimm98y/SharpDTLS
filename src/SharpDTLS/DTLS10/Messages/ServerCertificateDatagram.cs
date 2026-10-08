@@ -42,8 +42,8 @@ namespace SharpDTLS.DTLS10.Messages
             buf[0] = 0x16;
             buf[1] = 0xFE; buf[2] = 0xFF; // DTLS 1.0
             buf[3] = 0x00; buf[4] = 0x00;
-            buf[5]  = (byte)((RecordSequenceNumber >> 40) & 0xFF);
-            buf[6]  = (byte)((RecordSequenceNumber >> 32) & 0xFF);
+            buf[5]  = (byte)(((long)RecordSequenceNumber >> 40) & 0xFF);
+            buf[6]  = (byte)(((long)RecordSequenceNumber >> 32) & 0xFF);
             buf[7]  = (byte)((RecordSequenceNumber >> 24) & 0xFF);
             buf[8]  = (byte)((RecordSequenceNumber >> 16) & 0xFF);
             buf[9]  = (byte)((RecordSequenceNumber >> 8) & 0xFF);

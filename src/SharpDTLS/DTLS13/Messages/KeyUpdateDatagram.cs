@@ -4,10 +4,10 @@ using System.Linq;
 
 namespace SharpDTLS.DTLS13.Messages
 {
-    public class KeyUpdateDatagram : IDatagram
+    public class KeyUpdateDatagram : IHandshakeDatagram
     {
         // Handshake type for KeyUpdate per TLS 1.3 post-handshake
-        public byte HandshakeType { get; set; } = 0x1b;
+        public byte HandshakeType { get; set; } = 0x18; // key_update(24)
 
         public int SequenceNumber { get; set; } = 0;
         public byte UpdateRequest { get; set; } = 0x00; // 0x00 = update_not_requested, 0x01 = update_requested

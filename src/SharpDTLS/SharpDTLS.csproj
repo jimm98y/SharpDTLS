@@ -10,4 +10,8 @@
 		<PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
 	</ItemGroup>
 
+	<ItemGroup>
+		<InternalsVisibleTo Include="Dtls13Test.Tests" />
+	</ItemGroup>
+
 </Project>

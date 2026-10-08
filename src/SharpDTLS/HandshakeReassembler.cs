@@ -31,6 +31,7 @@ namespace SharpDTLS
         private sealed class FragmentBuffer
         {
             public byte[] Body;
+            public bool[] Received;
             public int ReceivedBytes;
             public int TotalLength;
             public byte ContentType;
@@ -38,17 +39,12 @@ namespace SharpDTLS
             public byte HsType;
         }
 
+        // Upper bounds protecting against memory exhaustion by a malicious peer.
+        public const int MaxMessageLength = 1 << 17;
+        private const int MaxPendingMessages = 8;
+
         private readonly Dictionary<Key, FragmentBuffer> _buffers = new();
 
-        /// <summary>
-        /// Processes one plaintext fragment (the decrypted, not-yet-parsed HS message bytes).
-        ///
-        /// Non-fragmented messages (fragment_offset == 0 and fragment_length == total_length)
-        /// pass straight through without any buffering.
-        ///
-        /// Returns <c>true</c> and sets <paramref name="complete"/> when all bytes of the message
-        /// have been received. Returns <c>false</c> while still waiting for more fragments.
-        /// </summary>
         /// <summary>
         /// Processes one unencrypted DTLS handshake record (which may be a fragment) and returns a
         /// complete, defragmented record once all bytes of the handshake message have been received.
@@ -71,9 +67,15 @@ namespace SharpDTLS
             //  [22-24]  fragment_length (3 bytes)
             //  [25+]    fragment body bytes
 
+            if (record.Length < 25)
+                throw new DtlsException(AlertDescription.DecodeError, "Truncated handshake record.");
+
             int fragmentOffset = (record[19] << 16) | (record[20] << 8) | record[21];
             int fragmentLength = (record[22] << 16) | (record[23] << 8) | record[24];
             int totalLength    = (record[14] << 16) | (record[15] << 8) | record[16];
+
+            if (record.Length < 25 + fragmentLength)
+                throw new DtlsException(AlertDescription.DecodeError, "Truncated handshake record body.");
 
             if (fragmentOffset == 0 && fragmentLength == totalLength)
             {
@@ -138,6 +140,15 @@ namespace SharpDTLS
             return true;
         }
 
+        /// <summary>
+        /// Processes one plaintext fragment (the decrypted, not-yet-parsed HS message bytes).
+        ///
+        /// Non-fragmented messages (fragment_offset == 0 and fragment_length == total_length)
+        /// pass straight through without any buffering.
+        ///
+        /// Returns <c>true</c> and sets <paramref name="complete"/> when all bytes of the message
+        /// have been received. Returns <c>false</c> while still waiting for more fragments.
+        /// </summary>
         public bool TryAddFragment(byte[] plaintext, out byte[] complete)
         {
             // Encrypted handshake plaintext layout (same for every fragment):
@@ -149,14 +160,27 @@ namespace SharpDTLS
             //  [12 .. 12+fragment_length-1]  fragment body bytes
             //  [12+fragment_length]           content type byte
 
+            complete = null;
+            if (plaintext.Length < 12)
+                throw new DtlsException(AlertDescription.DecodeError, "Truncated handshake fragment header.");
+
             byte hsType = plaintext[0];
             int totalLength = (plaintext[1] << 16) | (plaintext[2] << 8) | plaintext[3];
             ushort msgSeq = (ushort)((plaintext[4] << 8) | plaintext[5]);
             int fragmentOffset = (plaintext[6] << 16) | (plaintext[7] << 8) | plaintext[8];
             int fragmentLength = (plaintext[9] << 16) | (plaintext[10] << 8) | plaintext[11];
 
+            if (plaintext.Length < 12 + fragmentLength + 1)
+                throw new DtlsException(AlertDescription.DecodeError, "Truncated handshake fragment body.");
+            if (fragmentOffset + fragmentLength > totalLength)
+                throw new DtlsException(AlertDescription.DecodeError, "Handshake fragment exceeds message length.");
+            if (totalLength > MaxMessageLength)
+                throw new DtlsException(AlertDescription.IllegalParameter, "Handshake message too large.");
+
             if (fragmentOffset == 0 && fragmentLength == totalLength)
             {
+                // a complete message supersedes any partial reassembly state
+                _buffers.Remove(new Key(hsType, msgSeq));
                 complete = plaintext;
                 return true;
             }
@@ -165,38 +189,39 @@ namespace SharpDTLS
 
             if (!_buffers.TryGetValue(key, out var buf))
             {
+                if (_buffers.Count >= MaxPendingMessages)
+                    return false; // drop; the peer will retransmit
+
                 buf = new FragmentBuffer
                 {
                     HsType = hsType,
                     MsgSeq = msgSeq,
                     TotalLength = totalLength,
                     Body = new byte[totalLength],
-                    ReceivedBytes = 0,
+                    Received = new bool[totalLength],
                     ContentType = plaintext[12 + fragmentLength],
                 };
                 _buffers[key] = buf;
             }
-
-            // Copy fragment body at the correct offset; track how many new bytes we add.
-            // Overlapping retransmissions are handled by only counting newly filled positions.
-            for (int i = 0; i < fragmentLength; i++)
+            else if (buf.TotalLength != totalLength)
             {
-                int pos = fragmentOffset + i;
-                if (buf.Body[pos] == 0 || plaintext[12 + i] != 0)
+                throw new DtlsException(AlertDescription.IllegalParameter, "Handshake fragments disagree on message length.");
+            }
+
+            // Copy fragment body at the correct offset, counting only bytes not seen before so that
+            // overlapping or retransmitted fragments cannot complete the message early.
+            Buffer.BlockCopy(plaintext, 12, buf.Body, fragmentOffset, fragmentLength);
+            for (int i = fragmentOffset; i < fragmentOffset + fragmentLength; i++)
+            {
+                if (!buf.Received[i])
                 {
-                    buf.Body[pos] = plaintext[12 + i];
+                    buf.Received[i] = true;
+                    buf.ReceivedBytes++;
                 }
             }
 
-            // Simple accounting: mark received range; use a bitmask-free approach via byte count.
-            // We accept slight over-counting on retransmits — it only affects early completion checks.
-            buf.ReceivedBytes += fragmentLength;
-
             if (buf.ReceivedBytes < buf.TotalLength)
-            {
-                complete = null;
                 return false;
-            }
 
             _buffers.Remove(key);
 

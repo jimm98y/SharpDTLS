@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace SharpDTLS.DTLS13.Messages
 {
-    public class EncryptedExtensionsDatagram : IDatagram
+    public class EncryptedExtensionsDatagram : IHandshakeDatagram
     {
         public List<ITlsExtension> Extensions { get; private set; } = new List<ITlsExtension>();
         public int SequenceNumber { get; set; } = 1;
@@ -20,7 +20,7 @@ namespace SharpDTLS.DTLS13.Messages
         {
             return new ITlsExtension[]
             {
-                new SupportedGroups(new ushort[] { 0x0017, 0x001d, 0x0018, 0x0019, 0x0100 }) // assigned value for the curve "x25519"
+                new SupportedGroups(new ushort[] { 0x001d }) // x25519
             };
         }
 
@@ -56,7 +56,15 @@ namespace SharpDTLS.DTLS13.Messages
 
                 ITlsExtension matching = extType switch
                 {
+                    ServerNameExtension.Type => new ServerNameExtension(),
+                    AlpnExtension.Type => new AlpnExtension(),
+                    RecordSizeLimitExtension.Type => new RecordSizeLimitExtension(),
+                    MaxFragmentLengthExtension.Type => new MaxFragmentLengthExtension(),
+                    CertificateTypeExtension.ClientType => new CertificateTypeExtension(CertificateTypeExtension.ClientType),
+                    CertificateTypeExtension.ServerType => new CertificateTypeExtension(CertificateTypeExtension.ServerType),
                     0x000a => new SupportedGroups(),
+                    0x000e => new UseSrtpExtension(),
+                    EarlyDataExtension.Type => new EarlyDataExtension(),
                     _ => null
                 };
 

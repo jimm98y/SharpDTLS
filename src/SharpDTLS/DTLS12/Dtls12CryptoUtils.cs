@@ -73,6 +73,37 @@ namespace SharpDTLS.DTLS12
             return PRF(preMasterSecret, "master secret", seed, 48, useSha384);
         }
 
+        // RFC 5705 §4: PRF(master_secret, label, client_random + server_random [+ context_length + context])
+        public static byte[] ExportKeyingMaterial(byte[] masterSecret, byte[] clientRandom, byte[] serverRandom,
+            string label, byte[] context, int length, bool useSha384 = false)
+        {
+            byte[] seed = BuildExporterSeed(clientRandom, serverRandom, context);
+            return PRF(masterSecret, label, seed, length, useSha384);
+        }
+
+        internal static byte[] BuildExporterSeed(byte[] clientRandom, byte[] serverRandom, byte[] context)
+        {
+            int contextLength = context == null ? 0 : 2 + context.Length;
+            byte[] seed = new byte[64 + contextLength];
+            Buffer.BlockCopy(clientRandom, 0, seed, 0, 32);
+            Buffer.BlockCopy(serverRandom, 0, seed, 32, 32);
+            if (context != null)
+            {
+                if (context.Length > 0xFFFF) throw new ArgumentException("Exporter context too long.", nameof(context));
+                seed[64] = (byte)(context.Length >> 8);
+                seed[65] = (byte)context.Length;
+                Buffer.BlockCopy(context, 0, seed, 66, context.Length);
+            }
+            return seed;
+        }
+
+        // RFC 7627 §4: master_secret = PRF(pre_master_secret, "extended master secret", session_hash)[0..47]
+        // where session_hash is the transcript hash up to and including ClientKeyExchange.
+        public static byte[] CalculateExtendedMasterSecret(byte[] preMasterSecret, byte[] sessionHash, bool useSha384 = false)
+        {
+            return PRF(preMasterSecret, "extended master secret", sessionHash, 48, useSha384);
+        }
+
         // Key block layout:
         //   AES-128-GCM (0xC02F, 0xC02B):  clientKey(16)+serverKey(16)+clientIV(4)+serverIV(4)   = 40 bytes, P_SHA256
         //   AES-256-GCM (0xC030, 0xC02C):  clientKey(32)+serverKey(32)+clientIV(4)+serverIV(4)   = 72 bytes, P_SHA384
@@ -124,9 +155,7 @@ namespace SharpDTLS.DTLS12
                 }
 
                 byte[] bytes = msgToHash.Bytes;
-                byte[] contribution = bytes.Skip(skip).Take(4)
-                    .Concat(bytes.Skip(skip + 4 + 8).Take(bytes.Length - skip - 4 - 8))
-                    .ToArray();
+                byte[] contribution = DtlsHandshakeHash.Contribution(bytes, skip);
 
                 hash.BlockUpdate(contribution, 0, contribution.Length);
             }
@@ -150,9 +179,7 @@ namespace SharpDTLS.DTLS12
                 else if (msg is ServerEncryptedDatagram se) { m = se.Datagram; skip = 0; }
 
                 byte[] bytes = m.Bytes;
-                byte[] contribution = bytes.Skip(skip).Take(4)
-                    .Concat(bytes.Skip(skip + 4 + 8).Take(bytes.Length - skip - 4 - 8))
-                    .ToArray();
+                byte[] contribution = DtlsHandshakeHash.Contribution(bytes, skip);
                 result.AddRange(contribution);
             }
             return result.ToArray();
@@ -228,10 +255,10 @@ namespace SharpDTLS.DTLS12
 
         public static (AsymmetricCipherKeyPair keyPair, X509Certificate certificate) GenerateSelfSignedEcCertificate()
         {
-            var ecCurve = ECNamedCurveTable.GetByName("P-256");
-            var domainParams = new ECDomainParameters(ecCurve.Curve, ecCurve.G, ecCurve.N, ecCurve.H);
+            // Named curve (OID) parameters: RFC 5480 §2.1.1 forbids explicit curve parameters in certificates,
+            // and platform validators (e.g. Apple's) reject them.
             var ecGenerator = new ECKeyPairGenerator();
-            ecGenerator.Init(new ECKeyGenerationParameters(domainParams, new SecureRandom()));
+            ecGenerator.Init(new ECKeyGenerationParameters(ECNamedCurveTable.GetOid("P-256"), new SecureRandom()));
             var keyPair = ecGenerator.GenerateKeyPair();
 
             var certGenerator = new X509V3CertificateGenerator();

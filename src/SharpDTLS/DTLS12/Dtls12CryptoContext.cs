@@ -24,6 +24,10 @@ namespace SharpDTLS.DTLS12
         public ulong ServerSequenceNumber { get; set; } = 0;
         public ulong ClientSequenceNumber { get; set; } = 0;
 
+        // Anti-replay windows for records sent by each side (RFC 6347 §4.1.2.6).
+        public RecordWindow ClientRecords { get; } = new RecordWindow();
+        public RecordWindow ServerRecords { get; } = new RecordWindow();
+
         public byte[] MasterSecret { get; }
         public byte[] ClientKey { get; }     // 16 bytes (AES-128) or 32 bytes (AES-256 / ChaCha20)
         public byte[] ServerKey { get; }

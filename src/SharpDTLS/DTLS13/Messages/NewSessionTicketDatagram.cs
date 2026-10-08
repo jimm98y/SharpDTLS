@@ -4,13 +4,16 @@ using System.Linq;
 
 namespace SharpDTLS.DTLS13.Messages
 {
-    public class NewSessionTicketDatagram : IDatagram
+    public class NewSessionTicketDatagram : IHandshakeDatagram
     {
         public uint TicketLifetime { get; set; }
         public uint TicketAgeAdd { get; set; }
         public byte[] TicketNonce { get; set; } = new byte[0];
         public byte[] Ticket { get; set; } = new byte[0];
         public byte[] Bytes { get; private set; }
+
+        /// <summary>max_early_data_size from the early_data extension (RFC 8446 §4.6.1), 0 when absent.</summary>
+        public uint MaxEarlyDataSize { get; set; }
 
         public int SequenceNumber { get; set; } = 0;
 
@@ -70,8 +73,24 @@ namespace SharpDTLS.DTLS13.Messages
             pos += 2;
             if (bytes.Length < pos + extensionsLength) throw new ArgumentException("Buffer truncated in extensions area.");
 
-            // For now we don't parse individual extensions; just skip
-            pos += extensionsLength;
+            // early_data is the only NewSessionTicket extension defined; others are ignored (RFC 8446 §4.6.1).
+            int extensionsEnd = pos + extensionsLength;
+            while (pos + 4 <= extensionsEnd)
+            {
+                ushort extType = (ushort)((bytes[pos] << 8) | bytes[pos + 1]);
+                int extLength = (bytes[pos + 2] << 8) | bytes[pos + 3];
+                if (pos + 4 + extLength > extensionsEnd)
+                    throw new DtlsException(AlertDescription.DecodeError, "Truncated NewSessionTicket extension.");
+                if (extType == EarlyDataExtension.Type)
+                {
+                    var earlyData = new EarlyDataExtension();
+                    earlyData.Read(pos, bytes);
+                    MaxEarlyDataSize = earlyData.MaxEarlyDataSize ?? throw new DtlsException(AlertDescription.DecodeError, "early_data without max_early_data_size.");
+                }
+                pos += 4 + extLength;
+            }
+            if (pos != extensionsEnd)
+                throw new DtlsException(AlertDescription.DecodeError, "Invalid NewSessionTicket extensions.");
 
             // Optional: validate that parsed length matches handshake length field
             if (length != pos - 12)
@@ -136,10 +155,13 @@ namespace SharpDTLS.DTLS13.Messages
                 pos += ticketLen;
             }
 
-            // extensions length (2 bytes) - none for now
-            int extensionsLength = 0;
+            // extensions: early_data when 0-RTT is allowed
+            var extension = MaxEarlyDataSize > 0 ? new EarlyDataExtension(MaxEarlyDataSize) : null;
+            int extensionsLength = extension?.CalculateLength() ?? 0;
             data[pos++] = (byte)((extensionsLength >> 8) & 0xFF);
             data[pos++] = (byte)(extensionsLength & 0xFF);
+            if (extension != null)
+                pos += extension.Write(pos, data);
 
             // record type
             data[pos++] = 0x16; // handshake record

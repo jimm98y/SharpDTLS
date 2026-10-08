@@ -5,15 +5,35 @@ using System.Linq;
 
 namespace SharpDTLS.DTLS13.Messages
 {
-    public class ClientHelloDatagram : IDatagram
+    public class ClientHelloDatagram : IHandshakeDatagram
     {
-        public List<ushort> CipherSuites = new List<ushort> { 0x1301, 0x1302, 0x1303 }; // TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256
+        public List<ushort> CipherSuites = new List<ushort>(Dtls13CipherSuite.Supported);
         public byte[] PublicKey { get; private set; }
         public List<ITlsExtension> Extensions { get; private set; }
         public int Epoch { get; set; } = 0;
         public int RecordSequenceNumber { get; set; }
+
+        /// <summary>Handshake message_seq (0 for the first ClientHello, 1 after a HelloRetryRequest).</summary>
+        public int SequenceNumber { get; set; } = 0;
         public byte[] ClientRandom { get; set; } = null;
+        public byte[] LegacySessionId { get; set; } = Array.Empty<byte>();
+        public byte[] LegacyCookie { get; set; } = Array.Empty<byte>();
         public byte[] Bytes { get; private set; }
+
+        /// <summary>
+        /// DTLS form (a DTLS record with a 12-byte handshake header, legacy version 0xFEFD and a legacy_cookie) or, when
+        /// false, TLS form (a TLS record with a 4-byte handshake header, legacy version 0x0303, no cookie).
+        /// </summary>
+        public bool Datagram { get; set; } = true;
+
+        /// <summary>
+        /// A ClientHello answering a HelloRetryRequest: in TLS its record version is 0x0303, as for every record but the
+        /// initial ClientHello, which may say 0x0301 (RFC 8446 §5.1).
+        /// </summary>
+        public bool AfterHelloRetryRequest { get; set; }
+
+        // Bytes before the ClientHello body: record header + handshake header.
+        private int HeaderLength => Datagram ? 25 : 9;
 
         public ClientHelloDatagram()
         { }
@@ -40,36 +60,53 @@ namespace SharpDTLS.DTLS13.Messages
         public void FromBytes(byte[] bytes)
         {
             if (bytes == null) throw new ArgumentNullException(nameof(bytes));
-            if (bytes.Length < 67) throw new ArgumentException("Buffer too small to be a valid ClientHello.");
+            int h = HeaderLength;
+            if (bytes.Length < h + 42) throw new ArgumentException("Buffer too small to be a valid ClientHello.");
             if (bytes[0] != 0x16) throw new InvalidDataException("Not a handshake record.");
 
             Bytes = bytes.ToArray();
-            Epoch = (bytes[3] << 8) | bytes[4];
-
-            long seq = 0;
-            for (int i = 5; i <= 10; i++)
+            if (Datagram)
             {
-                seq = (seq << 8) | bytes[i];
+                Epoch = (bytes[3] << 8) | bytes[4];
+
+                long seq = 0;
+                for (int i = 5; i <= 10; i++)
+                {
+                    seq = (seq << 8) | bytes[i];
+                }
+                RecordSequenceNumber = (int)seq;
+                SequenceNumber = (bytes[17] << 8) | bytes[18];
             }
-            RecordSequenceNumber = (int)seq; 
 
-            if (bytes.Length < 27 + 32) throw new ArgumentException("Buffer too small for ClientRandom.");
             ClientRandom = new byte[32];
-            Buffer.BlockCopy(bytes, 27, ClientRandom, 0, 32);
+            Buffer.BlockCopy(bytes, h + 2, ClientRandom, 0, 32);
 
-            if (bytes.Length < 63) throw new ArgumentException("Buffer truncated before cipher suites.");
-            int cipherSuitesLen = (bytes[61] << 8) | bytes[62];
-            int cipherSuitesEnd = 63 + cipherSuitesLen;
-            if (bytes.Length < cipherSuitesEnd + 2) throw new ArgumentException("Buffer truncated after cipher suites.");
+            int p = h + 34;
+            int sessionIdLen = bytes[p++];
+            if (sessionIdLen > 32 || bytes.Length < p + sessionIdLen + 1) throw new DtlsException(AlertDescription.DecodeError, "Invalid legacy_session_id.");
+            LegacySessionId = bytes.AsSpan(p, sessionIdLen).ToArray();
+            p += sessionIdLen;
+
+            if (Datagram)
+            {
+                int cookieLen = bytes[p++];
+                if (bytes.Length < p + cookieLen + 2) throw new DtlsException(AlertDescription.DecodeError, "Invalid legacy_cookie.");
+                LegacyCookie = bytes.AsSpan(p, cookieLen).ToArray();
+                p += cookieLen;
+            }
+
+            int cipherSuitesLen = (bytes[p] << 8) | bytes[p + 1];
+            p += 2;
+            if ((cipherSuitesLen & 1) != 0 || bytes.Length < p + cipherSuitesLen + 2) throw new DtlsException(AlertDescription.DecodeError, "Invalid cipher suites.");
 
             CipherSuites = new List<ushort>();
             for (int i = 0; i < cipherSuitesLen; i += 2)
             {
-                ushort suite = (ushort)((bytes[63 + i] << 8) | bytes[63 + i + 1]);
+                ushort suite = (ushort)((bytes[p + i] << 8) | bytes[p + i + 1]);
                 CipherSuites.Add(suite);
             }
 
-            int compLenOffset = 63 + cipherSuitesLen;
+            int compLenOffset = p + cipherSuitesLen;
             if (bytes.Length <= compLenOffset) throw new ArgumentException("Buffer truncated at compression methods length.");
             int compMethodsLen = bytes[compLenOffset];
             int compMethodsEnd = compLenOffset + 1 + compMethodsLen;
@@ -93,14 +130,29 @@ namespace SharpDTLS.DTLS13.Messages
 
                 ITlsExtension matching = extType switch
                 {
+                    ServerNameExtension.Type => new ServerNameExtension(),
+                    AlpnExtension.Type => new AlpnExtension(),
+                    RecordSizeLimitExtension.Type => new RecordSizeLimitExtension(),
+                    MaxFragmentLengthExtension.Type => new MaxFragmentLengthExtension(),
+                    CertificateTypeExtension.ClientType => new CertificateTypeExtension(CertificateTypeExtension.ClientType),
+                    CertificateTypeExtension.ServerType => new CertificateTypeExtension(CertificateTypeExtension.ServerType),
+                    StatusRequestExtension.Type => new StatusRequestExtension(),
+                    CompressCertificateExtension.Type => new CompressCertificateExtension(),
+                    PostHandshakeAuthExtension.Type => new PostHandshakeAuthExtension(),
+                    CertificateAuthoritiesExtension.Type => new CertificateAuthoritiesExtension(),
+                    SignatureAlgorithmsCertExtension.Type => new SignatureAlgorithmsCertExtension(),
+                    ConnectionIdExtension.Type => new ConnectionIdExtension(),
                     0x0033 => new ClientKeyShareExtension(),
                     0x002b => new ClientSupportedVersions(),
                     0x000d => new ClientSignatureAlgorithms(),
                     0x0016 => new EncryptThenMac(),
                     0x000a => new SupportedGroups(),
                     0x002c => new CookieExtension(),
-                    0x000f => new UseSrtpExtension(),
-                    _ => throw new NotSupportedException()
+                    0x000e => new UseSrtpExtension(),
+                    PskKeyExchangeModesExtension.Type => new PskKeyExchangeModesExtension(),
+                    ClientPreSharedKeyExtension.Type => new ClientPreSharedKeyExtension(),
+                    EarlyDataExtension.Type => new EarlyDataExtension(),
+                    _ => new UnknownExtension()
                 };
 
                 if (matching != null)
@@ -112,7 +164,7 @@ namespace SharpDTLS.DTLS13.Messages
 
                     if(matching is ClientKeyShareExtension keyShareExt)
                     {
-                        PublicKey = keyShareExt.PublicKey;
+                        PublicKey = keyShareExt.GetKeyShare(0x001d); // x25519 is the only group implemented
                     }
                 }
                 else
@@ -126,7 +178,12 @@ namespace SharpDTLS.DTLS13.Messages
 
         public byte[] ToBytes()
         {
-            byte[] clientHello = new byte[2048];
+            // Sized from the content: post-quantum key shares alone exceed a kilobyte.
+            byte[] clientHello = new byte[512 + 2 * CipherSuites.Count + LegacySessionId.Length + LegacyCookie.Length
+                                          + Extensions.Sum(e => e.CalculateLength())];
+
+            if (!Datagram)
+                return ToTlsBytes(clientHello);
 
             // DTLS record header
             clientHello[0] = 0x16; // TLS record type 22 (Handshake)
@@ -134,8 +191,8 @@ namespace SharpDTLS.DTLS13.Messages
             clientHello[2] = 0xFD; // DTLS 1.2 minor version
             clientHello[3] = (byte)((Epoch >> 8) & 0xff); // Epoch
             clientHello[4] = (byte)((Epoch) & 0xff); // Epoch
-            clientHello[5] = (byte)((RecordSequenceNumber >> 40) & 0xff); // Record sequence number
-            clientHello[6] = (byte)((RecordSequenceNumber >> 32) & 0xff); // Record sequence number
+            clientHello[5] = (byte)(((long)RecordSequenceNumber >> 40) & 0xff); // Record sequence number
+            clientHello[6] = (byte)(((long)RecordSequenceNumber >> 32) & 0xff); // Record sequence number
             clientHello[7] = (byte)((RecordSequenceNumber >> 24) & 0xff); // Record sequence number
             clientHello[8] = (byte)((RecordSequenceNumber >> 16) & 0xff); // Record sequence number
             clientHello[9] = (byte)((RecordSequenceNumber >> 8) & 0xff); // Record sequence number
@@ -150,7 +207,7 @@ namespace SharpDTLS.DTLS13.Messages
             clientHello[16] = 0x00; // Length (placeholder)
 
             // Handshake reconstruction data
-            ushort messageSequenceNumber = 0;
+            ushort messageSequenceNumber = (ushort)SequenceNumber;
             uint fragmentOffset = 0;
             uint fragmentLength = 0;
             clientHello[17] = (byte)((messageSequenceNumber >> 8) & 0xff);
@@ -168,26 +225,31 @@ namespace SharpDTLS.DTLS13.Messages
 
             Buffer.BlockCopy(ClientRandom, 0, clientHello, 27, ClientRandom.Length);
 
-            clientHello[59] = 0x00; // Legacy Session ID, not used in DTLS 1.3
-            clientHello[60] = 0x00; // Legacy Cookie
+            int p = 59;
+            clientHello[p++] = (byte)LegacySessionId.Length;
+            Buffer.BlockCopy(LegacySessionId, 0, clientHello, p, LegacySessionId.Length);
+            p += LegacySessionId.Length;
+            clientHello[p++] = (byte)LegacyCookie.Length; // MUST be empty for DTLS 1.3-only clients
+            Buffer.BlockCopy(LegacyCookie, 0, clientHello, p, LegacyCookie.Length);
+            p += LegacyCookie.Length;
 
-            clientHello[61] = (byte)((CipherSuites.Count * 2 >> 8) & 0xff); // Cipher Suites length
-            clientHello[62] = (byte)((CipherSuites.Count * 2) & 0xff); // Cipher Suites length
+            clientHello[p++] = (byte)((CipherSuites.Count * 2 >> 8) & 0xff); // Cipher Suites length
+            clientHello[p++] = (byte)((CipherSuites.Count * 2) & 0xff); // Cipher Suites length
             for (int i = 0; i < CipherSuites.Count; i++)
             {
-                clientHello[63 + i * 2] = (byte)((CipherSuites[i] >> 8) & 0xff);
-                clientHello[64 + i * 2] = (byte)(CipherSuites[i] & 0xff);
+                clientHello[p++] = (byte)((CipherSuites[i] >> 8) & 0xff);
+                clientHello[p++] = (byte)(CipherSuites[i] & 0xff);
             }
 
             // DTLS 1.3 no longer allows compression
-            clientHello[63 + CipherSuites.Count * 2] = 0x01; // Compression Methods length
-            clientHello[64 + CipherSuites.Count * 2] = 0x00; // Compression Method 0 (null)
+            clientHello[p++] = 0x01; // Compression Methods length
+            clientHello[p++] = 0x00; // Compression Method 0 (null)
 
-            // Extensions 
+            // Extensions
             int extensionsLength = Extensions.Select(x => x.CalculateLength()).Sum();
-            clientHello[65 + CipherSuites.Count * 2] = (byte)((extensionsLength >> 8) & 0xff); // Extensions length in bytes (placeholder)
-            clientHello[66 + CipherSuites.Count * 2] = (byte)(extensionsLength & 0xff); // Extensions length in bytes (placeholder)
-            int nextExtensionOffset = 67 + CipherSuites.Count * 2; // Starting offset for extensions
+            clientHello[p++] = (byte)((extensionsLength >> 8) & 0xff); // Extensions length in bytes
+            clientHello[p++] = (byte)(extensionsLength & 0xff); // Extensions length in bytes
+            int nextExtensionOffset = p; // Starting offset for extensions
             foreach (var extension in Extensions)
             {
                 int extensionLength = extension.Write(nextExtensionOffset, clientHello);
@@ -213,131 +275,169 @@ namespace SharpDTLS.DTLS13.Messages
 
             return Bytes;
         }
+
+        // TLS: record header (version 0x0301 for compatibility, RFC 8446 §5.1), 4-byte handshake header, no cookie.
+        private byte[] ToTlsBytes(byte[] buffer)
+        {
+            var body = new TlsWriter()
+                .WriteUInt16(0x0303)
+                .WriteBytes(ClientRandom)
+                .WriteOpaque8(LegacySessionId)
+                .WriteUInt16List16(CipherSuites)
+                .WriteOpaque8(new byte[] { 0 });
+            int extensionsLength = Extensions.Sum(x => x.CalculateLength());
+            int offset = 0;
+            foreach (var extension in Extensions)
+                offset += extension.Write(offset, buffer);
+            body.WriteOpaque16(buffer.AsSpan(0, extensionsLength).ToArray());
+            byte[] message = body.ToArray();
+            Bytes = new TlsWriter().WriteUInt8(0x16).WriteUInt16(AfterHelloRetryRequest ? 0x0303 : 0x0301).WriteUInt16(4 + message.Length)
+                .WriteUInt8(0x01).WriteUInt24(message.Length).WriteBytes(message).ToArray();
+            return Bytes;
+        }
     }
 
    
 
     public class ClientKeyShareExtension : ITlsExtension
     {
-        public ushort KeyType { get; private set; }
-        public byte[] PublicKey { get; private set; }
+        /// <summary>All offered key shares in client preference order.</summary>
+        public List<(ushort Group, byte[] KeyExchange)> Entries { get; private set; } = new();
+
+        // Convenience accessors for the first offered share.
+        public ushort KeyType => Entries.Count > 0 ? Entries[0].Group : (ushort)0;
+        public byte[] PublicKey => Entries.Count > 0 ? Entries[0].KeyExchange : null;
 
         public ClientKeyShareExtension()
         { }
 
         public ClientKeyShareExtension(ushort keyType, byte[] publicKey)
         {
-            this.KeyType = keyType;
-            this.PublicKey = publicKey;
+            Entries.Add((keyType, publicKey));
+        }
+
+        public byte[] GetKeyShare(ushort group)
+        {
+            foreach (var entry in Entries)
+                if (entry.Group == group)
+                    return entry.KeyExchange;
+            return null;
         }
 
         public int CalculateLength()
         {
-            return 10 + this.PublicKey.Length;
+            return 6 + Entries.Sum(e => 4 + e.KeyExchange.Length);
         }
 
         public int Read(int offset, byte[] source)
         {
             if (source == null) throw new ArgumentNullException(nameof(source));
-            if (offset < 0) throw new ArgumentOutOfRangeException(nameof(offset));
+            if (source.Length < offset + 6) throw new DtlsException(AlertDescription.DecodeError, "Truncated key_share extension.");
 
             ushort extType = (ushort)((source[offset] << 8) | source[offset + 1]);
             if (extType != 0x0033) throw new InvalidDataException($"Unexpected extension type: 0x{extType:X4}");
 
-            ushort extensionLength = (ushort)((source[offset + 2] << 8) | source[offset + 3]);
-            ushort keyShareDataLength = (ushort)((source[offset + 4] << 8) | source[offset + 5]);
-            this.KeyType = (ushort)((source[offset + 6] << 8) | source[offset + 7]);
-            ushort publicKeyLength = (ushort)((source[offset + 8] << 8) | source[offset + 9]);
+            int extensionLength = (source[offset + 2] << 8) | source[offset + 3];
+            int listLength = (source[offset + 4] << 8) | source[offset + 5];
+            if (extensionLength != 2 + listLength || source.Length < offset + 4 + extensionLength)
+                throw new DtlsException(AlertDescription.DecodeError, "Inconsistent key_share extension length.");
 
-            // basic consistency checks based on the Write layout:
-            if (extensionLength != (ushort)(2 + keyShareDataLength))
-                throw new InvalidDataException("Inconsistent extension length for KeyShare extension.");
+            Entries = new();
+            int pos = offset + 6;
+            int end = pos + listLength;
+            while (pos < end)
+            {
+                if (pos + 4 > end) throw new DtlsException(AlertDescription.DecodeError, "Truncated key_share entry.");
+                ushort group = (ushort)((source[pos] << 8) | source[pos + 1]);
+                int keyLength = (source[pos + 2] << 8) | source[pos + 3];
+                pos += 4;
+                if (keyLength == 0 || pos + keyLength > end) throw new DtlsException(AlertDescription.DecodeError, "Invalid key_share entry.");
+                Entries.Add((group, source.AsSpan(pos, keyLength).ToArray()));
+                pos += keyLength;
+            }
 
-            // keyShareDataLength should equal 2 (key type) + 2 (pub key length) + publicKeyLength
-            if (keyShareDataLength != (ushort)(2 + 2 + publicKeyLength))
-                throw new InvalidDataException("Inconsistent key share data length for KeyShare extension.");
-
-            if (source.Length < offset + 10 + publicKeyLength)
-                throw new ArgumentException("Buffer too small to contain the declared public key.");
-
-            // extract public key bytes
-            this.PublicKey = new byte[publicKeyLength];
-            Buffer.BlockCopy(source, offset + 10, this.PublicKey, 0, publicKeyLength);
-
-            // return total bytes consumed for this extension (10 bytes header + public key)
-            return 10 + publicKeyLength;
+            return 4 + extensionLength;
         }
 
         public int Write(int offset, byte[] destination)
         {
+            int listLength = Entries.Sum(e => 4 + e.KeyExchange.Length);
+            int extensionLength = 2 + listLength;
+
             destination[offset] = 0x00; // Extension type 0x0033 (KeyShare)
-            destination[offset + 1] = 0x33; // Extension type 0x0033 (KeyShare)
+            destination[offset + 1] = 0x33;
+            destination[offset + 2] = (byte)((extensionLength >> 8) & 0xff);
+            destination[offset + 3] = (byte)(extensionLength & 0xff);
+            destination[offset + 4] = (byte)((listLength >> 8) & 0xff);
+            destination[offset + 5] = (byte)(listLength & 0xff);
 
-            int extensionLength = 2 + 2 + 2 + this.PublicKey.Length;
-            destination[offset + 2] = (byte)((extensionLength >> 8) & 0xff); // Extension length 
-            destination[offset + 3] = (byte)(extensionLength & 0xff); // Extension length 
+            int pos = offset + 6;
+            foreach (var (group, key) in Entries)
+            {
+                destination[pos++] = (byte)(group >> 8);
+                destination[pos++] = (byte)group;
+                destination[pos++] = (byte)(key.Length >> 8);
+                destination[pos++] = (byte)key.Length;
+                Buffer.BlockCopy(key, 0, destination, pos, key.Length);
+                pos += key.Length;
+            }
 
-            int keyShareDataLength = 2 + 2 + this.PublicKey.Length;
-            destination[offset + 4] = (byte)((keyShareDataLength >> 8) & 0xff); // Extension length 
-            destination[offset + 5] = (byte)(keyShareDataLength & 0xff); // Extension length 
-
-            destination[offset + 6] = (byte)((KeyType >> 8) & 0xff); // assigned value for x25519 (key exchange via curve25519)
-            destination[offset + 7] = (byte)(KeyType & 0xff); // assigned value for x25519 (key exchange via curve25519)
-
-            destination[offset + 8] = (byte)((this.PublicKey.Length >> 8) & 0xff); //  bytes of public key follows
-            destination[offset + 9] = (byte)(this.PublicKey.Length & 0xff); //  bytes of public key follows
-            Buffer.BlockCopy(this.PublicKey, 0, destination, offset + 10, this.PublicKey.Length);
-
-            return 10 + this.PublicKey.Length; // total length of the extension data
+            return 4 + extensionLength;
         }
     }
 
     public class ClientSupportedVersions : ITlsExtension
     {
+        public const ushort Dtls13 = 0xFEFC;
+        public const ushort Dtls12 = 0xFEFD;
+        public const ushort Tls13 = 0x0304;
+
+        public List<ushort> Versions { get; private set; } = new List<ushort> { Dtls13 };
+
         public ClientSupportedVersions()
         { }
 
+        public ClientSupportedVersions(params ushort[] versions) => Versions = versions.ToList();
+
         public int CalculateLength()
         {
-            return 7;
+            return 5 + 2 * Versions.Count;
         }
 
         public int Read(int offset, byte[] source)
         {
             if (source == null) throw new ArgumentNullException(nameof(source));
-            if (offset < 0) throw new ArgumentOutOfRangeException(nameof(offset));
-            if (source.Length < offset + 7) throw new ArgumentException("Not enough data for SupportedVersions extension.");
+            if (source.Length < offset + 5) throw new DtlsException(AlertDescription.DecodeError, "Truncated supported_versions extension.");
 
             ushort extType = (ushort)((source[offset] << 8) | source[offset + 1]);
             if (extType != 0x002b) throw new InvalidDataException($"Unexpected extension type: 0x{extType:X4}");
 
-            ushort extLen = (ushort)((source[offset + 2] << 8) | source[offset + 3]);
-            if (extLen != 3) throw new InvalidDataException("Invalid SupportedVersions extension length.");
+            int extLen = (source[offset + 2] << 8) | source[offset + 3];
+            int listLen = source[offset + 4];
+            if (extLen != 1 + listLen || (listLen & 1) != 0 || listLen == 0 || source.Length < offset + 4 + extLen)
+                throw new DtlsException(AlertDescription.DecodeError, "Invalid supported_versions extension.");
 
-            byte versionsListLen = source[offset + 4];
-            if (versionsListLen != 2) throw new InvalidDataException("Unexpected versions list length in SupportedVersions extension.");
+            Versions = new List<ushort>();
+            for (int i = 0; i < listLen; i += 2)
+                Versions.Add((ushort)((source[offset + 5 + i] << 8) | source[offset + 6 + i]));
 
-            byte major = source[offset + 5];
-            byte minor = source[offset + 6];
-
-            // Validate expected DTLS 1.3 version (0xFE, 0xFC) as written by Write()
-            if (major != 0xFE || minor != 0xFC)
-                throw new InvalidDataException($"Unsupported DTLS version: 0x{major:X2} 0x{minor:X2}");
-
-            // Total bytes consumed by this extension (header + payload)
-            return 7;
+            return 4 + extLen;
         }
 
         public int Write(int offset, byte[] destination)
         {
+            int listLen = 2 * Versions.Count;
             destination[offset] = 0x00;
             destination[offset + 1] = 0x2b; // Extension type 0x002b (Supported Versions)
-            destination[offset + 2] = 0x00; // Extension length
-            destination[offset + 3] = 0x03; // Extension length - 3 bytes follow
-            destination[offset + 4] = 0x02; // Length of versions list (2 bytes)
-            destination[offset + 5] = 0xfe; // DTLS 1.3 major version
-            destination[offset + 6] = 0xfc; // DTLS 1.3 minor version
-            return 7; // total length of the extension data
+            destination[offset + 2] = (byte)((1 + listLen) >> 8);
+            destination[offset + 3] = (byte)(1 + listLen);
+            destination[offset + 4] = (byte)listLen;
+            for (int i = 0; i < Versions.Count; i++)
+            {
+                destination[offset + 5 + 2 * i] = (byte)(Versions[i] >> 8);
+                destination[offset + 6 + 2 * i] = (byte)Versions[i];
+            }
+            return 5 + listLen;
         }
     }
 
@@ -551,7 +651,7 @@ namespace SharpDTLS.DTLS13.Messages
             if (source.Length < offset + 6) throw new ArgumentException("Not enough data for UseSrtp extension header.");
 
             ushort extType = (ushort)((source[offset] << 8) | source[offset + 1]);
-            if (extType != 0x000f) throw new InvalidDataException($"Unexpected extension type: 0x{extType:X4}");
+            if (extType != 0x000e) throw new InvalidDataException($"Unexpected extension type: 0x{extType:X4}");
 
             ushort extensionLength = (ushort)((source[offset + 2] << 8) | source[offset + 3]);
             ushort profileListLength = (ushort)((source[offset + 4] << 8) | source[offset + 5]);
@@ -592,7 +692,7 @@ namespace SharpDTLS.DTLS13.Messages
         public int Write(int offset, byte[] destination)
         {
             destination[offset] = 0x00;
-            destination[offset + 1] = 0x0f; // extension type 0x000f (Use SRTP)
+            destination[offset + 1] = 0x0e; // extension type 0x000e (use_srtp, RFC 5764)
 
             int extensionLength = 2 + 2 * this.SrtpProtectionProfiles.Length + 1 + this.MasterKeyIdentifier.Length;
             destination[offset + 2] = (byte)((extensionLength >> 8) & 0xff); // extension length

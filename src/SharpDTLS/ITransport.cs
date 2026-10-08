@@ -21,10 +21,12 @@
 
 using System;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace SharpSRTP.UDP
@@ -164,88 +166,115 @@ namespace SharpSRTP.UDP
         void Send(byte[] buf);
     }
 
-    public class ServerTransport : IServerTransport
+    public class ServerTransport : IServerTransport, IDisposable
     {
-        private readonly object _listening;
+        private readonly Socket _listenSocket;
+        private readonly CancellationTokenSource _cts = new CancellationTokenSource();
         private readonly ConcurrentDictionary<string, UdpTransport> _activeSessions;
         public event EventHandler<byte[]> OnDataReceived;
 
-        public ServerTransport()
+        /// <summary>The bound local endpoint (useful when binding to port 0).</summary>
+        public IPEndPoint LocalEndpoint { get; }
+
+        public ServerTransport() : this(IPEndPoint.Parse("0.0.0.0:8888"))
         {
-            Socket listenSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-            listenSocket.ReceiveTimeout = 30000;
+        }
+
+        public ServerTransport(IPEndPoint localEndpoint)
+        {
+            _listenSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            _listenSocket.ReceiveTimeout = 1000;
 
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
                 // disables the SocketException on client hard crash
                 const int SIO_UDP_CONNRESET = -1744830452;
-                listenSocket.IOControl((IOControlCode)SIO_UDP_CONNRESET, new byte[] { 0, 0, 0, 0 }, null);
-                listenSocket.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.PacketInformation, true);
+                _listenSocket.IOControl((IOControlCode)SIO_UDP_CONNRESET, new byte[] { 0, 0, 0, 0 }, null);
+                _listenSocket.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.PacketInformation, true);
             }
 
-            EndPoint localEndpoint = IPEndPoint.Parse("0.0.0.0:8888");
-            EndPoint remoteEndpoint = new IPEndPoint(IPAddress.Any, 0);
             _activeSessions = new ConcurrentDictionary<string, UdpTransport>();
 
-            listenSocket.Bind(localEndpoint);
+            _listenSocket.Bind(localEndpoint);
+            LocalEndpoint = (IPEndPoint)_listenSocket.LocalEndPoint;
 
-            _listening = Task.Run(() =>
+            // Receive loops block, so they run on dedicated threads rather than thread-pool threads.
+            StartLongRunning(ListenLoop);
+        }
+
+        private void ListenLoop()
+        {
+            byte[] buffer = new byte[UdpTransport.MTU];
+            EndPoint remoteEndpoint = new IPEndPoint(IPAddress.Any, 0);
+
+            while (!_cts.IsCancellationRequested)
             {
-                byte[] buffer = new byte[UdpTransport.MTU];
-
-                while (true)
+                int length = 0;
+                try
                 {
-                    int length = 0;
+                    length = _listenSocket.ReceiveFrom(buffer, ref remoteEndpoint);
+                }
+                catch (SocketException ex) when (ex.SocketErrorCode == SocketError.TimedOut)
+                {
+                    continue;
+                }
+                catch (SocketException ex)
+                {
+                    Debug.WriteLine(ex.Message);
+                    continue;
+                }
+                catch (ObjectDisposedException)
+                {
+                    return;
+                }
+
+                if (length <= 0)
+                    continue;
+
+                // copy: ReceiveFrom may reuse the endpoint instance on the next call
+                var sender = new IPEndPoint(((IPEndPoint)remoteEndpoint).Address, ((IPEndPoint)remoteEndpoint).Port);
+                byte[] datagram = buffer.AsSpan(0, length).ToArray();
+
+                if (_activeSessions.TryGetValue(sender.ToString(), out UdpTransport transport))
+                {
+                    // current session; drop the datagram when the queue is full (the peer retransmits)
+                    if (!transport.TryAddToReceiveQueue(datagram))
+                        Debug.WriteLine($"Receive queue full for {sender}, dropping datagram");
+                    continue;
+                }
+
+                transport = new UdpTransport(_listenSocket, sender, UdpTransport.MTU, (t) => _activeSessions.TryRemove(t.RemoteEndpoint, out _));
+                if (_activeSessions.TryAdd(sender.ToString(), transport))
+                {
+                    transport.TryAddToReceiveQueue(datagram);
+                    StartLongRunning(() => SessionLoop(sender, transport));
+                }
+            }
+        }
+
+        private void SessionLoop(EndPoint sender, UdpTransport transport)
+        {
+            byte[] receiveBuffer = new byte[UdpTransport.MTU];
+            while (!_cts.IsCancellationRequested)
+            {
+                int len = transport.Receive(receiveBuffer, 0, receiveBuffer.Length, 1000);
+                if (len > 0)
+                {
                     try
                     {
-                        length = listenSocket.ReceiveFrom(buffer, ref remoteEndpoint);
+                        OnDataReceived?.Invoke(sender, receiveBuffer.AsSpan(0, len).ToArray());
                     }
-                    catch (SocketException ex)
+                    catch (Exception ex)
                     {
-                        Console.WriteLine(ex.Message);
-                    }
-
-                    if (length > 0)
-                    {
-                        UdpTransport transport;
-                        if (_activeSessions.TryGetValue(remoteEndpoint.ToString(), out transport))
-                        {
-                            // current session
-                            if (!transport.TryAddToReceiveQueue(buffer.Take(length).ToArray()))
-                            {
-                                throw new Exception("Receive queue full!");
-                            }
-                        }
-                        else
-                        {
-                            transport = new UdpTransport(listenSocket, remoteEndpoint, UdpTransport.MTU, (t) => _activeSessions.TryRemove(t.RemoteEndpoint, out _));
-
-                            if (_activeSessions.TryAdd(remoteEndpoint.ToString(), transport))
-                            {
-                                transport.TryAddToReceiveQueue(buffer.Take(length).ToArray());
-
-                                var session = Task.Run(() =>
-                                {
-                                    byte[] receiveBuffer = new byte[UdpTransport.MTU];
-                                    while (true)
-                                    {
-                                        int len = transport.Receive(receiveBuffer, 1000);
-                                        if (len > 0)
-                                        {
-                                            OnDataReceived?.Invoke(remoteEndpoint, receiveBuffer.AsSpan(0, len).ToArray());
-                                        }
-                                    }
-                                });
-                            }
-                        }
+                        Debug.WriteLine($"Receive handler failed: {ex.Message}");
                     }
                 }
-            });
+            }
         }
 
         public void Send(EndPoint endpoint, byte[] buf)
         {
-            if(_activeSessions.TryGetValue(endpoint.ToString(), out UdpTransport transport))
+            if (_activeSessions.TryGetValue(endpoint.ToString(), out UdpTransport transport))
             {
                 transport.Send(buf, 0, buf.Length);
             }
@@ -266,30 +295,59 @@ namespace SharpSRTP.UDP
                 throw new Exception("No active session");
             }
         }
+
+        public void Dispose()
+        {
+            _cts.Cancel();
+            _listenSocket.Dispose();
+        }
+
+        internal static void StartLongRunning(Action loop)
+            => Task.Factory.StartNew(loop, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
     }
 
-    public class ClientTransport : IClientTransport
+    public class ClientTransport : IClientTransport, IDisposable
     {
+        private readonly Socket _socket;
         private readonly UdpTransport _udpClientTransport;
-        private readonly object _receiving;
+        private readonly CancellationTokenSource _cts = new CancellationTokenSource();
         public event EventHandler<byte[]> OnDataReceived;
 
-        public ClientTransport()
+        public ClientTransport() : this(IPEndPoint.Parse("127.0.0.1:8888"))
         {
-            Socket socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-            IPEndPoint remoteEndpoint = IPEndPoint.Parse("127.0.0.1:8888");
-            socket.Connect(remoteEndpoint);
+        }
 
-            _udpClientTransport = new UdpTransport(socket);
-            _receiving = Task.Run(() =>
+        public ClientTransport(IPEndPoint remoteEndpoint)
+        {
+            _socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            _socket.Connect(remoteEndpoint);
+
+            _udpClientTransport = new UdpTransport(_socket);
+            ServerTransport.StartLongRunning(() =>
             {
                 byte[] buffer = new byte[UdpTransport.MTU];
-                while (true)
+                while (!_cts.IsCancellationRequested)
                 {
-                    int len = _udpClientTransport.Receive(buffer, 1000);
+                    int len;
+                    try
+                    {
+                        len = _udpClientTransport.Receive(buffer, 0, buffer.Length, 1000);
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        return;
+                    }
+
                     if (len > 0)
                     {
-                        OnDataReceived?.Invoke(remoteEndpoint, buffer.AsSpan(0, len).ToArray());
+                        try
+                        {
+                            OnDataReceived?.Invoke(remoteEndpoint, buffer.AsSpan(0, len).ToArray());
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"Receive handler failed: {ex.Message}");
+                        }
                     }
                 }
             });
@@ -298,6 +356,12 @@ namespace SharpSRTP.UDP
         public void Send(byte[] buf)
         {
             _udpClientTransport.Send(buf, 0, buf.Length);
+        }
+
+        public void Dispose()
+        {
+            _cts.Cancel();
+            _socket.Dispose();
         }
     }
 }

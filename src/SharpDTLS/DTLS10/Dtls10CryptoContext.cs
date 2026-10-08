@@ -14,6 +14,10 @@ namespace SharpDTLS.DTLS10
         public ulong ClientSequenceNumber { get; set; } = 0;
         public ulong ServerSequenceNumber { get; set; } = 0;
 
+        // Anti-replay windows for records sent by each side (RFC 6347 §4.1.2.6).
+        public RecordWindow ClientRecords { get; } = new RecordWindow();
+        public RecordWindow ServerRecords { get; } = new RecordWindow();
+
         public Dtls10CryptoContext(byte[] masterSecret,
             byte[] clientMacKey, byte[] serverMacKey,
             byte[] clientKey, byte[] serverKey)

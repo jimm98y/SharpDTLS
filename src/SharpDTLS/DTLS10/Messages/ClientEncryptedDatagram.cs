@@ -41,26 +41,12 @@ namespace SharpDTLS.DTLS10.Messages
             for (int i = 5; i <= 10; i++) seq = (seq << 8) | bytes[i];
             SequenceNumber = seq;
 
-            ushort recordLen = (ushort)((bytes[11] << 8) | bytes[12]);
+            byte[] fragment = Dtls10RecordProtection.Open(bytes, _ctx.ClientKey, _ctx.ClientMacKey, Epoch, SequenceNumber, ContentType);
 
-            byte[] iv = new byte[16];
-            Buffer.BlockCopy(bytes, 13, iv, 0, 16);
-
-            byte[] ciphertext = new byte[recordLen - 16];
-            Buffer.BlockCopy(bytes, 29, ciphertext, 0, ciphertext.Length);
-
-            byte[] decrypted = CbcDecrypt(_ctx.ClientKey, iv, ciphertext);
-
-            int padLen      = decrypted[decrypted.Length - 1] + 1;
-            int macLen      = 20;
-            int fragmentLen = decrypted.Length - padLen - macLen;
-
-            byte[] fragment    = decrypted.Take(fragmentLen).ToArray();
-            byte[] receivedMac = decrypted.Skip(fragmentLen).Take(macLen).ToArray();
-            byte[] expectedMac = ServerEncryptedDatagram.ComputeMac(_ctx.ClientMacKey, Epoch, SequenceNumber, ContentType, fragment);
-
-            if (!receivedMac.SequenceEqual(expectedMac))
-                throw new Exception("MAC verification failed on client record.");
+            // Mark only after the record authenticated (RFC 6347 §4.1.2.6).
+            if (_ctx.ClientRecords.IsDuplicate(SequenceNumber))
+                throw new DtlsRecordDiscardedException($"Replayed record {SequenceNumber}");
+            _ctx.ClientRecords.Mark(SequenceNumber);
 
             if (ContentType == 0x16)
             {
@@ -132,16 +118,6 @@ namespace SharpDTLS.DTLS10.Messages
         {
             var cipher = new CbcBlockCipher(new AesEngine());
             cipher.Init(true, new ParametersWithIV(new KeyParameter(key), iv));
-            byte[] result = new byte[data.Length];
-            for (int i = 0; i < data.Length; i += 16)
-                cipher.ProcessBlock(data, i, result, i);
-            return result;
-        }
-
-        private static byte[] CbcDecrypt(byte[] key, byte[] iv, byte[] data)
-        {
-            var cipher = new CbcBlockCipher(new AesEngine());
-            cipher.Init(false, new ParametersWithIV(new KeyParameter(key), iv));
             byte[] result = new byte[data.Length];
             for (int i = 0; i < data.Length; i += 16)
                 cipher.ProcessBlock(data, i, result, i);
