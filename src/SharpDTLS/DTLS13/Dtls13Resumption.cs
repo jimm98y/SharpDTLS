@@ -9,8 +9,10 @@ namespace SharpDTLS.DTLS13
     /// </summary>
     public sealed class Dtls13SessionTicket
     {
-        internal Dtls13SessionTicket(byte[] ticket, uint lifetimeSeconds, uint ageAdd, ushort cipherSuite, byte[] psk, byte[] serverCertificate)
+        internal Dtls13SessionTicket(byte[] ticket, uint lifetimeSeconds, uint ageAdd, ushort cipherSuite, byte[] psk, byte[] serverCertificate,
+            uint maxEarlyDataSize = 0)
         {
+            MaxEarlyDataSize = maxEarlyDataSize;
             Ticket = ticket;
             LifetimeSeconds = lifetimeSeconds;
             AgeAdd = ageAdd;
@@ -32,6 +34,9 @@ namespace SharpDTLS.DTLS13
         public byte[] ServerCertificate { get; }
 
         public DateTime ReceivedUtc { get; }
+
+        /// <summary>How much 0-RTT data the server accepts with this ticket (0: none).</summary>
+        public uint MaxEarlyDataSize { get; }
 
         public bool IsExpired => DateTime.UtcNow - ReceivedUtc >= TimeSpan.FromSeconds(LifetimeSeconds);
 
@@ -79,13 +84,15 @@ namespace SharpDTLS.DTLS13
         public uint AgeAdd { get; init; }
         public DateTime IssuedUtc { get; init; }
         public byte[] ClientCertificate { get; init; }
+        public uint MaxEarlyDataSize { get; init; }
 
         public byte[] Seal(SessionTicketKeys keys)
             => keys.Seal(new TlsWriter()
                 .WriteUInt8(StateVersion)
                 .WriteUInt16(CipherSuite)
                 .WriteUInt32(AgeAdd)
-                .WriteUInt32((uint)(new DateTimeOffset(IssuedUtc).ToUnixTimeSeconds() >> 32)).WriteUInt32((uint)new DateTimeOffset(IssuedUtc).ToUnixTimeSeconds())
+                .WriteUInt32(MaxEarlyDataSize)
+                .WriteUInt32((uint)(new DateTimeOffset(IssuedUtc).ToUnixTimeMilliseconds() >> 32)).WriteUInt32((uint)new DateTimeOffset(IssuedUtc).ToUnixTimeMilliseconds())
                 .WriteOpaque8(Psk)
                 .WriteOpaque24(ClientCertificate ?? Array.Empty<byte>())
                 .ToArray());
@@ -102,7 +109,8 @@ namespace SharpDTLS.DTLS13
                 r.ReadUInt8();
                 ushort cipherSuite = r.ReadUInt16();
                 uint ageAdd = r.ReadUInt32();
-                var issuedUtc = DateTimeOffset.FromUnixTimeSeconds(((long)r.ReadUInt32() << 32) | r.ReadUInt32()).UtcDateTime;
+                uint maxEarlyDataSize = r.ReadUInt32();
+                var issuedUtc = DateTimeOffset.FromUnixTimeMilliseconds(((long)r.ReadUInt32() << 32) | r.ReadUInt32()).UtcDateTime;
                 byte[] psk = r.ReadOpaque8();
                 byte[] certificate = r.ReadOpaque24();
                 r.EnsureEnd();
@@ -110,7 +118,7 @@ namespace SharpDTLS.DTLS13
                     return null;
                 return new Dtls13TicketState
                 {
-                    CipherSuite = cipherSuite, AgeAdd = ageAdd, IssuedUtc = issuedUtc, Psk = psk,
+                    CipherSuite = cipherSuite, AgeAdd = ageAdd, IssuedUtc = issuedUtc, Psk = psk, MaxEarlyDataSize = maxEarlyDataSize,
                     ClientCertificate = certificate.Length == 0 ? null : certificate,
                 };
             }
@@ -118,6 +126,50 @@ namespace SharpDTLS.DTLS13
             {
                 return null;
             }
+        }
+    }
+
+    /// <summary>
+    /// early_data (RFC 8446 §4.2.10): empty in ClientHello and EncryptedExtensions, max_early_data_size in
+    /// NewSessionTicket.
+    /// </summary>
+    public class EarlyDataExtension : ITlsExtension
+    {
+        public const ushort Type = 0x002a;
+
+        public EarlyDataExtension() { }
+        public EarlyDataExtension(uint maxEarlyDataSize) => MaxEarlyDataSize = maxEarlyDataSize;
+
+        /// <summary>The ticket's limit (NewSessionTicket only), or null.</summary>
+        public uint? MaxEarlyDataSize { get; private set; }
+
+        public int CalculateLength() => MaxEarlyDataSize.HasValue ? 8 : 4;
+
+        public int Read(int offset, byte[] source)
+        {
+            int length = (source[offset + 2] << 8) | source[offset + 3];
+            if ((length != 0 && length != 4) || source.Length < offset + 4 + length)
+                throw new DtlsException(AlertDescription.DecodeError, "Invalid early_data extension.");
+            if (length == 4)
+                MaxEarlyDataSize = (uint)((source[offset + 4] << 24) | (source[offset + 5] << 16) | (source[offset + 6] << 8) | source[offset + 7]);
+            return 4 + length;
+        }
+
+        public int Write(int offset, byte[] destination)
+        {
+            destination[offset] = 0x00;
+            destination[offset + 1] = 0x2a;
+            destination[offset + 2] = 0x00;
+            destination[offset + 3] = (byte)(MaxEarlyDataSize.HasValue ? 4 : 0);
+            if (MaxEarlyDataSize.HasValue)
+            {
+                uint value = MaxEarlyDataSize.Value;
+                destination[offset + 4] = (byte)(value >> 24);
+                destination[offset + 5] = (byte)(value >> 16);
+                destination[offset + 6] = (byte)(value >> 8);
+                destination[offset + 7] = (byte)value;
+            }
+            return CalculateLength();
         }
     }
 

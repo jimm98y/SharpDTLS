@@ -58,6 +58,7 @@ namespace SharpDTLS.DTLS13.Messages
                 {
                     0x000a => new SupportedGroups(),
                     0x000e => new UseSrtpExtension(),
+                    EarlyDataExtension.Type => new EarlyDataExtension(),
                     _ => null
                 };
 

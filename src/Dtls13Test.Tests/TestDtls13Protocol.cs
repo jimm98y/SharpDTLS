@@ -50,6 +50,9 @@ namespace Dtls13Test.Tests
             }
 
             public void Deliver(byte[] data) => OnDataReceived?.Invoke(ClientEndpoint, data);
+
+            /// <summary>Delivers a datagram as if it came from another client (e.g. an attacker replaying one).</summary>
+            public void Deliver(EndPoint from, byte[] data) => OnDataReceived?.Invoke(from, data);
         }
 
         public sealed class ClientSide : IClientTransport

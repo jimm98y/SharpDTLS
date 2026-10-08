@@ -34,6 +34,7 @@ namespace SharpDTLS.DTLS13
         private X509Certificate _serverCertificate;
         private readonly List<OfferedPsk> _offeredPsks = new();
         private OfferedPsk _selectedPsk;
+        private bool _earlyDataOffered;
 
         /// <summary>A PSK offered in pre_shared_key: a resumption ticket or the external PSK.</summary>
         private sealed record OfferedPsk(byte[] Identity, uint ObfuscatedAge, byte[] Key, Dtls13CipherSuite HashSuite,
@@ -69,6 +70,16 @@ namespace SharpDTLS.DTLS13
         public byte[] PskKeyExchangeModes { get; set; } = { PskKeyExchangeModesExtension.PskDheKe };
 
         private bool OffersPskDhe => PskKeyExchangeModes.Contains(PskKeyExchangeModesExtension.PskDheKe);
+
+        /// <summary>
+        /// 0-RTT data to send right after the ClientHello when resuming with a ticket that allows it (RFC 8446 §2.3).
+        /// It is sent at most once, may be replayed by an attacker, and is lost when the server declines it
+        /// (<see cref="EarlyDataAccepted"/> false): send it again after the handshake in that case.
+        /// </summary>
+        public byte[] EarlyData { get; set; }
+
+        /// <summary>Whether the server accepted <see cref="EarlyData"/>.</summary>
+        public bool EarlyDataAccepted { get; private set; }
 
         public IClientTransport ClientTransport { get; }
 
@@ -118,6 +129,8 @@ namespace SharpDTLS.DTLS13
                 BeginFlight();
                 byte[] record = SendPlaintextHandshake(_clientHello);
                 Session.Transcript.AddPlaintextRecord(record);
+                if (_earlyDataOffered)
+                    SendEarlyData();
                 _state = State.WaitServerHello;
                 ArmRetransmission();
             });
@@ -160,6 +173,7 @@ namespace SharpDTLS.DTLS13
         private void OfferPsks(ClientHelloDatagram clientHello)
         {
             _offeredPsks.Clear();
+            _earlyDataOffered = false;
 
             // A PSK's hash must match the suite: after a HelloRetryRequest that is the selected one.
             bool Compatible(Dtls13CipherSuite hashSuite) => _receivedHelloRetryRequest
@@ -178,6 +192,14 @@ namespace SharpDTLS.DTLS13
             if (_offeredPsks.Count == 0)
                 return;
 
+            // 0-RTT only with the ticket as the first identity, within its limit and with its suite offered
+            // (the server must select it), and never after a HelloRetryRequest (RFC 8446 §4.2.10).
+            var first = _offeredPsks[0];
+            _earlyDataOffered = EarlyData != null && first.Ticket != null && !_receivedHelloRetryRequest
+                                && first.Ticket.MaxEarlyDataSize >= EarlyData.Length && CipherSuites.Contains(first.Ticket.CipherSuite);
+            if (_earlyDataOffered)
+                clientHello.Extensions.Add(new EarlyDataExtension());
+
             var extension = new ClientPreSharedKeyExtension();
             foreach (var offered in _offeredPsks)
             {
@@ -193,6 +215,14 @@ namespace SharpDTLS.DTLS13
                 extension.Binders[i] = Dtls13CryptoUtils.CalculateBinder(offered.Key, Session.Transcript.HashWith(offered.HashSuite, truncated),
                     offered.HashSuite, external: offered.Ticket == null);
             }
+        }
+
+        // Epoch 1, under client_early_traffic_secret of the ticket's suite; not part of any flight.
+        private void SendEarlyData()
+        {
+            var ticketSuite = Dtls13CipherSuite.Get(_offeredPsks[0].Ticket.CipherSuite);
+            var earlyKeys = Dtls13CryptoUtils.CalculateEarlyKeys(_clientHello.ClientRandom, Session.Transcript.Hash(ticketSuite), _offeredPsks[0].Key, ticketSuite);
+            SendProtected(earlyKeys, new ApplicationDataDatagram(EarlyData).ToBytes());
         }
 
         // ── ServerHello / HelloRetryRequest ──────────────────────────────────────────────────
@@ -332,6 +362,14 @@ namespace SharpDTLS.DTLS13
             switch (_state)
             {
                 case State.WaitEncryptedExtensions when parsed is EncryptedExtensionsDatagram encryptedExtensions:
+                    // RFC 8446 §4.2.10: early_data may only be accepted when offered, with the first PSK and its suite.
+                    if (encryptedExtensions.Extensions.OfType<EarlyDataExtension>().Any())
+                    {
+                        if (!_earlyDataOffered || _selectedPsk != _offeredPsks[0] || Session.CipherSuite.Id != _offeredPsks[0].Ticket.CipherSuite)
+                            throw new DtlsException(AlertDescription.IllegalParameter, "Server accepted early data that was not offered.");
+                        EarlyDataAccepted = true;
+                    }
+
                     var srtp = encryptedExtensions.Extensions.OfType<UseSrtpExtension>().FirstOrDefault();
                     if (srtp != null)
                     {
@@ -452,7 +490,7 @@ namespace SharpDTLS.DTLS13
             var suite = Session.CipherSuite;
             byte[] psk = Dtls13CryptoUtils.CalculateResumptionPsk(Session.ResumptionMasterSecret, nst.TicketNonce ?? Array.Empty<byte>(), suite);
             SessionTicket = new Dtls13SessionTicket(nst.Ticket, Math.Min(nst.TicketLifetime, 604800u), nst.TicketAgeAdd, suite.Id, psk,
-                Session.PeerCertificate);
+                Session.PeerCertificate, nst.MaxEarlyDataSize);
         }
 
         private void SendClientCertificate()

@@ -215,6 +215,17 @@ namespace SharpDTLS.DTLS13
             return CalculateFinished(binderKey, truncatedTranscriptHash, suite);
         }
 
+        /// <summary>
+        /// 0-RTT keys (epoch 1, client to server only): client_early_traffic_secret =
+        /// Derive-Secret(early_secret, "c e traffic", ClientHello) (RFC 8446 §7.1, RFC 9147 §6.1).
+        /// </summary>
+        public static Dtls13CryptoContext CalculateEarlyKeys(byte[] clientRandom, byte[] clientHelloHash, byte[] psk, Dtls13CipherSuite suite)
+        {
+            byte[] earlySecret = CalculateEarlySecret(psk, suite);
+            byte[] clientSecret = HkdfExpandLabel(new BcTlsSecret(_crypto, earlySecret), suite.HashAlgorithm, "c e traffic", clientHelloHash, suite.HashLength).Extract();
+            return CreateContext(clientRandom, earlySecret, clientSecret, clientSecret, suite, epoch: 1);
+        }
+
         /// <summary>resumption_master_secret = Derive-Secret(master_secret, "res master", ClientHello..client Finished)</summary>
         public static byte[] CalculateResumptionMasterSecret(byte[] masterSecret, byte[] clientFinishedHash, Dtls13CipherSuite suite)
             => HkdfExpandLabel(new BcTlsSecret(_crypto, masterSecret), suite.HashAlgorithm, "res master", clientFinishedHash, suite.HashLength).Extract();

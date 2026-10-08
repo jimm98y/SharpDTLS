@@ -118,6 +118,7 @@ namespace SharpDTLS.DTLS13.Messages
                     0x000e => new UseSrtpExtension(),
                     PskKeyExchangeModesExtension.Type => new PskKeyExchangeModesExtension(),
                     ClientPreSharedKeyExtension.Type => new ClientPreSharedKeyExtension(),
+                    EarlyDataExtension.Type => new EarlyDataExtension(),
                     _ => new UnknownExtension()
                 };
 

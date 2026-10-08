@@ -139,6 +139,15 @@ namespace SharpDTLS.DTLS13
             byte[] inner = unprotected.InnerPlaintext;
             byte contentType = inner[inner.Length - 1];
 
+            // Epoch 1 carries only 0-RTT application data; DTLS 1.3 has no EndOfEarlyData (RFC 9147 §5.6).
+            if (keys.Epoch == 1)
+            {
+                if (IsClient || contentType != 0x17)
+                    throw new DtlsException(AlertDescription.UnexpectedMessage, $"Content type 0x{contentType:X2} in the early data epoch.");
+                OnEarlyData(inner.AsSpan(0, inner.Length - 1).ToArray());
+                return;
+            }
+
             switch (contentType)
             {
                 case 0x16:
@@ -255,6 +264,9 @@ namespace SharpDTLS.DTLS13
         }
 
         // ── Post-handshake messages ──────────────────────────────────────────────────────────
+
+        /// <summary>0-RTT application data arrived in epoch 1 (server only; the keys exist only once early data is accepted).</summary>
+        protected virtual void OnEarlyData(byte[] data) { }
 
         /// <summary>A NewSessionTicket arrived (client only), before NewSessionTicketReceived is raised.</summary>
         protected virtual void OnNewSessionTicket(NewSessionTicketDatagram ticket) { }

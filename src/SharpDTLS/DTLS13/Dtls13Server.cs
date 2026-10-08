@@ -85,6 +85,41 @@ namespace SharpDTLS.DTLS13
         /// </summary>
         public bool AllowPskOnlyKeyExchange { get; set; }
 
+        /// <summary>
+        /// Maximum 0-RTT data per connection advertised in tickets (RFC 8446 §4.2.10); 0 (the default) disables early
+        /// data. Early data can be replayed by an attacker, so only enable it for idempotent requests. It is accepted
+        /// only without a HelloRetryRequest (set <see cref="ShouldSendHelloRetry"/> to false), for a fresh ticket
+        /// (<see cref="EarlyDataFreshnessWindow"/>) whose ClientHello has not been seen before.
+        /// </summary>
+        public uint MaxEarlyDataSize { get; set; }
+
+        /// <summary>
+        /// Anti-replay window (RFC 8446 §8.2): early data is accepted only when the client's ticket age is within this
+        /// of the server's view, and each ClientHello is remembered for this long.
+        /// </summary>
+        public TimeSpan EarlyDataFreshnessWindow { get; set; } = TimeSpan.FromSeconds(10);
+
+        /// <summary>0-RTT data accepted before the handshake completes; it may be a replay.</summary>
+        public event EventHandler<Dtls13DataReceivedEventArgs> EarlyDataReceived;
+
+        private readonly ConcurrentDictionary<string, DateTime> _seenEarlyDataClientHellos = new();
+
+        /// <summary>
+        /// RFC 8446 §8.2 ClientHello recording: remembers the binder of each 0-RTT ClientHello for the freshness
+        /// window and refuses a second one. Older entries are outside the window and are pruned.
+        /// </summary>
+        internal bool RecordEarlyDataClientHello(byte[] binder)
+        {
+            var now = DateTime.UtcNow;
+            foreach (var entry in _seenEarlyDataClientHellos)
+                if (now - entry.Value > EarlyDataFreshnessWindow)
+                    _seenEarlyDataClientHellos.TryRemove(entry);
+            return _seenEarlyDataClientHellos.TryAdd(Convert.ToHexString(binder), now);
+        }
+
+        internal void OnEarlyData(Dtls13ServerConnection connection, byte[] data)
+            => EarlyDataReceived?.Invoke(this, new Dtls13DataReceivedEventArgs(connection.RemoteEndPoint, connection, data));
+
         public event EventHandler<EventArgs> HandshakeFinished;
         public event EventHandler<KeyUpdateDatagram> KeyUpdateReceived;
         public event EventHandler<Dtls13DataReceivedEventArgs> ApplicationDataReceived;
@@ -316,6 +351,11 @@ namespace SharpDTLS.DTLS13
         private byte[] _psk;
         private int _pskIdentity;
         private bool _pskOnly;
+        private bool _helloRetried;
+        private Dtls13TicketState _ticketState;
+        private Dtls13CryptoContext _earlyKeys;
+        private long _earlyDataReceived;
+        private bool _earlyDataAccepted;
 
         public EndPoint RemoteEndPoint { get; }
 
@@ -330,6 +370,9 @@ namespace SharpDTLS.DTLS13
 
         /// <summary>Whether the handshake used psk_ke (no (EC)DHE, no forward secrecy).</summary>
         public bool IsPskOnlyKeyExchange => _pskOnly;
+
+        /// <summary>Whether the client's 0-RTT data was accepted.</summary>
+        public bool EarlyDataAccepted => _earlyDataAccepted;
 
         /// <summary>The client's certificate, when one was sent.</summary>
         public X509Certificate ClientCertificate => _clientCertificate;
@@ -362,11 +405,20 @@ namespace SharpDTLS.DTLS13
                     Session.Transcript.AddMessageHash(retry.ClientHello1Hash);
                     Session.Transcript.AddPlaintextRecord(hrr.ToBytes());
                 }
+                _helloRetried = retry != null;
                 SelectPsk(record);
                 if (_psk == null && (_clientHello.PublicKey == null || _server.ServerCertificate == null))
                     throw new DtlsException(AlertDescription.HandshakeFailure,
                         _server.ServerCertificate == null ? "PSK-only server and no acceptable PSK." : "No key share and no acceptable PSK.");
                 Session.Transcript.AddPlaintextRecord(record);
+
+                // 0-RTT keys come from the ClientHello alone (RFC 8446 §7.1).
+                if (AcceptEarlyData())
+                {
+                    _earlyKeys = Dtls13CryptoUtils.CalculateEarlyKeys(_clientHello.ClientRandom, Session.Transcript.Hash(suite), _psk, suite);
+                    AddReadKeys(_earlyKeys);
+                    _earlyDataAccepted = true;
+                }
 
                 // Message sequence numbers continue after the stateless HelloRetryRequest (RFC 9147 §5.2).
                 NextReceiveMessageSeq = clientHello.SequenceNumber + 1;
@@ -434,6 +486,7 @@ namespace SharpDTLS.DTLS13
                 _psk = psk;
                 _pskIdentity = i;
                 _pskOnly = pskOnly;
+                _ticketState = state;
                 if (external)
                     ExternalPskIdentity = identity;
                 if (clientCertificate != null)
@@ -444,6 +497,36 @@ namespace SharpDTLS.DTLS13
                 }
                 return;
             }
+        }
+
+        /// <summary>
+        /// RFC 8446 §4.2.10: early data needs the first identity to be a ticket that allows it, the ticket's suite and
+        /// no HelloRetryRequest; §8 adds the freshness check and ClientHello recording against replays.
+        /// </summary>
+        private bool AcceptEarlyData()
+        {
+            var offered = _clientHello.Extensions.OfType<ClientPreSharedKeyExtension>().FirstOrDefault();
+            if (!_clientHello.Extensions.OfType<EarlyDataExtension>().Any() || offered == null)
+                return false;
+            if (_server.MaxEarlyDataSize == 0 || _ticketState == null || _ticketState.MaxEarlyDataSize == 0 || _pskIdentity != 0
+                || _helloRetried || _ticketState.CipherSuite != Session.CipherSuite.Id)
+                return false;
+
+            uint clientAge = unchecked(offered.Identities[0].ObfuscatedAge - _ticketState.AgeAdd);
+            double serverAge = (DateTime.UtcNow - _ticketState.IssuedUtc).TotalMilliseconds;
+            if (Math.Abs(serverAge - clientAge) > _server.EarlyDataFreshnessWindow.TotalMilliseconds)
+                return false;
+            return _server.RecordEarlyDataClientHello(offered.Binders[0]);
+        }
+
+        protected override void OnEarlyData(byte[] data)
+        {
+            if (_earlyKeys == null)
+                throw new DtlsRecordDiscardedException("Early data after the client Finished");
+            _earlyDataReceived += data.Length;
+            if (_earlyDataReceived > _ticketState.MaxEarlyDataSize)
+                throw new DtlsException(AlertDescription.UnexpectedMessage, "Early data exceeds max_early_data_size.");
+            RaiseEvent(() => _server.OnEarlyData(this, data));
         }
 
         private void SendServerFlight()
@@ -513,6 +596,8 @@ namespace SharpDTLS.DTLS13
                 SelectedSrtpProtectionProfile = profile;
                 extensions.Extensions.Add(new UseSrtpExtension(new[] { profile.Value }, offered.MasterKeyIdentifier));
             }
+            if (_earlyKeys != null)
+                extensions.Extensions.Add(new EarlyDataExtension());
 
             return extensions;
         }
@@ -602,6 +687,14 @@ namespace SharpDTLS.DTLS13
 
             Session.Transcript.AddHandshake(message);
             StopRetransmission();
+
+            // The client's Finished ends the early data epoch.
+            if (_earlyKeys != null)
+            {
+                Session.ReadKeys.Remove(_earlyKeys);
+                _earlyKeys = null;
+            }
+
             Session.ResumptionMasterSecret = Dtls13CryptoUtils.CalculateResumptionMasterSecret(
                 Session.ServerApplicationKeys.Secret, Session.Transcript.Hash(suite), suite);
 
@@ -649,6 +742,7 @@ namespace SharpDTLS.DTLS13
             uint lifetime = (uint)Math.Min(604800, keys.Lifetime.TotalSeconds);
             var state = new Dtls13TicketState
             {
+                MaxEarlyDataSize = _server.MaxEarlyDataSize,
                 CipherSuite = suite.Id,
                 Psk = Dtls13CryptoUtils.CalculateResumptionPsk(Session.ResumptionMasterSecret, nonce, suite),
                 AgeAdd = ageAdd,
@@ -658,7 +752,8 @@ namespace SharpDTLS.DTLS13
 
             // Retransmitted until the client ACKs it (RFC 9147 §5.8).
             BeginFlight();
-            SendHandshake(new NewSessionTicketDatagram(state.Seal(keys), nonce, lifetime, ageAdd), Session.WriteKeys, addToTranscript: false);
+            SendHandshake(new NewSessionTicketDatagram(state.Seal(keys), nonce, lifetime, ageAdd) { MaxEarlyDataSize = state.MaxEarlyDataSize },
+                Session.WriteKeys, addToTranscript: false);
             ArmRetransmission();
         }
     }
