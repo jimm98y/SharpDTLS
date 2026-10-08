@@ -68,7 +68,8 @@ namespace SharpDTLS.DTLS13
 
         internal IDtls13RecordCipher Cipher { get; }
 
-        private Dtls13CipherSuite(ushort id, int hashAlgorithm, int hashLength, int keyLength, int ivLength, IDtls13RecordCipher cipher)
+        private Dtls13CipherSuite(ushort id, int hashAlgorithm, int hashLength, int keyLength, int ivLength, IDtls13RecordCipher cipher,
+            string labelPrefix = "dtls13")
         {
             Id = id;
             HashAlgorithm = hashAlgorithm;
@@ -76,7 +77,22 @@ namespace SharpDTLS.DTLS13
             KeyLength = keyLength;
             IvLength = ivLength;
             Cipher = cipher;
+            LabelPrefix = labelPrefix;
+            LabelPrefixBytes = System.Text.Encoding.ASCII.GetBytes(labelPrefix);
         }
+
+        /// <summary>The HKDF-Expand-Label prefix: "dtls13" (RFC 9147 §5.9), or "tls13 " for TLS 1.3 (RFC 8446 §7.1).</summary>
+        public string LabelPrefix { get; }
+        internal byte[] LabelPrefixBytes { get; }
+
+        /// <summary>Whether this is the TLS 1.3 variant of the suite.</summary>
+        public bool IsTls => LabelPrefix == "tls13 ";
+
+        private Dtls13CipherSuite _tls;
+
+        /// <summary>The same suite for TLS 1.3, whose key schedule labels start with "tls13 ".</summary>
+        public Dtls13CipherSuite ForTls()
+            => IsTls ? this : _tls ??= new Dtls13CipherSuite(Id, HashAlgorithm, HashLength, KeyLength, IvLength, Cipher, "tls13 ");
 
         public static bool IsSupported(ushort id) => _suites.ContainsKey(id);
 
