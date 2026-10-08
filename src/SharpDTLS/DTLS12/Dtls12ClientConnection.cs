@@ -55,6 +55,11 @@ namespace SharpDTLS.DTLS12
         {
         }
 
+        /// <param name="stream">TLS over a reliable byte stream instead of DTLS over datagrams.</param>
+        protected Dtls12ClientConnection(Action<byte[]> send, bool stream) : base(isClient: true, send, stream)
+        {
+        }
+
         // Set these before BeginHandshake to enable client authentication.
         public AsymmetricCipherKeyPair ClientCertificateKeyPair { get; set; }
         public X509Certificate ClientCertificate { get; set; }
@@ -289,7 +294,7 @@ namespace SharpDTLS.DTLS12
                 ch.Extensions.Add(new EncryptThenMacExtension());
             ch.Extensions.Add(new ExtendedMasterSecretExtension());
             ch.Extensions.Add(new RenegotiationInfoExtension());
-            if (SrtpProtectionProfiles != null && SrtpProtectionProfiles.Length > 0)
+            if (IsDatagram && SrtpProtectionProfiles != null && SrtpProtectionProfiles.Length > 0)
                 ch.Extensions.Add(new UseSrtpExtension(SrtpProtectionProfiles));
             if (ServerName != null)
                 ch.Extensions.Add(new ServerNameExtension(ServerName));
@@ -304,7 +309,7 @@ namespace SharpDTLS.DTLS12
                 ch.Extensions.Add(new SignatureAlgorithmsCertExtension(SignatureAlgorithmsCert));
             if (RawPublicKeys.Offer(CertificateTypeExtension.ClientType, ClientCertificateTypes) is { } clientTypes)
                 ch.Extensions.Add(clientTypes);
-            if (UseConnectionId)
+            if (UseConnectionId && IsDatagram)
             {
                 _offeredConnectionId ??= Dtls12CryptoUtils.GenerateRandom(ConnectionIdLength);
                 ch.Extensions.Add(new ConnectionIdExtension(_offeredConnectionId));
@@ -323,7 +328,7 @@ namespace SharpDTLS.DTLS12
             // The initial ClientHello and HelloVerifyRequest are not part of the transcript (RFC 6347 §4.2.6).
             ResetTranscript();
             BeginFlight();
-            SendHandshake(HandshakeType.ClientHello, ch.Encode());
+            SendHandshake(HandshakeType.ClientHello, ch.Encode(IsDatagram));
             ArmRetransmission();
             _state = State.WaitServerHello;
             Debug.WriteLine($"{LogPrefix} Sent ClientHello (cookie {cookie.Length} bytes)");
@@ -353,7 +358,7 @@ namespace SharpDTLS.DTLS12
 
             switch (_state)
             {
-                case State.WaitServerHello when type == HandshakeType.HelloVerifyRequest:
+                case State.WaitServerHello when type == HandshakeType.HelloVerifyRequest && IsDatagram:
                     OnHelloVerifyRequest(body);
                     break;
 
@@ -481,7 +486,7 @@ namespace SharpDTLS.DTLS12
             var srtp = sh.Extension<ServerUseSrtpExtension>();
             if (srtp != null)
             {
-                if (SrtpProtectionProfiles == null || !SrtpProtectionProfiles.Contains(srtp.SelectedProfile))
+                if (!IsDatagram || SrtpProtectionProfiles == null || !SrtpProtectionProfiles.Contains(srtp.SelectedProfile))
                     throw new DtlsException(AlertDescription.IllegalParameter, $"Server selected SRTP profile 0x{srtp.SelectedProfile:X4}, which was not offered.");
                 SelectedSrtpProtectionProfile = srtp.SelectedProfile;
             }

@@ -84,17 +84,20 @@ namespace SharpDTLS.DTLS12
 
         public T Extension<T>() where T : class, ITlsExtension => Extensions.OfType<T>().FirstOrDefault();
 
-        public byte[] Encode() => new TlsWriter()
-            .WriteUInt16(ClientVersion)
-            .WriteBytes(Random)
-            .WriteOpaque8(SessionId)
-            .WriteOpaque8(Cookie)
-            .WriteUInt16List16(CipherSuites)
-            .WriteOpaque8(CompressionMethods)
-            .WriteExtensions(Extensions, omitWhenEmpty: true)
-            .ToArray();
+        /// <param name="datagram">DTLS, with the cookie field (RFC 6347 §4.2.1); TLS has none.</param>
+        public byte[] Encode(bool datagram = true)
+        {
+            var w = new TlsWriter().WriteUInt16(ClientVersion).WriteBytes(Random).WriteOpaque8(SessionId);
+            if (datagram)
+                w.WriteOpaque8(Cookie);
+            return w.WriteUInt16List16(CipherSuites)
+                .WriteOpaque8(CompressionMethods)
+                .WriteExtensions(Extensions, omitWhenEmpty: true)
+                .ToArray();
+        }
 
-        public static ClientHelloMessage Decode(byte[] body)
+        /// <param name="datagram">DTLS, with the cookie field (RFC 6347 §4.2.1); TLS has none.</param>
+        public static ClientHelloMessage Decode(byte[] body, bool datagram = true)
         {
             var r = new TlsReader(body);
             var m = new ClientHelloMessage
@@ -102,7 +105,7 @@ namespace SharpDTLS.DTLS12
                 ClientVersion = r.ReadUInt16(),
                 Random = r.ReadBytes(32),
                 SessionId = r.ReadOpaque8(),
-                Cookie = r.ReadOpaque8(),
+                Cookie = datagram ? r.ReadOpaque8() : Array.Empty<byte>(),
                 CipherSuites = r.ReadUInt16List16().ToList(),
                 CompressionMethods = r.ReadOpaque8(),
             };

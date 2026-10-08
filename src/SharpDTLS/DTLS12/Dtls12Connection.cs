@@ -21,10 +21,38 @@ namespace SharpDTLS.DTLS12
         private readonly List<byte[]> _transcript = new();
 
         protected Dtls12Connection(bool isClient, Action<byte[]> send)
-            : base(isClient, send, "DTLS12")
+            : this(isClient, send, stream: false)
         {
-            _framing = new DatagramFraming(this);
         }
+
+        /// <param name="stream">TLS over a reliable byte stream instead of DTLS over datagrams.</param>
+        protected Dtls12Connection(bool isClient, Action<byte[]> send, bool stream)
+            : base(isClient, send, stream ? "TLS12" : "DTLS12")
+        {
+            _framing = stream ? new StreamFraming(this) : new DatagramFraming(this);
+        }
+
+        protected override bool IsReliableTransport => !_framing.IsDatagram;
+
+        /// <summary>
+        /// The TLS stream ended: after the handshake that closes the connection (without close_notify the data may be
+        /// truncated); during it the handshake fails.
+        /// </summary>
+        internal void OnTransportClosed() => Run(() =>
+        {
+            if (IsClosed)
+                return;
+            if (!IsHandshakeComplete)
+                throw new System.IO.IOException("The connection closed during the handshake.");
+            CloseInternal();
+        });
+
+        /// <summary>Processes bytes received from a TLS stream (any amount: partial or several records).</summary>
+        public void ProcessStreamData(byte[] data, int offset, int count) => Run(() =>
+        {
+            if (!IsClosed)
+                _framing.ProcessInput(data, offset, count);
+        });
 
         /// <summary>Oldest protocol version this endpoint accepts.</summary>
         public ushort MinimumVersion { get; set; } = DtlsVersion.Dtls12;

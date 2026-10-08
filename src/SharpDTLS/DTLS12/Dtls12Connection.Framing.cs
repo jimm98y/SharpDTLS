@@ -1,3 +1,5 @@
+using System;
+
 namespace SharpDTLS.DTLS12
 {
     public abstract partial class Dtls12Connection
@@ -13,6 +15,9 @@ namespace SharpDTLS.DTLS12
 
             /// <summary>The connection this framing serves.</summary>
             protected Dtls12Connection C { get; }
+
+            /// <summary>Processes received transport bytes (TLS; DTLS splits datagrams into records first).</summary>
+            public virtual void ProcessInput(byte[] data, int offset, int count) => throw new NotSupportedException();
 
             /// <summary>Processes one received record.</summary>
             public abstract void ProcessRecord(byte[] record);

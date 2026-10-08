@@ -22,7 +22,7 @@ namespace Dtls13Test.Tests
     {
         private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(15);
 
-        private static readonly Lazy<(Dictionary<ushort, string> Names, string Providers)> _openSsl = new(() =>
+        internal static readonly Lazy<(Dictionary<ushort, string> Names, string Providers)> _openSsl = new(() =>
         {
             // The legacy provider adds SEED, IDEA and single DES; fall back to the default provider without it.
             foreach (string providers in new[] { "-provider legacy -provider default", "" })

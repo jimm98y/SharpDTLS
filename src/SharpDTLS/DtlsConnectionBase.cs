@@ -15,6 +15,7 @@ namespace SharpDTLS
     public abstract class DtlsConnectionBase
     {
         private readonly object _sync = new object();
+        private readonly object _sendOrder = new object();
         private readonly Queue<object> _outbox = new Queue<object>(); // byte[] datagrams and Action events, in order
         private readonly Action<byte[]> _send;
         private readonly string _protocolName;
@@ -162,6 +163,12 @@ namespace SharpDTLS
         /// <summary>Whether a received alert terminates the connection (RFC 5246 §7.2 vs RFC 8446 §6).</summary>
         protected virtual bool IsAlertFatal(byte level, AlertDescription description) => level == 2;
 
+        /// <summary>
+        /// Whether the transport is reliable and ordered (TLS over TCP): nothing is retransmitted, and records leave in
+        /// exactly the order they were queued.
+        /// </summary>
+        protected virtual bool IsReliableTransport => false;
+
         /// <summary>Called when a new flight starts (before any of its records are built).</summary>
         protected virtual void OnFlightStarted() { }
 
@@ -184,7 +191,7 @@ namespace SharpDTLS
 
         protected void RetransmitFlight()
         {
-            if (_flight.Count == 0)
+            if (_flight.Count == 0 || IsReliableTransport)
                 return;
             Debug.WriteLine($"{LogPrefix} Retransmitting flight ({_flight.Count} messages)");
             foreach (var build in _flight)
@@ -194,7 +201,11 @@ namespace SharpDTLS
 
         protected bool HasFlight => _flight.Count > 0;
         protected bool IsRetransmissionArmed => _retransmitTimer.IsRunning;
-        protected void ArmRetransmission() => _retransmitTimer.Start(InitialRetransmitTimeout);
+        protected void ArmRetransmission()
+        {
+            if (!IsReliableTransport)
+                _retransmitTimer.Start(InitialRetransmitTimeout);
+        }
         protected void StopRetransmission() => _retransmitTimer.Stop();
 
         // ── Alerts and failure ───────────────────────────────────────────────────────────────
@@ -298,6 +309,18 @@ namespace SharpDTLS
             if (Monitor.IsEntered(_sync))
                 return; // the outermost caller flushes once the lock is released
 
+            if (!IsReliableTransport)
+            {
+                FlushOutbox();
+                return;
+            }
+            // A stream must see the records in sequence-number order, so flushes do not overlap.
+            lock (_sendOrder)
+                FlushOutbox();
+        }
+
+        private void FlushOutbox()
+        {
             while (true)
             {
                 object next;

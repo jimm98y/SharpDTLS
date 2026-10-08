@@ -152,7 +152,13 @@ namespace SharpDTLS.DTLS12
         public event EventHandler<EventArgs> HandshakeFinished;
 
         public Dtls12ServerConnection(Dtls12ServerSettings settings, EndPoint remoteEndPoint, Action<byte[]> send)
-            : base(isClient: false, send)
+            : this(settings, remoteEndPoint, send, stream: false)
+        {
+        }
+
+        /// <param name="stream">TLS over a reliable byte stream: the ClientHello arrives on it (no cookie exchange).</param>
+        internal Dtls12ServerConnection(Dtls12ServerSettings settings, EndPoint remoteEndPoint, Action<byte[]> send, bool stream)
+            : base(isClient: false, send, stream)
         {
             _settings = settings;
             _address = new PeerAddressTracker(remoteEndPoint);
@@ -237,13 +243,17 @@ namespace SharpDTLS.DTLS12
             NextReceiveMessageSeq = messageSeq + 1;
             NextSendMessageSeq = messageSeq;
             SetInitialRecordSequence(recordSequenceNumber);
+            OnClientHello(message);
+        });
 
+        private void OnClientHello(byte[] message)
+        {
             Negotiate();
 
             ResetTranscript();
             AddToTranscript(message);
             SendServerFlight();
-        });
+        }
 
         private void Negotiate()
         {
@@ -271,7 +281,7 @@ namespace SharpDTLS.DTLS12
 
             ClientRandom = ch.Random;
             ServerRandom = Dtls12CryptoUtils.GenerateRandom(32);
-            SelectedSrtpProtectionProfile = DtlsSrtp.Select(_settings.SrtpProtectionProfiles, ch.Extension<UseSrtpExtension>()?.ProtectionProfiles);
+            SelectedSrtpProtectionProfile = IsDatagram ? DtlsSrtp.Select(_settings.SrtpProtectionProfiles, ch.Extension<UseSrtpExtension>()?.ProtectionProfiles) : null;
 
             // Credentials for the requested name come first: the certificate key decides which suites are possible.
             ServerName = ch.Extension<ServerNameExtension>()?.HostName;
@@ -297,7 +307,7 @@ namespace SharpDTLS.DTLS12
 
             // Connection IDs are negotiated afresh in every handshake, resumed ones included (RFC 9146 §3).
             var offeredCid = ch.Extension<ConnectionIdExtension>();
-            if (_settings.UseConnectionIds && offeredCid != null)
+            if (IsDatagram && _settings.UseConnectionIds && offeredCid != null)
             {
                 WriteConnectionId = offeredCid.ConnectionId;
                 ReadConnectionId = Dtls12CryptoUtils.GenerateRandom(_settings.ConnectionIdLength);
@@ -530,6 +540,11 @@ namespace SharpDTLS.DTLS12
 
             switch (_state)
             {
+                case State.Start when type == HandshakeType.ClientHello && !IsDatagram:
+                    _clientHello = ClientHelloMessage.Decode(body, datagram: false);
+                    OnClientHello(message);
+                    break;
+
                 case State.WaitClientCertificate when type == HandshakeType.Certificate:
                     StopRetransmission();
                     OnClientCertificate(body, message);
