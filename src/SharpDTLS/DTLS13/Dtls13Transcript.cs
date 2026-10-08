@@ -14,6 +14,9 @@ namespace SharpDTLS.DTLS13
 
         public int Count => _messages.Count;
 
+        /// <summary>Starts over (a ClientHello resent after a HelloVerifyRequest replaces the first).</summary>
+        internal void Clear() => _messages.Clear();
+
         /// <summary>A copy that can be extended independently (post-handshake authentication, RFC 8446 §4.6.2).</summary>
         public Dtls13Transcript Clone()
         {

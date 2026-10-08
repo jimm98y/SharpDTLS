@@ -20,7 +20,7 @@ namespace SharpDTLS.DTLS13
         private enum State
         {
             Start,
-            HandedOff, // a TLS 1.2-or-lower ServerHello: the legacy engine took over
+            HandedOff, // a (D)TLS 1.2-or-lower ServerHello: the legacy engine took over
             WaitServerHello,
             WaitEncryptedExtensions,
             WaitCertificateOrCertificateRequest,
@@ -238,25 +238,37 @@ namespace SharpDTLS.DTLS13
         public void BeginHandshake() => Run(() => StartHandshake(Dtls13CryptoUtils.GenerateRandom(32)));
 
         /// <summary>
-        /// For a TLS client that also offers TLS 1.2 and below: one ClientHello for both engines, this one's merged with
+        /// For a client that also offers (D)TLS 1.2 and below: one ClientHello for both engines, this one's merged with
         /// <paramref name="legacyHello"/> (its suites, versions down to <paramref name="minimumVersion"/>, and extensions). A
-        /// ServerHello below TLS 1.3 is then handed to <see cref="LegacyServerHello"/> with every byte after it. Returns the
-        /// ClientHello sent (TLS form, 4-byte header).
+        /// ServerHello below 1.3 is then handed to <see cref="LegacyServerHello"/> (TLS) or
+        /// <see cref="LegacyDatagramServerHello"/> (DTLS). Returns the ClientHello sent (TLS form, 4-byte header; DTLS
+        /// form, 12-byte header).
         /// </summary>
         internal byte[] BeginMergedHandshake(SharpDTLS.DTLS12.ClientHelloMessage legacyHello, ushort minimumVersion)
         {
             _legacyHello = legacyHello;
             _legacyMinimumVersion = minimumVersion;
-            byte[] record = null;
-            Locked(() => record = StartHandshake(legacyHello.Random));
-            return record.AsSpan(5).ToArray();
+            Locked(() => StartHandshake(legacyHello.Random));
+            return _sentClientHello.AsSpan(IsDatagram ? 13 : 5).ToArray();
         }
 
         /// <summary>A TLS 1.2-or-lower ServerHello arrived after a merged ClientHello: the received bytes from it on.</summary>
         internal event Action<byte[]> LegacyServerHello;
 
+        /// <summary>
+        /// A DTLS 1.2-or-lower ServerHello arrived after a merged ClientHello. Called under this connection's lock, before
+        /// the next datagram is read, so the legacy engine is in place for it.
+        /// </summary>
+        internal Action<LegacyDatagramHandoff> LegacyDatagramServerHello { get; set; }
+
         private SharpDTLS.DTLS12.ClientHelloMessage _legacyHello;
         private ushort _legacyMinimumVersion;
+        private byte[] _sentClientHello; // the last ClientHello record sent
+        private int _helloVerifyRequests;
+
+        // A DTLS 1.2 server's flight can overtake its ServerHello: kept for the legacy engine.
+        private readonly List<byte[]> _overtakingLegacyRecords = new();
+        private const int MaxOvertakingLegacyRecords = 16;
 
         private byte[] StartHandshake(byte[] random)
         {
@@ -283,6 +295,7 @@ namespace SharpDTLS.DTLS13
 
             BeginFlight();
             record = SendPlaintextHandshake(_clientHello);
+            _sentClientHello = record;
             Session.Transcript.AddPlaintextRecord(record);
             if (_earlyDataOffered)
                 SendEarlyData();
@@ -431,11 +444,12 @@ namespace SharpDTLS.DTLS13
                 if (!clientHello.CipherSuites.Contains(suite))
                     clientHello.CipherSuites.Add(suite);
 
-            var versions = new List<ushort> { ClientSupportedVersions.Tls13 };
-            versions.AddRange(new[] { TlsVersion.Tls12, TlsVersion.Tls11, TlsVersion.Tls10 }.Where(v => ProtocolVersions.IsAtLeast(v, _legacyMinimumVersion)));
+            var versions = new List<ushort> { IsDatagram ? ClientSupportedVersions.Dtls13 : ClientSupportedVersions.Tls13 };
+            var legacyVersions = IsDatagram ? new[] { DtlsVersion.Dtls12, DtlsVersion.Dtls10 } : new[] { TlsVersion.Tls12, TlsVersion.Tls11, TlsVersion.Tls10 };
+            versions.AddRange(legacyVersions.Where(v => ProtocolVersions.IsAtLeast(v, _legacyMinimumVersion)));
             clientHello.Extensions.RemoveAll(e => e is ClientSupportedVersions);
             clientHello.Extensions.Add(new ClientSupportedVersions(versions.ToArray()));
-            clientHello.LegacySessionId = _legacyHello.SessionId; // TLS 1.2 session resumption; echoed by a TLS 1.3 server
+            clientHello.LegacySessionId = _legacyHello.SessionId; // 1.2 session resumption; echoed by a TLS 1.3 server
 
             var types = clientHello.Extensions.Select(ExtensionType).ToHashSet();
             foreach (var extension in _legacyHello.Extensions)
@@ -482,8 +496,21 @@ namespace SharpDTLS.DTLS13
         protected override void OnPlaintextHandshake(byte[] record)
         {
             byte type = record[IsDatagram ? 13 : 5];
+            bool mergedDatagram = IsDatagram && _legacyHello != null && _state == State.WaitServerHello;
+            if (mergedDatagram && type == 0x03)
+            {
+                OnHelloVerifyRequest(record);
+                return;
+            }
             if (type != 0x02)
+            {
+                if (mergedDatagram && _overtakingLegacyRecords.Count < MaxOvertakingLegacyRecords)
+                {
+                    _overtakingLegacyRecords.Add(record);
+                    return;
+                }
                 throw new DtlsException(AlertDescription.UnexpectedMessage, $"Unexpected plaintext handshake message 0x{type:X2}");
+            }
 
             // Retransmitted ServerHello/HelloRetryRequest (e.g. answering a retransmitted ClientHello): ignore.
             int messageSeq = IsDatagram ? (record[17] << 8) | record[18] : NextReceiveMessageSeq;
@@ -497,15 +524,27 @@ namespace SharpDTLS.DTLS13
             var serverHello = new ServerHelloDatagram { Datagram = IsDatagram };
             serverHello.FromBytes(record);
 
-            // After a merged ClientHello, a server that chose TLS 1.2 or lower is the legacy engine's (RFC 8446 §4.1.3:
-            // unless the server also speaks TLS 1.3 and marked the random, which means someone downgraded us).
-            if (_legacyHello != null && serverHello.Extensions.OfType<ServerSupportedVersions>().FirstOrDefault()?.Version != ClientSupportedVersions.Tls13)
+            // After a merged ClientHello, a server that chose 1.2 or lower is the legacy engine's (RFC 8446 §4.1.3,
+            // RFC 9147 §5.3: unless the server also speaks 1.3 and marked the random, which means someone downgraded us).
+            ushort version13 = IsDatagram ? ClientSupportedVersions.Dtls13 : ClientSupportedVersions.Tls13;
+            if (_legacyHello != null && serverHello.Extensions.OfType<ServerSupportedVersions>().FirstOrDefault()?.Version != version13)
             {
                 if (Downgrade.IsMarked(serverHello.ServerRandom))
-                    throw new DtlsException(AlertDescription.IllegalParameter, "The ServerHello carries the TLS 1.3 downgrade sentinel.");
+                    throw new DtlsException(AlertDescription.IllegalParameter, "The ServerHello carries the 1.3 downgrade sentinel.");
                 StopRetransmission();
-                byte[] pending = DetachTlsInput(record);
                 _state = State.HandedOff;
+                if (IsDatagram)
+                {
+                    // The ServerHello whole (it may have come in fragments), what overtook it, and the rest of its datagram.
+                    InputDetached = true;
+                    var records = new List<byte[]> { record };
+                    records.AddRange(_overtakingLegacyRecords);
+                    records.Add(CurrentDatagram);
+                    LegacyDatagramServerHello?.Invoke(new LegacyDatagramHandoff(_sentClientHello.AsSpan(13).ToArray(), records,
+                        PlaintextRecordSequence, NextSendMessageSeq, messageSeq));
+                    return;
+                }
+                byte[] pending = DetachTlsInput(record);
                 RaiseEvent(() => LegacyServerHello?.Invoke(pending));
                 return;
             }
@@ -515,6 +554,31 @@ namespace SharpDTLS.DTLS13
                 OnHelloRetryRequest(record, serverHello);
             else
                 OnServerHello(record, serverHello);
+        }
+
+        // A DTLS 1.2 server checks our address first (RFC 6347 §4.2.1): the same ClientHello again, with its cookie.
+        private void OnHelloVerifyRequest(byte[] record)
+        {
+            int messageSeq = (record[17] << 8) | record[18];
+            if (messageSeq < NextReceiveMessageSeq)
+                return; // retransmitted
+            if (++_helloVerifyRequests > 3)
+                throw new DtlsException(AlertDescription.UnexpectedMessage, "Too many HelloVerifyRequests.");
+
+            int length = (record[14] << 16) | (record[15] << 8) | record[16];
+            var hvr = SharpDTLS.DTLS12.HelloVerifyRequestMessage.Decode(record.AsSpan(25, length).ToArray());
+            if ((hvr.ServerVersion >> 8) != 0xFE)
+                throw new DtlsException(AlertDescription.ProtocolVersion, "HelloVerifyRequest is not DTLS.");
+            Debug.WriteLine($"{LogPrefix} Received HelloVerifyRequest (cookie {hvr.Cookie.Length} bytes)");
+
+            StopRetransmission();
+            NextReceiveMessageSeq = messageSeq + 1;
+            _clientHello.LegacyCookie = hvr.Cookie;
+            BeginFlight();
+            _sentClientHello = SendPlaintextHandshake(_clientHello);
+            Session.Transcript.Clear();
+            Session.Transcript.AddPlaintextRecord(_sentClientHello);
+            ArmRetransmission();
         }
 
         private void ValidateServerHello(ServerHelloDatagram serverHello)
@@ -530,8 +594,8 @@ namespace SharpDTLS.DTLS13
             if (!CipherSuites.Contains(serverHello.SelectedCipherSuite))
                 throw new DtlsException(AlertDescription.IllegalParameter, $"Server selected a cipher suite that was not offered (0x{serverHello.SelectedCipherSuite:X4}).");
 
-            // RFC 9147 §5: DTLS 1.3 servers must not echo legacy_session_id; TLS 1.3 servers echo ours (RFC 8446 §4.1.3).
-            if (!serverHello.LegacySessionIdEcho.AsSpan().SequenceEqual(_clientHello.LegacySessionId))
+            // RFC 9147 §5.4: DTLS 1.3 servers must not echo legacy_session_id; TLS 1.3 servers echo ours (RFC 8446 §4.1.3).
+            if (!serverHello.LegacySessionIdEcho.AsSpan().SequenceEqual(IsDatagram ? Array.Empty<byte>() : _clientHello.LegacySessionId))
                 throw new DtlsException(AlertDescription.IllegalParameter, "ServerHello legacy_session_id_echo does not match.");
         }
 
@@ -571,6 +635,7 @@ namespace SharpDTLS.DTLS13
 
             BeginFlight();
             byte[] clientHello2 = SendPlaintextHandshake(_clientHello);
+            _sentClientHello = clientHello2;
             Session.Transcript.AddPlaintextRecord(clientHello2);
             ArmRetransmission();
         }
@@ -901,4 +966,12 @@ namespace SharpDTLS.DTLS13
             return true;
         }
     }
+
+    /// <summary>
+    /// What the DTLS 1.0-1.2 engine needs to continue a handshake that a merged ClientHello started: the ClientHello
+    /// last sent (12-byte header), the records to process (the ServerHello first), and where the epoch-0 record and
+    /// message sequence numbers stand.
+    /// </summary>
+    internal sealed record LegacyDatagramHandoff(byte[] ClientHello, IReadOnlyList<byte[]> Records, int NextRecordSequence,
+        int NextSendMessageSeq, int ServerHelloMessageSeq);
 }

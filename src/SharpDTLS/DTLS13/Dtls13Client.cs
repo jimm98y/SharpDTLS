@@ -8,10 +8,17 @@ namespace SharpDTLS.DTLS13
         public IClientTransport ClientTransport { get; }
 
         public Dtls13Client(IClientTransport clientTransport)
+            : this(clientTransport, receive: true)
+        {
+        }
+
+        /// <param name="receive">False when the caller feeds received datagrams to <see cref="TlsConnectionBase.ProcessDatagram(byte[])"/>.</param>
+        internal Dtls13Client(IClientTransport clientTransport, bool receive)
             : base(data => clientTransport.Send(data), stream: false)
         {
             ClientTransport = clientTransport;
-            ClientTransport.OnDataReceived += (_, data) => ProcessDatagram(data);
+            if (receive)
+                ClientTransport.OnDataReceived += (_, data) => ProcessDatagram(data);
         }
     }
 }

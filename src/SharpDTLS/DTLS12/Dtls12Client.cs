@@ -18,10 +18,17 @@ namespace SharpDTLS.DTLS12
         public IClientTransport ClientTransport { get; }
 
         public Dtls12Client(IClientTransport clientTransport)
+            : this(clientTransport, receive: true)
+        {
+        }
+
+        /// <param name="receive">False when the caller feeds received datagrams to <see cref="TlsConnectionBase.ProcessDatagram(byte[])"/>.</param>
+        internal Dtls12Client(IClientTransport clientTransport, bool receive)
             : base(data => clientTransport.Send(data))
         {
             ClientTransport = clientTransport;
-            ClientTransport.OnDataReceived += (_, data) => ProcessDatagram(data);
+            if (receive)
+                ClientTransport.OnDataReceived += (_, data) => ProcessDatagram(data);
 
             HandshakeFinished += (_, _) =>
             {

@@ -89,12 +89,19 @@ namespace SharpDTLS
         /// <summary>The source address of the datagram being processed, when the transport reports it.</summary>
         protected EndPoint DatagramSource { get; private set; }
 
+        /// <summary>The datagram being processed (for handing it to another engine).</summary>
+        protected byte[] CurrentDatagram { get; private set; }
+
+        /// <summary>Another engine took the connection over: no more input is read.</summary>
+        protected bool InputDetached { get; set; }
+
         /// <summary>Processes a datagram from <paramref name="source"/> (for connection-ID address updates).</summary>
         public void ProcessDatagram(byte[] datagram, EndPoint source) => Run(() =>
         {
-            if (IsClosed)
+            if (IsClosed || InputDetached)
                 return;
             DatagramSource = source;
+            CurrentDatagram = datagram;
 
             foreach (var record in DtlsRecordSplitter.Split(datagram, ReceiveConnectionIdLength))
             {
@@ -107,7 +114,7 @@ namespace SharpDTLS
                     Debug.WriteLine($"{LogPrefix} Discarded record: {ex.Message}");
                 }
 
-                if (IsClosed)
+                if (IsClosed || InputDetached)
                     break;
             }
         });

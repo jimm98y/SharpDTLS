@@ -211,7 +211,6 @@ namespace SharpDTLS.DTLS13
         private readonly List<byte> _tlsInput = new();
         private readonly List<byte> _tlsHandshake = new();
         private readonly Dictionary<Dtls13CryptoContext, ulong> _tlsReadSequence = new();
-        private bool _tlsDetached;
 
         /// <summary>
         /// Stops reading the stream and returns <paramref name="firstRecord"/> (a whole-message plaintext record) with
@@ -219,7 +218,7 @@ namespace SharpDTLS.DTLS13
         /// </summary>
         protected byte[] DetachTlsInput(byte[] firstRecord)
         {
-            _tlsDetached = true;
+            InputDetached = true;
             var handshake = new List<byte>(firstRecord.AsSpan(5).ToArray());
             handshake.AddRange(_tlsHandshake);
             _tlsHandshake.Clear();
@@ -254,7 +253,7 @@ namespace SharpDTLS.DTLS13
                 return;
             for (int i = 0; i < count; i++)
                 _tlsInput.Add(data[offset + i]);
-            while (_tlsInput.Count >= 5 && !IsClosed && !_tlsDetached)
+            while (_tlsInput.Count >= 5 && !IsClosed && !InputDetached)
             {
                 int length = (_tlsInput[3] << 8) | _tlsInput[4];
                 if (length > MaxTlsCiphertextLength)
@@ -270,7 +269,7 @@ namespace SharpDTLS.DTLS13
         /// <summary>The TLS stream ended: after the handshake that closes the connection; during it the handshake fails.</summary>
         internal void OnTransportClosed() => Run(() =>
         {
-            if (IsClosed || _tlsDetached)
+            if (IsClosed || InputDetached)
                 return;
             if (!IsHandshakeComplete)
                 throw new System.IO.IOException("The connection closed during the handshake.");
@@ -311,7 +310,7 @@ namespace SharpDTLS.DTLS13
                     if (fragment.Length == 0)
                         throw new DtlsException(AlertDescription.UnexpectedMessage, "Empty handshake record.");
                     _tlsHandshake.AddRange(fragment);
-                    while (!_tlsDetached && TakeTlsHandshakeMessage() is { } message && !IsClosed)
+                    while (!InputDetached && TakeTlsHandshakeMessage() is { } message && !IsClosed)
                     {
                         // Handed over as one record holding the whole message, as the DTLS reassembler does.
                         byte[] whole = new byte[5 + message.Length];
@@ -754,6 +753,9 @@ namespace SharpDTLS.DTLS13
 
         /// <summary>Epoch-0 record sequence numbers continue from here (a stateless server starts after the HelloRetryRequest).</summary>
         protected void SetPlaintextRecordSequence(int next) => _plaintextRecordSequence = (ushort)next;
+
+        /// <summary>The next epoch-0 record sequence number.</summary>
+        protected int PlaintextRecordSequence => _plaintextRecordSequence;
 
         private byte[] SendPlaintextRecord(byte[] record)
         {

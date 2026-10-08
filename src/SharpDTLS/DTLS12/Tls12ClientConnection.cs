@@ -259,12 +259,13 @@ namespace SharpDTLS.DTLS12
         }
 
         /// <summary>
-        /// For a TLS client that also offers TLS 1.3: the ClientHello this engine would send, for merging into the TLS 1.3
-        /// one. <see cref="AdoptClientHello"/> then takes the merged message as the one sent.
+        /// For a client that also offers (D)TLS 1.3: the ClientHello this engine would send, for merging into the 1.3 one.
+        /// <see cref="AdoptClientHello"/> (TLS) or <see cref="AdoptHandoff"/> (DTLS) then takes the merged message as the
+        /// one sent.
         /// </summary>
         internal ClientHelloMessage PrepareClientHello()
         {
-            if (_state != State.Start || IsDatagram)
+            if (_state != State.Start)
                 throw new InvalidOperationException("The handshake has already started.");
             ClientRandom = Dtls12CryptoUtils.GenerateRandom(32);
             return BuildClientHello(Array.Empty<byte>());
@@ -276,6 +277,23 @@ namespace SharpDTLS.DTLS12
             _clientHello = ClientHelloMessage.Decode(message.AsSpan(4).ToArray(), datagram: false);
             ResetTranscript();
             AddToTranscript(message);
+            _state = State.WaitServerHello;
+        });
+
+        /// <summary>
+        /// DTLS: the 1.3 engine sent the merged ClientHello and got a DTLS 1.2-or-lower ServerHello. Continues from its
+        /// last ClientHello (12-byte header) and sequence numbers; the handoff's records are then processed.
+        /// </summary>
+        internal void AdoptHandoff(SharpDTLS.DTLS13.LegacyDatagramHandoff handoff) => Locked(() =>
+        {
+            _clientHello = ClientHelloMessage.Decode(handoff.ClientHello.AsSpan(12).ToArray(), datagram: true);
+            // The 1.3 engine's connection ID went out; it is the one the server answers.
+            _offeredConnectionId = _clientHello.Extension<ConnectionIdExtension>()?.ConnectionId;
+            SetInitialRecordSequence((ulong)handoff.NextRecordSequence);
+            NextSendMessageSeq = handoff.NextSendMessageSeq;
+            NextReceiveMessageSeq = handoff.ServerHelloMessageSeq;
+            ResetTranscript();
+            AddToTranscript(handoff.ClientHello);
             _state = State.WaitServerHello;
         });
 
