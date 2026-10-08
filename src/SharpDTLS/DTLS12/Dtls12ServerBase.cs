@@ -67,6 +67,12 @@ namespace SharpDTLS.DTLS12
         /// <summary>Maps an SRP username to its verifier (null for unknown users); enables the SRP suites.</summary>
         public Func<byte[], SrpVerifier> SrpVerifierProvider { get => Settings.SrpVerifierProvider; set => Settings.SrpVerifierProvider = value; }
 
+        /// <summary>
+        /// Maps a TLS-PWD username to its credential (null for unknown users, whose handshakes are simulated);
+        /// enables the ECCPWD suites.
+        /// </summary>
+        public Func<string, PwdCredential> PwdCredentialProvider { get => Settings.PwdCredentialProvider; set => Settings.PwdCredentialProvider = value; }
+
         public IReadOnlyCollection<Dtls12ServerConnection> Connections => _connections.Values.ToList();
 
         public Dtls12ServerConnection GetConnection(EndPoint endpoint)

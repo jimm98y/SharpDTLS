@@ -35,43 +35,64 @@ namespace SharpDTLS
         }
     }
 
-    /// <summary>srp (RFC 5054 §2.8.1): the client's SRP username, srp_I&lt;1..2^8-1&gt;.</summary>
-    public class SrpExtension : ITlsExtension
+    /// <summary>An extension whose data is a single name&lt;1..2^8-1&gt;.</summary>
+    public abstract class OpaqueNameExtension : ITlsExtension
     {
-        public const ushort Type = 0x000c;
+        private readonly ushort _type;
 
-        public SrpExtension() { }
-
-        public SrpExtension(byte[] identity)
+        protected OpaqueNameExtension(ushort type, byte[] name)
         {
-            if (identity == null || identity.Length is 0 or > 255)
-                throw new ArgumentException("The SRP identity must be 1 to 255 bytes.", nameof(identity));
-            Identity = identity;
+            _type = type;
+            if (name != null && name.Length is 0 or > 255)
+                throw new ArgumentException("The name must be 1 to 255 bytes.", nameof(name));
+            Name = name ?? Array.Empty<byte>();
         }
 
-        public byte[] Identity { get; private set; } = Array.Empty<byte>();
+        protected byte[] Name { get; private set; }
 
-        public int CalculateLength() => 5 + Identity.Length;
+        public int CalculateLength() => 5 + Name.Length;
 
         public int Read(int offset, byte[] source)
         {
             int length = (source[offset + 2] << 8) | source[offset + 3];
             if (length < 2 || source.Length < offset + 4 + length || source[offset + 4] != length - 1)
-                throw new DtlsException(AlertDescription.DecodeError, "Invalid srp extension.");
-            Identity = source.AsSpan(offset + 5, length - 1).ToArray();
+                throw new DtlsException(AlertDescription.DecodeError, $"Invalid extension 0x{_type:X4}.");
+            Name = source.AsSpan(offset + 5, length - 1).ToArray();
             return 4 + length;
         }
 
         public int Write(int offset, byte[] destination)
         {
-            destination[offset]     = 0x00;
-            destination[offset + 1] = 0x0c;
-            destination[offset + 2] = (byte)((1 + Identity.Length) >> 8);
-            destination[offset + 3] = (byte)(1 + Identity.Length);
-            destination[offset + 4] = (byte)Identity.Length;
-            Buffer.BlockCopy(Identity, 0, destination, offset + 5, Identity.Length);
-            return 5 + Identity.Length;
+            destination[offset]     = (byte)(_type >> 8);
+            destination[offset + 1] = (byte)_type;
+            destination[offset + 2] = (byte)((1 + Name.Length) >> 8);
+            destination[offset + 3] = (byte)(1 + Name.Length);
+            destination[offset + 4] = (byte)Name.Length;
+            Buffer.BlockCopy(Name, 0, destination, offset + 5, Name.Length);
+            return 5 + Name.Length;
         }
+    }
+
+    /// <summary>srp (RFC 5054 §2.8.1): the client's SRP username, srp_I&lt;1..2^8-1&gt;.</summary>
+    public class SrpExtension : OpaqueNameExtension
+    {
+        public const ushort Type = 0x000c;
+
+        public SrpExtension() : base(Type, null) { }
+        public SrpExtension(byte[] identity) : base(Type, identity ?? throw new ArgumentNullException(nameof(identity))) { }
+
+        public byte[] Identity => Name;
+    }
+
+    /// <summary>pwd_clear (RFC 8492 §4.4.3): the client's TLS-PWD username, unprotected, as UTF-8 OpaqueString.</summary>
+    public class PwdClearExtension : OpaqueNameExtension
+    {
+        public const ushort Type = 0x001e;
+
+        public PwdClearExtension() : base(Type, null) { }
+        public PwdClearExtension(byte[] username) : base(Type, username ?? throw new ArgumentNullException(nameof(username))) { }
+
+        public string Username => System.Text.Encoding.UTF8.GetString(Name);
     }
 
     /// <summary>

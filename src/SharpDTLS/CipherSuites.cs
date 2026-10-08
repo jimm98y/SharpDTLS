@@ -145,6 +145,7 @@ namespace SharpDTLS
             or KeyExchangeAlgorithm.ECDHE_ECDSA or KeyExchangeAlgorithm.ECDHE_RSA or KeyExchangeAlgorithm.DHE_PSK
             or KeyExchangeAlgorithm.PSK_DHE or KeyExchangeAlgorithm.ECDHE_PSK
             or KeyExchangeAlgorithm.SRP_SHA or KeyExchangeAlgorithm.SRP_SHA_RSA or KeyExchangeAlgorithm.SRP_SHA_DSS
+            or KeyExchangeAlgorithm.ECCPWD
             or KeyExchangeAlgorithm.DHE_DSS_EXPORT or KeyExchangeAlgorithm.DHE_RSA_EXPORT;
 
         /// <summary>
@@ -170,6 +171,9 @@ namespace SharpDTLS
 
         /// <summary>The key exchange authenticates with an SRP password (RFC 5054).</summary>
         public bool RequiresSrp => KeyExchange is KeyExchangeAlgorithm.SRP_SHA or KeyExchangeAlgorithm.SRP_SHA_RSA or KeyExchangeAlgorithm.SRP_SHA_DSS;
+
+        /// <summary>The key exchange authenticates with a TLS-PWD password (RFC 8492).</summary>
+        public bool RequiresPwd => KeyExchange == KeyExchangeAlgorithm.ECCPWD;
 
         /// <summary>Whether this implementation supports the suite.</summary>
         public bool IsImplemented => DtlsOk && CipherSuites.IsKeyExchangeImplemented(KeyExchange) && CipherSuites.IsCipherImplemented(Cipher)
@@ -308,6 +312,7 @@ namespace SharpDTLS
             KeyExchangeAlgorithm.DH_anon, KeyExchangeAlgorithm.ECDH_anon,
             KeyExchangeAlgorithm.DH_DSS, KeyExchangeAlgorithm.DH_RSA, KeyExchangeAlgorithm.ECDH_ECDSA, KeyExchangeAlgorithm.ECDH_RSA,
             KeyExchangeAlgorithm.SRP_SHA, KeyExchangeAlgorithm.SRP_SHA_RSA, KeyExchangeAlgorithm.SRP_SHA_DSS,
+            KeyExchangeAlgorithm.ECCPWD,
         };
 
         private static readonly HashSet<BulkCipherAlgorithm> ImplementedCiphers = new()
@@ -354,13 +359,15 @@ namespace SharpDTLS
 
         /// <summary>
         /// Suites offered when none are configured: implemented, not weak, usable within the version range,
-        /// in preference order. PSK and SRP suites are included only when their credentials are configured.
+        /// in preference order. PSK, SRP and TLS-PWD suites are included only when their credentials are configured.
         /// </summary>
-        public static List<ushort> DefaultFor(ushort minimumVersion, ushort maximumVersion, bool includePsk = false, bool includeSrp = false)
+        public static List<ushort> DefaultFor(ushort minimumVersion, ushort maximumVersion, bool includePsk = false, bool includeSrp = false,
+            bool includePwd = false)
             => _implemented
                 .Where(s => s.Security != CipherSuiteSecurity.Weak)
                 .Where(s => includePsk || !s.RequiresPsk)
                 .Where(s => includeSrp || !s.RequiresSrp)
+                .Where(s => includePwd || !s.RequiresPwd)
                 .Where(s => !s.IsStaticKeyAgreement)
                 .Where(s => s.IsUsableWith(maximumVersion) || s.IsUsableWith(minimumVersion))
                 .Select(s => s.Id)

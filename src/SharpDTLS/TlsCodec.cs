@@ -32,6 +32,7 @@ namespace SharpDTLS
         }
 
         public byte ReadUInt8() { Require(1); return _buffer[Position++]; }
+        public byte PeekUInt8() { Require(1); return _buffer[Position]; }
         public ushort ReadUInt16() { Require(2); ushort v = (ushort)((_buffer[Position] << 8) | _buffer[Position + 1]); Position += 2; return v; }
         public int ReadUInt24() { Require(3); int v = (_buffer[Position] << 16) | (_buffer[Position + 1] << 8) | _buffer[Position + 2]; Position += 3; return v; }
         public uint ReadUInt32() { Require(4); uint v = (uint)((_buffer[Position] << 24) | (_buffer[Position + 1] << 16) | (_buffer[Position + 2] << 8) | _buffer[Position + 3]); Position += 4; return v; }

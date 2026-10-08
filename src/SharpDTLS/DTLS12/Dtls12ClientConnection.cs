@@ -89,6 +89,14 @@ namespace SharpDTLS.DTLS12
 
         private bool HaveSrp => SrpIdentity != null && SrpPassword != null;
 
+        /// <summary>TLS-PWD username (RFC 8492), sent in the clear; setting it with <see cref="PwdPassword"/> enables the ECCPWD suites.</summary>
+        public string PwdUsername { get; set; }
+
+        /// <summary>The TLS-PWD password that goes with <see cref="PwdUsername"/>.</summary>
+        public string PwdPassword { get; set; }
+
+        private bool HavePwd => PwdUsername != null && PwdPassword != null;
+
         /// <summary>Smallest finite-field Diffie-Hellman prime, or SRP group modulus, accepted from a server.</summary>
         public int MinimumDhPrimeBits { get; set; } = 1024;
 
@@ -109,9 +117,9 @@ namespace SharpDTLS.DTLS12
         private void SendClientHello(byte[] cookie)
         {
             bool havePsk = EffectivePskProvider != null;
-            var offered = (CipherSuites ?? SharpDTLS.CipherSuites.DefaultFor(MinimumVersion, MaximumVersion, includePsk: havePsk, includeSrp: HaveSrp))
+            var offered = (CipherSuites ?? SharpDTLS.CipherSuites.DefaultFor(MinimumVersion, MaximumVersion, includePsk: havePsk, includeSrp: HaveSrp, includePwd: HavePwd))
                 .Where(id => SharpDTLS.CipherSuites.TryGet(id, out var s) && (s.IsUsableWith(MaximumVersion) || s.IsUsableWith(MinimumVersion))
-                             && (havePsk || !s.RequiresPsk) && (HaveSrp || !s.RequiresSrp))
+                             && (havePsk || !s.RequiresPsk) && (HaveSrp || !s.RequiresSrp) && (HavePwd || !s.RequiresPwd))
                 .ToList();
             var offeredSuites = offered.Select(id => SharpDTLS.CipherSuites.Get(id)).ToList();
             if (offered.Count == 0)
@@ -130,6 +138,8 @@ namespace SharpDTLS.DTLS12
             if (offeredSuites.Any(s => s.KeyExchange is KeyExchangeAlgorithm.DHE_RSA or KeyExchangeAlgorithm.DHE_DSS
                                       or KeyExchangeAlgorithm.DHE_PSK or KeyExchangeAlgorithm.PSK_DHE))
                 groups.AddRange(FfdheGroups.Supported);
+            if (offeredSuites.Any(s => s.RequiresPwd))
+                groups.AddRange(EccPwd.Groups.Where(g => !groups.Contains(g)));
             ch.Extensions.Add(new SupportedGroupsExtension(groups.ToArray()));
             ch.Extensions.Add(new EcPointFormatsExtension(new byte[] { 0 })); // uncompressed
             if (MaximumVersion == DtlsVersion.Dtls12)
@@ -142,6 +152,8 @@ namespace SharpDTLS.DTLS12
                 ch.Extensions.Add(new UseSrtpExtension(SrtpProtectionProfiles));
             if (offeredSuites.Any(s => s.RequiresSrp))
                 ch.Extensions.Add(new SrpExtension(SrpIdentity));
+            if (offeredSuites.Any(s => s.RequiresPwd))
+                ch.Extensions.Add(new PwdClearExtension(EccPwd.PrepareOpaqueString(PwdUsername)));
 
             _clientHello = ch;
 
@@ -300,6 +312,9 @@ namespace SharpDTLS.DTLS12
                 PskProvider = EffectivePskProvider,
                 SrpIdentity = SrpIdentity,
                 SrpPassword = SrpPassword,
+                PwdUsername = PwdUsername,
+                PwdPassword = PwdPassword,
+                PwdContext = () => Concat(ClientRandom, ServerRandom),
             });
 
             _state = _keyExchange.ServerKeyExchange switch

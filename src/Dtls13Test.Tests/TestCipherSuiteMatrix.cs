@@ -33,6 +33,13 @@ namespace Dtls13Test.Tests
 
         public static SrpVerifier ResolveSrp(byte[] identity) => identity.AsSpan().SequenceEqual(SrpIdentity) ? _srpVerifier.Value : null;
 
+        // RFC 8492 Appendix A test user.
+        public const string PwdUsername = "fred";
+        public const string PwdPassword = "barney";
+        private static readonly Lazy<PwdCredential> _pwdCredential = new(() => PwdCredential.Create(PwdUsername, PwdPassword));
+
+        public static PwdCredential ResolvePwd(string username) => username == PwdUsername ? _pwdCredential.Value : null;
+
         private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _rsa = new(() => Dtls12CryptoUtils.GenerateSelfSignedCertificate());
         private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _ecdsa = new(() => SharpDTLS.DTLS13.Dtls13CryptoUtils.GenerateSelfSignedEcCertificate());
         private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _dsa = new(GenerateDsa);
@@ -154,6 +161,11 @@ namespace Dtls13Test.Tests
             {
                 server.SrpVerifierProvider = TestCredentials.ResolveSrp;
                 (client.SrpIdentity, client.SrpPassword) = (TestCredentials.SrpIdentity, TestCredentials.SrpPassword);
+            }
+            if (suite.RequiresPwd)
+            {
+                server.PwdCredentialProvider = TestCredentials.ResolvePwd;
+                (client.PwdUsername, client.PwdPassword) = (TestCredentials.PwdUsername, TestCredentials.PwdPassword);
             }
             byte[] seenHint = null;
             if (suite.RequiresPsk)

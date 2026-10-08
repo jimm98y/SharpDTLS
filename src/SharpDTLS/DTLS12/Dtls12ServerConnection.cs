@@ -40,6 +40,12 @@ namespace SharpDTLS.DTLS12
 
         /// <summary>Maps an SRP username to its verifier (null for unknown users); enables the SRP suites.</summary>
         public Func<byte[], SrpVerifier> SrpVerifierProvider { get; set; }
+
+        /// <summary>
+        /// Maps a TLS-PWD username to its credential (null for unknown users, whose handshakes are simulated
+        /// and fail like a wrong password, RFC 8492 §4.5.1.1); enables the ECCPWD suites.
+        /// </summary>
+        public Func<string, PwdCredential> PwdCredentialProvider { get; set; }
     }
 
     /// <summary>
@@ -139,7 +145,9 @@ namespace SharpDTLS.DTLS12
                     && (s.ServerCertificateType == CertificateKeyType.None || (serverKey != null && Dtls12ClientConnection.KeyMatches(s.ServerCertificateType, serverKey)))
                     && (!s.IsStaticKeyAgreement || Dtls12ClientConnection.SignedWith(_settings.Certificate, s.RequiredCertificateSigner))
                     && (!s.RequiresPsk || _settings.PskIdentityResolver != null)
-                    && (!s.RequiresSrp || (_settings.SrpVerifierProvider != null && ch.Extension<SrpExtension>() != null)))
+                    && (!s.RequiresSrp || (_settings.SrpVerifierProvider != null && ch.Extension<SrpExtension>() != null))
+                    && (!s.RequiresPwd || (_settings.PwdCredentialProvider != null && ch.Extension<PwdClearExtension>() != null
+                                           && EccPwd.SelectGroup(ch) != 0)))
                 ?? throw new DtlsException(AlertDescription.HandshakeFailure, "No cipher suite in common.");
 
             _keyExchange = KeyExchanges.CreateServer(CipherSuite, new ServerKeyExchangeContext
@@ -149,6 +157,8 @@ namespace SharpDTLS.DTLS12
                 PskIdentityHint = _settings.PskIdentityHint,
                 PskResolver = _settings.PskIdentityResolver,
                 SrpVerifierProvider = _settings.SrpVerifierProvider,
+                PwdCredentialProvider = _settings.PwdCredentialProvider,
+                PwdContext = () => Concat(ClientRandom, ServerRandom),
             });
 
             // RFC 5746: secure renegotiation is signalled by the extension or the SCSV.

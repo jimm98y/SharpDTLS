@@ -74,6 +74,10 @@ namespace SharpDTLS.DTLS12
         public byte[] PskIdentityHint { get; init; }
         public Func<byte[], byte[]> PskResolver { get; init; }
         public Func<byte[], SrpVerifier> SrpVerifierProvider { get; init; }
+        public Func<string, PwdCredential> PwdCredentialProvider { get; init; }
+
+        /// <summary>ClientHello.random | ServerHello.random, once both are known (TLS-PWD hunting and pecking).</summary>
+        public Func<byte[]> PwdContext { get; init; }
     }
 
     internal sealed class ClientKeyExchangeContext
@@ -87,6 +91,12 @@ namespace SharpDTLS.DTLS12
 
         public byte[] SrpIdentity { get; init; }
         public byte[] SrpPassword { get; init; }
+
+        public string PwdUsername { get; init; }
+        public string PwdPassword { get; init; }
+
+        /// <summary>ClientHello.random | ServerHello.random (TLS-PWD hunting and pecking).</summary>
+        public Func<byte[]> PwdContext { get; init; }
     }
 
     internal static class KeyExchanges
@@ -106,6 +116,7 @@ namespace SharpDTLS.DTLS12
             KeyExchangeAlgorithm.ECDH_ECDSA or KeyExchangeAlgorithm.ECDH_RSA => new StaticEcdhServerKeyExchange(context),
             KeyExchangeAlgorithm.SRP_SHA => new SrpServerKeyExchange(context, signed: false),
             KeyExchangeAlgorithm.SRP_SHA_RSA or KeyExchangeAlgorithm.SRP_SHA_DSS => new SrpServerKeyExchange(context, signed: true),
+            KeyExchangeAlgorithm.ECCPWD => new EccPwdServerKeyExchange(context, suite),
             _ => throw new DtlsException(AlertDescription.InternalError, $"Key exchange {suite.KeyExchange} is not implemented."),
         };
 
@@ -124,6 +135,7 @@ namespace SharpDTLS.DTLS12
             KeyExchangeAlgorithm.ECDH_ECDSA or KeyExchangeAlgorithm.ECDH_RSA => new StaticEcdhClientKeyExchange(context),
             KeyExchangeAlgorithm.SRP_SHA => new SrpClientKeyExchange(context, signed: false),
             KeyExchangeAlgorithm.SRP_SHA_RSA or KeyExchangeAlgorithm.SRP_SHA_DSS => new SrpClientKeyExchange(context, signed: true),
+            KeyExchangeAlgorithm.ECCPWD => new EccPwdClientKeyExchange(context, suite),
             _ => throw new DtlsException(AlertDescription.InternalError, $"Key exchange {suite.KeyExchange} is not implemented."),
         };
     }
