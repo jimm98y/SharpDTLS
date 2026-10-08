@@ -148,7 +148,9 @@ namespace SharpDTLS.DTLS13.Messages
 
         public byte[] ToBytes()
         {
-            byte[] clientHello = new byte[2048];
+            // Sized from the content: post-quantum key shares alone exceed a kilobyte.
+            byte[] clientHello = new byte[512 + 2 * CipherSuites.Count + LegacySessionId.Length + LegacyCookie.Length
+                                          + Extensions.Sum(e => e.CalculateLength())];
 
             // DTLS record header
             clientHello[0] = 0x16; // TLS record type 22 (Handshake)

@@ -15,7 +15,7 @@
  *   -alpn <p1,p2,...>   offer (client) or accept (server) these ALPN protocols; prints "ALPN:<protocol>"
  *   <cert.pem> / -cert  may hold the certificate followed by its intermediates
  *   -cert <c> -key <k>  client: present a client certificate
- *   -group <name>       client: initial key share (x25519 | p256)
+ *   -group <name|id>    client: initial key share; server: the only accepted group (x25519 | p256 | IANA number)
  *   -srtp <profiles>    offer/accept DTLS-SRTP, e.g. SRTP_AES128_CM_SHA1_80; prints "SRTP:<hex keying material>"
  *   -export <label> <n> print "EXPORT:<hex>" of n bytes exported with label (empty context)
  *   -psk <hex> -psk_identity <id>   authenticate with an external PSK (TLS 1.3 PSK callbacks)
@@ -210,12 +210,19 @@ int main(int argc, char **argv)
     if (wolfSSL_set_dtls_fd_connected(ssl, fd) != WOLFSSL_SUCCESS)
         fail("set fd", NULL, 0);
 
+    /* post-quantum key shares make ClientHellos larger than one datagram */
+    if (server && wolfSSL_dtls13_allow_ch_frag(ssl, 1) != WOLFSSL_SUCCESS)
+        fail("allow ch frag", NULL, 0);
     if (server && hrr && wolfSSL_send_hrr_cookie(ssl, NULL, 0) != WOLFSSL_SUCCESS)
         fail("hrr cookie", NULL, 0);
-    if (!server && group) {
-        int g = !strcmp(group, "p256") ? WOLFSSL_ECC_SECP256R1 : WOLFSSL_ECC_X25519;
-        if (wolfSSL_UseKeyShare(ssl, g) != WOLFSSL_SUCCESS)
+    if (group) {
+        int g = !strcmp(group, "p256") ? WOLFSSL_ECC_SECP256R1 : !strcmp(group, "x25519") ? WOLFSSL_ECC_X25519 : atoi(group);
+        if (server) {
+            if (wolfSSL_set_groups(ssl, &g, 1) != WOLFSSL_SUCCESS)
+                fail("set groups", NULL, 0);
+        } else if (wolfSSL_UseKeyShare(ssl, (word16)g) != WOLFSSL_SUCCESS) {
             fail("key share", NULL, 0);
+        }
     }
 
     ret = server ? wolfSSL_accept(ssl) : wolfSSL_connect(ssl);

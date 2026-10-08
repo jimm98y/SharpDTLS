@@ -23,7 +23,7 @@ namespace SharpDTLS.DTLS13
         private static readonly byte[] _cookieKey;
         private static readonly BcTlsCrypto _crypto = new BcTlsCrypto();
 
-        private const byte CookieVersion = 1;
+        private const byte CookieVersion = 2;
         private static readonly TimeSpan CookieLifetime = TimeSpan.FromMinutes(2);
 
         static Dtls13CryptoUtils()
@@ -33,20 +33,20 @@ namespace SharpDTLS.DTLS13
         }
 
         // ── Stateless HelloRetryRequest cookie (RFC 8446 §4.2.2) ────────────────────────────────
-        // cookie = version(1) || timestamp(8) || cipher_suite(2) || flags(1) || hash_len(1) || Hash(ClientHello1) || HMAC-SHA256(32)
+        // cookie = version(1) || timestamp(8) || cipher_suite(2) || requested_group(2) || hash_len(1) || Hash(ClientHello1) || HMAC-SHA256(32)
         // The MAC also covers the client address so a cookie cannot be replayed from another address.
 
         public static byte[] CreateCookie(DateTime timestamp, string clientIP, int clientPort,
-            ushort cipherSuite = Dtls13CipherSuite.TLS_AES_128_GCM_SHA256, byte[] clientHelloHash = null, bool keyShareRequested = false)
+            ushort cipherSuite = Dtls13CipherSuite.TLS_AES_128_GCM_SHA256, byte[] clientHelloHash = null, ushort requestedGroup = 0)
         {
             clientHelloHash ??= Array.Empty<byte>();
-            byte[] payload = new byte[1 + 8 + 2 + 1 + 1 + clientHelloHash.Length];
+            byte[] payload = new byte[1 + 8 + 2 + 2 + 1 + clientHelloHash.Length];
             payload[0] = CookieVersion;
             BinaryPrimitives.WriteInt64BigEndian(payload.AsSpan(1, 8), timestamp.ToUniversalTime().Ticks);
             BinaryPrimitives.WriteUInt16BigEndian(payload.AsSpan(9, 2), cipherSuite);
-            payload[11] = (byte)(keyShareRequested ? 1 : 0);
-            payload[12] = (byte)clientHelloHash.Length;
-            Buffer.BlockCopy(clientHelloHash, 0, payload, 13, clientHelloHash.Length);
+            BinaryPrimitives.WriteUInt16BigEndian(payload.AsSpan(11, 2), requestedGroup);
+            payload[13] = (byte)clientHelloHash.Length;
+            Buffer.BlockCopy(clientHelloHash, 0, payload, 14, clientHelloHash.Length);
 
             byte[] mac = CookieMac(clientIP, clientPort, payload);
             byte[] cookie = new byte[payload.Length + mac.Length];
@@ -56,17 +56,17 @@ namespace SharpDTLS.DTLS13
         }
 
         public static bool ValidateCookie(DateTime now, string clientIP, int clientPort, byte[] cookie,
-            out ushort cipherSuite, out byte[] clientHelloHash, out bool keyShareRequested)
+            out ushort cipherSuite, out byte[] clientHelloHash, out ushort requestedGroup)
         {
             cipherSuite = 0;
             clientHelloHash = null;
-            keyShareRequested = false;
+            requestedGroup = 0;
 
-            if (cookie == null || cookie.Length < 13 + 32 || cookie[0] != CookieVersion)
+            if (cookie == null || cookie.Length < 14 + 32 || cookie[0] != CookieVersion)
                 return false;
 
-            int hashLength = cookie[12];
-            int payloadLength = 13 + hashLength;
+            int hashLength = cookie[13];
+            int payloadLength = 14 + hashLength;
             if (cookie.Length != payloadLength + 32)
                 return false;
 
@@ -80,8 +80,8 @@ namespace SharpDTLS.DTLS13
                 return false;
 
             cipherSuite = BinaryPrimitives.ReadUInt16BigEndian(cookie.AsSpan(9, 2));
-            keyShareRequested = cookie[11] == 1;
-            clientHelloHash = cookie.AsSpan(13, hashLength).ToArray();
+            requestedGroup = BinaryPrimitives.ReadUInt16BigEndian(cookie.AsSpan(11, 2));
+            clientHelloHash = cookie.AsSpan(14, hashLength).ToArray();
             return true;
         }
 

@@ -40,8 +40,6 @@ namespace SharpDTLS.DTLS13
     /// </summary>
     public class Dtls13Server
     {
-        private const ushort GroupX25519 = 0x001d;
-
         private readonly ConcurrentDictionary<string, Dtls13ServerConnection> _connections = new();
         private readonly ClientHelloReassembler _clientHelloReassembler = new();
 
@@ -73,6 +71,12 @@ namespace SharpDTLS.DTLS13
 
         /// <summary>Application protocols (ALPN, RFC 7301) in server preference order; null to ignore ALPN.</summary>
         public IList<string> ApplicationProtocols { get; set; }
+
+        /// <summary>
+        /// Key exchange groups in server preference order (see <see cref="Dtls13Groups"/>). A group the client already
+        /// sent a share for is preferred, to avoid a HelloRetryRequest; otherwise the server asks for its best group.
+        /// </summary>
+        public IList<ushort> SupportedGroups { get; set; } = new List<ushort>(Dtls13Groups.DefaultPreference);
 
         /// <summary>
         /// Negotiate connection IDs (RFC 9147 §9) with clients that offer them: their records are then routed by CID,
@@ -262,34 +266,48 @@ namespace SharpDTLS.DTLS13
             bool pskOnly = AllowPskOnlyKeyExchange && clientHello.Extensions.OfType<ClientPreSharedKeyExtension>().Any()
                            && modes != null && modes.Modes.Contains(PskKeyExchangeModesExtension.PskKe)
                            && !modes.Modes.Contains(PskKeyExchangeModesExtension.PskDheKe);
-            var groups = clientHello.Extensions.OfType<SupportedGroups>().FirstOrDefault();
-            if (!pskOnly && (groups == null || !groups.Groups.Contains(GroupX25519)))
+            // Group: the server's most preferred one the client sent a share for, else its most preferred mutual
+            // group, requested with a HelloRetryRequest (RFC 8446 §4.2.8).
+            var offeredGroups = clientHello.Extensions.OfType<SupportedGroups>().FirstOrDefault()?.Groups ?? Array.Empty<ushort>();
+            var shares = clientHello.Extensions.OfType<ClientKeyShareExtension>().FirstOrDefault();
+            var mutual = SupportedGroups.Where(g => offeredGroups.Contains(g) && Dtls13Groups.IsSupported(g)).ToList();
+            ushort shareGroup = mutual.FirstOrDefault(g => shares?.GetKeyShare(g) != null);
+            if (!pskOnly && mutual.Count == 0)
                 throw new DtlsException(AlertDescription.HandshakeFailure, "No supported key exchange group in common.");
 
             ushort suiteId = CipherSuites.FirstOrDefault(s => clientHello.CipherSuites.Contains(s));
             if (suiteId == 0)
                 throw new DtlsException(AlertDescription.HandshakeFailure, "No cipher suite in common.");
 
-            bool hasKeyShare = clientHello.PublicKey != null;
+            bool hasKeyShare = shareGroup != 0;
             var ipEndpoint = (IPEndPoint)endpoint;
             string ip = ipEndpoint.Address.ToString();
 
             HelloRetryState retry = null;
             var cookie = clientHello.Extensions.OfType<CookieExtension>().FirstOrDefault();
             if (cookie != null && Dtls13CryptoUtils.ValidateCookie(DateTime.UtcNow, ip, ipEndpoint.Port, cookie.Cookie,
-                    out ushort cookieSuite, out byte[] clientHello1Hash, out bool keyShareRequested))
+                    out ushort cookieSuite, out byte[] clientHello1Hash, out ushort requestedGroup))
             {
                 if (!clientHello.CipherSuites.Contains(cookieSuite) || !CipherSuites.Contains(cookieSuite))
                     throw new DtlsException(AlertDescription.IllegalParameter, "ClientHello2 does not offer the cipher suite selected in HelloRetryRequest.");
-                if (!hasKeyShare && !pskOnly)
-                    throw new DtlsException(AlertDescription.IllegalParameter, "ClientHello2 has no x25519 key share.");
+                // ClientHello2 must carry a share for the group the HelloRetryRequest asked for (RFC 8446 §4.1.2).
+                if (requestedGroup != 0)
+                {
+                    if (shares?.GetKeyShare(requestedGroup) == null)
+                        throw new DtlsException(AlertDescription.IllegalParameter, $"ClientHello2 has no {Dtls13Groups.Name(requestedGroup)} key share.");
+                    shareGroup = requestedGroup;
+                }
+                else if (!hasKeyShare && !pskOnly)
+                {
+                    throw new DtlsException(AlertDescription.IllegalParameter, "ClientHello2 has no usable key share.");
+                }
 
                 suiteId = cookieSuite;
-                retry = new HelloRetryState(clientHello1Hash, cookie.Cookie, keyShareRequested);
+                retry = new HelloRetryState(clientHello1Hash, cookie.Cookie, requestedGroup);
             }
             else if (ShouldSendHelloRetry || (!hasKeyShare && !pskOnly))
             {
-                SendHelloRetryRequest(endpoint, record, clientHello, suiteId, requestKeyShare: !hasKeyShare && !pskOnly);
+                SendHelloRetryRequest(endpoint, record, clientHello, suiteId, requestedGroup: !hasKeyShare && !pskOnly ? mutual[0] : (ushort)0);
                 return;
             }
 
@@ -300,7 +318,7 @@ namespace SharpDTLS.DTLS13
                 return;
             }
 
-            connection.Start(record, clientHello, Dtls13CipherSuite.Get(suiteId), retry);
+            connection.Start(record, clientHello, Dtls13CipherSuite.Get(suiteId), retry, shareGroup);
             if (connection.ConnectionId != null && !connection.IsClosed)
                 _connectionsById[Convert.ToHexString(connection.ConnectionId)] = connection;
         }
@@ -314,7 +332,7 @@ namespace SharpDTLS.DTLS13
             _connections[connection.RemoteEndPoint.ToString()] = connection;
         }
 
-        private void SendHelloRetryRequest(EndPoint endpoint, byte[] record, ClientHelloDatagram clientHello, ushort suiteId, bool requestKeyShare)
+        private void SendHelloRetryRequest(EndPoint endpoint, byte[] record, ClientHelloDatagram clientHello, ushort suiteId, ushort requestedGroup)
         {
             var suite = Dtls13CipherSuite.Get(suiteId);
             var transcript = new Dtls13Transcript();
@@ -322,10 +340,10 @@ namespace SharpDTLS.DTLS13
 
             var ipEndpoint = (IPEndPoint)endpoint;
             byte[] cookie = Dtls13CryptoUtils.CreateCookie(DateTime.UtcNow, ipEndpoint.Address.ToString(), ipEndpoint.Port,
-                suiteId, transcript.Hash(suite), requestKeyShare);
+                suiteId, transcript.Hash(suite), requestedGroup);
 
             // RFC 9147 §5: DTLS servers never echo legacy_session_id.
-            var hrr = new HelloRetryRequest(suiteId, cookie, requestKeyShare ? GroupX25519 : null, Array.Empty<byte>())
+            var hrr = new HelloRetryRequest(suiteId, cookie, requestedGroup != 0 ? requestedGroup : null, Array.Empty<byte>())
             {
                 SequenceNumber = clientHello.SequenceNumber,
                 // RFC 9147 §5.1: reuse the ClientHello's record sequence number so a stateless server never repeats one.
@@ -364,16 +382,16 @@ namespace SharpDTLS.DTLS13
 
         internal sealed class HelloRetryState
         {
-            public HelloRetryState(byte[] clientHello1Hash, byte[] cookie, bool keyShareRequested)
+            public HelloRetryState(byte[] clientHello1Hash, byte[] cookie, ushort requestedGroup)
             {
                 ClientHello1Hash = clientHello1Hash;
                 Cookie = cookie;
-                KeyShareRequested = keyShareRequested;
+                RequestedGroup = requestedGroup;
             }
 
             public byte[] ClientHello1Hash { get; }
             public byte[] Cookie { get; }
-            public bool KeyShareRequested { get; }
+            public ushort RequestedGroup { get; }
         }
     }
 
@@ -382,8 +400,6 @@ namespace SharpDTLS.DTLS13
     /// </summary>
     public class Dtls13ServerConnection : Dtls13Connection
     {
-        private const ushort GroupX25519 = 0x001d;
-
         private enum State
         {
             Start,
@@ -400,6 +416,10 @@ namespace SharpDTLS.DTLS13
         private X509Certificate _clientCertificate;
         private byte[] _psk;
         private int _pskIdentity;
+        private ushort _group;
+
+        /// <summary>The negotiated key exchange group, or 0 (psk_ke).</summary>
+        public ushort NegotiatedGroup { get; private set; }
         private bool _pskOnly;
         private bool _helloRetried;
         private Dtls13TicketState _ticketState;
@@ -487,18 +507,19 @@ namespace SharpDTLS.DTLS13
             Closed += (_, _) => _server.OnConnectionClosed(this);
         }
 
-        internal void Start(byte[] record, ClientHelloDatagram clientHello, Dtls13CipherSuite suite, Dtls13Server.HelloRetryState retry)
+        internal void Start(byte[] record, ClientHelloDatagram clientHello, Dtls13CipherSuite suite, Dtls13Server.HelloRetryState retry, ushort group)
         {
             Run(() =>
             {
                 _clientHello = clientHello;
+                _group = group;
                 Session.CipherSuite = suite;
 
                 if (retry != null)
                 {
                     // Rebuild the transcript the client has: message_hash(ClientHello1) || HelloRetryRequest || ClientHello2.
                     // The HelloRetryRequest is deterministic given the cookie, so it can be recreated byte for byte.
-                    var hrr = new HelloRetryRequest(suite.Id, retry.Cookie, retry.KeyShareRequested ? GroupX25519 : null, Array.Empty<byte>());
+                    var hrr = new HelloRetryRequest(suite.Id, retry.Cookie, retry.RequestedGroup != 0 ? retry.RequestedGroup : null, Array.Empty<byte>());
                     Session.Transcript.AddMessageHash(retry.ClientHello1Hash);
                     Session.Transcript.AddPlaintextRecord(hrr.ToBytes());
                 }
@@ -520,7 +541,7 @@ namespace SharpDTLS.DTLS13
                 }
 
                 SelectPsk(record);
-                if (_psk == null && (_clientHello.PublicKey == null || _certificate == null))
+                if (_psk == null && (_group == 0 || _certificate == null))
                     throw new DtlsException(AlertDescription.HandshakeFailure,
                         _certificate == null ? "PSK-only server and no acceptable PSK." : "No key share and no acceptable PSK.");
                 Session.Transcript.AddPlaintextRecord(record);
@@ -559,7 +580,7 @@ namespace SharpDTLS.DTLS13
             var modes = _clientHello.Extensions.OfType<PskKeyExchangeModesExtension>().FirstOrDefault();
             if (modes == null)
                 throw new DtlsException(AlertDescription.MissingExtension, "pre_shared_key without psk_key_exchange_modes.");
-            bool dhe = modes.Modes.Contains(PskKeyExchangeModesExtension.PskDheKe) && _clientHello.PublicKey != null;
+            bool dhe = modes.Modes.Contains(PskKeyExchangeModesExtension.PskDheKe) && _group != 0;
             bool pskOnly = !dhe && _server.AllowPskOnlyKeyExchange && modes.Modes.Contains(PskKeyExchangeModesExtension.PskKe);
             if (!dhe && !pskOnly)
                 return;
@@ -649,23 +670,28 @@ namespace SharpDTLS.DTLS13
         {
             var suite = Session.CipherSuite;
 
-            var (privateKey, publicKey) = Dtls13CryptoUtils.CreateX25519KeyPair();
-            Session.PrivateKey = privateKey.GetEncoded();
-            Session.PublicKey = publicKey.GetEncoded();
+            // The key share for the chosen group (none for psk_ke).
+            byte[] share = null, sharedSecret = null;
+            if (!_pskOnly)
+            {
+                (share, sharedSecret) = Dtls13Groups.Respond(_group,
+                    _clientHello.Extensions.OfType<ClientKeyShareExtension>().First().GetKeyShare(_group));
+                NegotiatedGroup = _group;
+            }
 
             BeginFlight();
 
             // RFC 9147 §5: legacy_session_id_echo stays empty, whatever the client sent (no compatibility mode).
-            var serverHello = new ServerHelloDatagram(Session.PublicKey, suite.Id, Dtls13CryptoUtils.GenerateRandom(32));
+            var serverHello = new ServerHelloDatagram(Array.Empty<byte>(), suite.Id, Dtls13CryptoUtils.GenerateRandom(32));
+            serverHello.Extensions.RemoveAll(e => e is ServerKeyShareExtension);
+            if (!_pskOnly)
+                serverHello.Extensions.Insert(0, new ServerKeyShareExtension(_group, share));
             if (_psk != null)
                 serverHello.Extensions.Add(new ServerPreSharedKeyExtension((ushort)_pskIdentity));
-            if (_pskOnly)
-                serverHello.Extensions.RemoveAll(e => e is ServerKeyShareExtension);
             if (ReadConnectionId != null)
                 serverHello.Extensions.Add(new ConnectionIdExtension(ReadConnectionId));
             Session.Transcript.AddPlaintextRecord(SendPlaintextHandshake(serverHello));
 
-            byte[] sharedSecret = _pskOnly ? null : Dtls13CryptoUtils.DeriveSharedSecretX25519(Session.PrivateKey, _clientHello.PublicKey);
             var handshakeKeys = Dtls13CryptoUtils.CalculateHandshakeKeys(_clientHello.ClientRandom, Session.Transcript.Hash(suite), sharedSecret, suite, _psk);
             Session.ServerHandshakeKeys = handshakeKeys;
             Session.WriteKeys = handshakeKeys;
