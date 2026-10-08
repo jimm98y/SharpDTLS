@@ -29,6 +29,70 @@ namespace Dtls13Test.Tests
         private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _rsa = new(() => Dtls12CryptoUtils.GenerateSelfSignedCertificate());
         private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _ecdsa = new(() => SharpDTLS.DTLS13.Dtls13CryptoUtils.GenerateSelfSignedEcCertificate());
         private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _dsa = new(GenerateDsa);
+        private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _dhRsa = new(() => GenerateDh(_rsa.Value.Item1.Private, "SHA256WITHRSA"));
+        private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _dhDss = new(() => GenerateDh(_dsa.Value.Item1.Private, "SHA256WITHDSA"));
+        private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _ecdhRsa = new(() => GenerateEcdh(_rsa.Value.Item1.Private, "SHA256WITHRSA"));
+
+        // Fixed (EC)DH client certificates: distinct keys on the server's group or curve (RFC 5246 §7.4.6, RFC 8422 §3).
+        private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _dhRsaClient = new(() => GenerateDh(_rsa.Value.Item1.Private, "SHA256WITHRSA"));
+        private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _dhDssClient = new(() => GenerateDh(_dsa.Value.Item1.Private, "SHA256WITHDSA"));
+        private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _ecdhRsaClient = new(() => GenerateEcdh(_rsa.Value.Item1.Private, "SHA256WITHRSA"));
+        private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _ecdhEcdsaClient = new(() => GenerateEcdh(_ecdsa.Value.Item1.Private, "SHA256WITHECDSA"));
+
+        /// <summary>Fixed (EC)DH client credentials for a static key agreement suite; (null, null) otherwise.</summary>
+        public static (AsymmetricCipherKeyPair KeyPair, X509Certificate Certificate) FixedClientFor(CipherSuiteInfo suite) => suite.KeyExchange switch
+        {
+            KeyExchangeAlgorithm.DH_RSA => _dhRsaClient.Value,
+            KeyExchangeAlgorithm.DH_DSS => _dhDssClient.Value,
+            KeyExchangeAlgorithm.ECDH_RSA => _ecdhRsaClient.Value,
+            KeyExchangeAlgorithm.ECDH_ECDSA => _ecdhEcdsaClient.Value,
+            _ => (null, null),
+        };
+
+        /// <summary>Server credentials for <paramref name="suite"/>, including static (EC)DH certificates.</summary>
+        public static (AsymmetricCipherKeyPair KeyPair, X509Certificate Certificate) For(CipherSuiteInfo suite) => suite.KeyExchange switch
+        {
+            KeyExchangeAlgorithm.DH_RSA => _dhRsa.Value,
+            KeyExchangeAlgorithm.DH_DSS => _dhDss.Value,
+            KeyExchangeAlgorithm.ECDH_RSA => _ecdhRsa.Value,
+            KeyExchangeAlgorithm.ECDH_ECDSA => _ecdsa.Value,
+            _ => For(suite.ServerCertificateType),
+        };
+
+        private static X509Certificate Certify(AsymmetricKeyParameter subjectKey, AsymmetricKeyParameter issuerKey, string algorithm, string name)
+        {
+            var certGenerator = new X509V3CertificateGenerator();
+            certGenerator.SetSerialNumber(BigInteger.ValueOf(Environment.TickCount64));
+            certGenerator.SetIssuerDN(new X509Name("CN=SharpDTLS Test CA"));
+            certGenerator.SetSubjectDN(new X509Name("CN=" + name));
+            certGenerator.SetNotBefore(DateTime.UtcNow.AddDays(-1));
+            certGenerator.SetNotAfter(DateTime.UtcNow.AddYears(1));
+            certGenerator.SetPublicKey(subjectKey);
+            return certGenerator.Generate(new Asn1SignatureFactory(algorithm, issuerKey, new SecureRandom()));
+        }
+
+        private static (AsymmetricCipherKeyPair, X509Certificate) GenerateDh(AsymmetricKeyParameter issuerKey, string algorithm)
+        {
+            var generator = new DHKeyPairGenerator();
+            generator.Init(new DHKeyGenerationParameters(new SecureRandom(), FfdheGroups.Parameters(FfdheGroups.Ffdhe2048)));
+            var keyPair = generator.GenerateKeyPair();
+            var certificate = Certify(keyPair.Public, issuerKey, algorithm, "SharpDTLS static DH");
+
+            // Use the parameters as decoded from the certificate (as loading the key from PKCS#8 would):
+            // BouncyCastle requires identical DHParameters on both keys of an agreement.
+            var publicKey = (DHPublicKeyParameters)certificate.GetPublicKey();
+            var privateKey = new DHPrivateKeyParameters(((DHPrivateKeyParameters)keyPair.Private).X, publicKey.Parameters);
+            return (new AsymmetricCipherKeyPair(publicKey, privateKey), certificate);
+        }
+
+        private static (AsymmetricCipherKeyPair, X509Certificate) GenerateEcdh(AsymmetricKeyParameter issuerKey, string algorithm)
+        {
+            var ec = Org.BouncyCastle.Asn1.X9.ECNamedCurveTable.GetByName("P-256");
+            var generator = new ECKeyPairGenerator();
+            generator.Init(new ECKeyGenerationParameters(new ECDomainParameters(ec.Curve, ec.G, ec.N, ec.H), new SecureRandom()));
+            var keyPair = generator.GenerateKeyPair();
+            return (keyPair, Certify(keyPair.Public, issuerKey, algorithm, "SharpDTLS static ECDH"));
+        }
 
         public static (AsymmetricCipherKeyPair KeyPair, X509Certificate Certificate) For(CertificateKeyType type) => type switch
         {
@@ -69,11 +133,16 @@ namespace Dtls13Test.Tests
         {
             var suite = CipherSuites.Get(id);
             ushort version = suite.IsUsableWith(DtlsVersion.Dtls12) ? DtlsVersion.Dtls12 : DtlsVersion.Dtls10;
-            var (keyPair, certificate) = TestCredentials.For(suite.ServerCertificateType);
+            var (keyPair, certificate) = TestCredentials.For(suite);
 
             var pair = new ScriptedTransportPair();
             var server = new Dtls12Server(pair.Server, keyPair, certificate) { MinimumVersion = DtlsVersion.Dtls10, CipherSuites = new List<ushort> { id } };
-            var client = new Dtls12Client(pair.Client) { MinimumVersion = version, MaximumVersion = version, CipherSuites = new List<ushort> { id } };
+            var client = new Dtls12Client(pair.Client) { MinimumVersion = version, MaximumVersion = version, CipherSuites = new List<ushort> { id }, MinimumDhPrimeBits = 2048 };
+            if (suite.IsStaticKeyAgreement)
+            {
+                server.RequireClientCertificate = true;
+                (client.ClientCertificateKeyPair, client.ClientCertificate) = TestCredentials.FixedClientFor(suite);
+            }
             byte[] seenHint = null;
             if (suite.RequiresPsk)
             {
@@ -94,6 +163,8 @@ namespace Dtls13Test.Tests
             Assert.AreEqual(version, client.NegotiatedVersion);
             if (suite.RequiresPsk)
                 CollectionAssert.AreEqual(TestCredentials.PskHint, seenHint, "the server's identity hint reaches the client");
+            if (suite.IsStaticKeyAgreement)
+                Assert.AreEqual(client.ClientCertificate, server.Connections.Single().ClientCertificate, "fixed (EC)DH client authentication");
 
             for (int i = 0; i < 20; i++)
                 client.SendApplicationData(Encoding.UTF8.GetBytes($"{name}-{i}"));

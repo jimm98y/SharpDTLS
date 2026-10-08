@@ -1,8 +1,10 @@
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Tls;
+using AlertDescription = Org.BouncyCastle.Tls.AlertDescription;
 using Org.BouncyCastle.Tls.Crypto;
 using Org.BouncyCastle.Tls.Crypto.Impl.BC;
+using X509Certificate = Org.BouncyCastle.X509.X509Certificate;
 using SharpDTLS;
 using SharpDTLS.DTLS12;
 using SharpSRTP.UDP;
@@ -111,6 +113,29 @@ namespace Dtls13Test.Tests
         protected override TlsCredentialedSigner GetDsaSignerCredentials() => Signer(SignatureAlgorithm.dsa);
         protected override TlsCredentialedSigner GetECDsaSignerCredentials() => Signer(SignatureAlgorithm.ecdsa);
         protected override TlsCredentialedDecryptor GetRsaEncryptionCredentials() => new BcDefaultTlsCredentialedDecryptor((BcTlsCrypto)Crypto, Chain(), _privateKey);
+
+        // BouncyCastle implements static (EC)DH only with fixed (EC)DH client authentication.
+        public override CertificateRequest GetCertificateRequest()
+        {
+            int keyExchange = TlsUtilities.GetKeyExchangeAlgorithm(m_selectedCipherSuite);
+            if (keyExchange is not (Org.BouncyCastle.Tls.KeyExchangeAlgorithm.DH_DSS or Org.BouncyCastle.Tls.KeyExchangeAlgorithm.DH_RSA
+                or Org.BouncyCastle.Tls.KeyExchangeAlgorithm.ECDH_ECDSA or Org.BouncyCastle.Tls.KeyExchangeAlgorithm.ECDH_RSA))
+                return null;
+            var types = new short[] { ClientCertificateType.rsa_fixed_dh, ClientCertificateType.dss_fixed_dh, ClientCertificateType.rsa_fixed_ecdh, ClientCertificateType.ecdsa_fixed_ecdh };
+            var algorithms = TlsUtilities.IsTlsV12(m_context) ? TlsUtilities.GetDefaultSupportedSignatureAlgorithms(m_context) : null;
+            return new CertificateRequest(types, algorithms, null);
+        }
+
+        // Static DH / ECDH suites authenticate with the certificate's key agreement key.
+        public override TlsCredentials GetCredentials()
+        {
+            int keyExchange = TlsUtilities.GetKeyExchangeAlgorithm(m_selectedCipherSuite);
+            return keyExchange is Org.BouncyCastle.Tls.KeyExchangeAlgorithm.DH_DSS or Org.BouncyCastle.Tls.KeyExchangeAlgorithm.DH_RSA or Org.BouncyCastle.Tls.KeyExchangeAlgorithm.ECDH_ECDSA or Org.BouncyCastle.Tls.KeyExchangeAlgorithm.ECDH_RSA
+                ? new BcDefaultTlsCredentialedAgreement((BcTlsCrypto)Crypto, Chain(), _privateKey)
+                : base.GetCredentials();
+        }
+
+        public override void NotifyClientCertificate(Certificate clientCertificate) { }
     }
 
     internal sealed class BcPskIdentityManager : TlsPskIdentityManager
@@ -168,20 +193,34 @@ namespace Dtls13Test.Tests
     {
         private readonly int[] _suites;
         private readonly ProtocolVersion[] _versions;
+        private readonly AsymmetricCipherKeyPair _fixedKeyPair;
+        private readonly X509Certificate _fixedCertificate;
 
-        public BcTestClient(BcTlsCrypto crypto, int suite, ProtocolVersion version) : base(crypto)
+        /// <param name="fixedKeyPair">Key agreement key for fixed (EC)DH client authentication, or null.</param>
+        public BcTestClient(BcTlsCrypto crypto, int suite, ProtocolVersion version, AsymmetricCipherKeyPair fixedKeyPair = null, X509Certificate fixedCertificate = null)
+            : base(crypto)
         {
             _suites = new[] { suite };
             _versions = version.Only();
+            _fixedKeyPair = fixedKeyPair;
+            _fixedCertificate = fixedCertificate;
         }
 
         protected override ProtocolVersion[] GetSupportedVersions() => _versions;
         protected override int[] GetSupportedCipherSuites() => _suites;
-        public override TlsAuthentication GetAuthentication() => new AcceptAnyServer();
+        public override TlsAuthentication GetAuthentication() => new Authentication(this);
 
-        private sealed class AcceptAnyServer : ServerOnlyTlsAuthentication
+        private sealed class Authentication(BcTestClient owner) : TlsAuthentication
         {
-            public override void NotifyServerCertificate(TlsServerCertificate serverCertificate) { }
+            public void NotifyServerCertificate(TlsServerCertificate serverCertificate) { }
+
+            public TlsCredentials GetClientCredentials(CertificateRequest certificateRequest)
+            {
+                if (owner._fixedKeyPair == null)
+                    return null;
+                var chain = new Certificate(new[] { owner.Crypto.CreateCertificate(owner._fixedCertificate.GetEncoded()) });
+                return new BcDefaultTlsCredentialedAgreement((BcTlsCrypto)owner.Crypto, chain, owner._fixedKeyPair.Private);
+            }
         }
     }
 
@@ -223,7 +262,7 @@ namespace Dtls13Test.Tests
         public void SharpDtlsClient_To_BouncyCastleServer(ushort id, string name)
         {
             var (suite, crypto, bcVersion, version) = Prepare(id);
-            var (keyPair, certificate) = TestCredentials.For(suite.ServerCertificateType);
+            var (keyPair, certificate) = TestCredentials.For(suite);
 
             using var serverSocket = LoopbackSocket();
             int port = ((IPEndPoint)serverSocket.LocalEndPoint).Port;
@@ -244,6 +283,8 @@ namespace Dtls13Test.Tests
 
             using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
             var client = new Dtls12Client(transport) { MinimumVersion = version, MaximumVersion = version, CipherSuites = new List<ushort> { id } };
+            if (suite.IsStaticKeyAgreement)
+                (client.ClientCertificateKeyPair, client.ClientCertificate) = TestCredentials.FixedClientFor(suite);
             if (suite.RequiresPsk)
             {
                 client.PskIdentity = TestCredentials.PskIdentity;
@@ -277,10 +318,13 @@ namespace Dtls13Test.Tests
         public void BouncyCastleClient_To_SharpDtlsServer(ushort id, string name)
         {
             var (suite, crypto, bcVersion, version) = Prepare(id);
-            var (keyPair, certificate) = TestCredentials.For(suite.ServerCertificateType);
+            var (keyPair, certificate) = TestCredentials.For(suite);
 
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
             var server = new Dtls12Server(transport, keyPair, certificate) { MinimumVersion = DtlsVersion.Dtls10, CipherSuites = new List<ushort> { id } };
+            var (fixedKeyPair, fixedCertificate) = TestCredentials.FixedClientFor(suite);
+            if (suite.IsStaticKeyAgreement)
+                server.RequireClientCertificate = true;
             if (suite.RequiresPsk)
             {
                 server.PskIdentityResolver = TestCredentials.ResolvePsk;
@@ -292,7 +336,7 @@ namespace Dtls13Test.Tests
             clientSocket.Connect(new IPEndPoint(IPAddress.Loopback, transport.LocalEndpoint.Port));
             var bcClient = RunBlocking(() =>
             {
-                TlsClient bcClientPeer = suite.RequiresPsk ? new BcPskTestClient(crypto, id, bcVersion) : new BcTestClient(crypto, id, bcVersion);
+                TlsClient bcClientPeer = suite.RequiresPsk ? new BcPskTestClient(crypto, id, bcVersion) : new BcTestClient(crypto, id, bcVersion, fixedKeyPair, fixedCertificate);
                 var dtls = new DtlsClientProtocol().Connect(bcClientPeer, new BcUdpTransport(clientSocket));
                 byte[] ping = Encoding.UTF8.GetBytes("ping");
                 dtls.Send(ping, 0, ping.Length);
@@ -304,6 +348,8 @@ namespace Dtls13Test.Tests
             Assert.IsTrue(bcClient.Wait(Timeout), $"{name}: BouncyCastle client did not finish");
             Assert.AreEqual("pong:ping", bcClient.Result);
             Assert.AreEqual(id, server.Connections.Single().CipherSuite.Id);
+            if (suite.IsStaticKeyAgreement)
+                Assert.AreEqual(fixedCertificate, server.Connections.Single().ClientCertificate, "fixed (EC)DH client authentication");
         }
     }
 }

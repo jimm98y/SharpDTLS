@@ -323,21 +323,32 @@ namespace SharpDTLS.DTLS12
         {
             BeginFlight();
 
-            // Certificate (only when requested). Send ours only if its type and a signature scheme are accepted.
+            // Certificate (only when requested). Send ours only if its type and a signature scheme are accepted,
+            // or, with static (EC)DH, if it holds a key agreement key on the server's parameters (fixed (EC)DH).
             bool authenticate = false;
+            bool fixedKeyAgreement = false;
+            if (_certificateRequest != null && ClientCertificate != null && ClientCertificateKeyPair != null)
+            {
+                var key = ClientCertificateKeyPair.Private;
+                fixedKeyAgreement = CipherSuite.IsStaticKeyAgreement && _keyExchange.SupportsFixedClientKey(key)
+                    && FixedTypeAccepted(_certificateRequest, ClientCertificate);
+                authenticate = !fixedKeyAgreement && CertificateTypeAccepted(_certificateRequest, key)
+                    && (!IsDtls12 || Dtls12Signatures.SelectScheme(key, _certificateRequest.SignatureAlgorithms) != null);
+            }
+
             if (_certificateRequest != null)
             {
-                authenticate = ClientCertificate != null && ClientCertificateKeyPair != null
-                    && CertificateTypeAccepted(_certificateRequest, ClientCertificateKeyPair.Private)
-                    && (!IsDtls12 || Dtls12Signatures.SelectScheme(ClientCertificateKeyPair.Private, _certificateRequest.SignatureAlgorithms) != null);
-
                 var certificate = new CertificateMessage();
-                if (authenticate)
+                if (authenticate || fixedKeyAgreement)
                     certificate.Chain.Add(ClientCertificate.GetEncoded());
                 SendHandshake(HandshakeType.Certificate, certificate.Encode());
             }
 
-            SendHandshake(HandshakeType.ClientKeyExchange, _keyExchange.CreateClientKeyExchange(out byte[] preMasterSecret));
+            byte[] preMasterSecret;
+            byte[] clientKeyExchange = fixedKeyAgreement
+                ? _keyExchange.CreateFixedClientKeyExchange(ClientCertificateKeyPair.Private, out preMasterSecret)
+                : _keyExchange.CreateClientKeyExchange(out preMasterSecret);
+            SendHandshake(HandshakeType.ClientKeyExchange, clientKeyExchange);
             DeriveKeys(preMasterSecret);
 
             if (authenticate)
@@ -410,8 +421,40 @@ namespace SharpDTLS.DTLS12
             CertificateKeyType.Rsa => key is RsaKeyParameters,
             CertificateKeyType.Ecdsa => key is ECKeyParameters,
             CertificateKeyType.Dsa => key is DsaKeyParameters,
+            CertificateKeyType.Dh => key is DHKeyParameters,
+            CertificateKeyType.Ecdh => key is ECKeyParameters,
             _ => true,
         };
+
+        /// <summary>Whether <paramref name="certificate"/> is signed with the algorithm family <paramref name="signer"/>.</summary>
+        internal static bool SignedWith(X509Certificate certificate, CertificateKeyType signer)
+        {
+            string algorithm = certificate.SigAlgName.ToUpperInvariant();
+            return signer switch
+            {
+                CertificateKeyType.None => true,
+                CertificateKeyType.Ecdsa => algorithm.Contains("ECDSA"),
+                CertificateKeyType.Dsa => algorithm.Contains("DSA") && !algorithm.Contains("ECDSA"),
+                CertificateKeyType.Rsa => algorithm.Contains("RSA"),
+                _ => false,
+            };
+        }
+
+        // RFC 5246 §7.4.4 / RFC 8422 §5.5 fixed key agreement certificate types:
+        // rsa_fixed_dh(3), dss_fixed_dh(4), rsa_fixed_ecdh(65), ecdsa_fixed_ecdh(66), chosen by key and issuer signature.
+        internal static bool FixedTypeAccepted(CertificateRequestMessage request, X509Certificate certificate)
+        {
+            var key = certificate.GetPublicKey();
+            byte type = key switch
+            {
+                DHKeyParameters when SignedWith(certificate, CertificateKeyType.Rsa) => 3,
+                DHKeyParameters when SignedWith(certificate, CertificateKeyType.Dsa) => 4,
+                ECKeyParameters when SignedWith(certificate, CertificateKeyType.Rsa) => 65,
+                ECKeyParameters when SignedWith(certificate, CertificateKeyType.Ecdsa) => 66,
+                _ => 0,
+            };
+            return type != 0 && request.CertificateTypes.Contains(type);
+        }
 
         // RFC 5246 §7.4.4 ClientCertificateType: rsa_sign(1), dss_sign(2), ecdsa_sign(64)
         internal static bool CertificateTypeAccepted(CertificateRequestMessage request, AsymmetricKeyParameter key)

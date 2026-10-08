@@ -126,12 +126,15 @@ namespace SharpDTLS.DTLS12
                 throw new DtlsException(AlertDescription.IllegalParameter, "Client does not offer null compression.");
 
             var serverKey = _settings.KeyPair?.Private;
-            var preference = _settings.CipherSuites ?? SharpDTLS.CipherSuites.All.Select(s => s.Id).ToList();
+            // Without explicit configuration weak suites (export, DES, NULL, anonymous...) are never selected.
+            var preference = _settings.CipherSuites
+                ?? SharpDTLS.CipherSuites.All.Where(s => s.Security != CipherSuiteSecurity.Weak).Select(s => s.Id).ToList();
             CipherSuite = preference
                 .Where(id => ch.CipherSuites.Contains(id))
                 .Select(id => SharpDTLS.CipherSuites.TryGet(id, out var s) ? s : null)
                 .FirstOrDefault(s => s != null && s.IsUsableWith(version)
                     && (s.ServerCertificateType == CertificateKeyType.None || (serverKey != null && Dtls12ClientConnection.KeyMatches(s.ServerCertificateType, serverKey)))
+                    && (!s.IsStaticKeyAgreement || Dtls12ClientConnection.SignedWith(_settings.Certificate, s.RequiredCertificateSigner))
                     && (!s.RequiresPsk || _settings.PskIdentityResolver != null))
                 ?? throw new DtlsException(AlertDescription.HandshakeFailure, "No cipher suite in common.");
 
@@ -205,6 +208,8 @@ namespace SharpDTLS.DTLS12
             if (_settings.RequireClientCertificate && certificateBased)
             {
                 _certificateRequest = new CertificateRequestMessage();
+                if (CipherSuite.IsStaticKeyAgreement)
+                    _certificateRequest.CertificateTypes = new byte[] { 1, 2, 64, 3, 4, 65, 66 }; // also the fixed (EC)DH types
                 SendHandshake(HandshakeType.CertificateRequest, _certificateRequest.Encode(NegotiatedVersion));
             }
 
@@ -236,8 +241,14 @@ namespace SharpDTLS.DTLS12
                 case State.WaitClientKeyExchange when type == HandshakeType.ClientKeyExchange:
                     StopRetransmission();
                     AddToTranscript(message);
-                    DeriveKeys(_keyExchange.ProcessClientKeyExchange(body));
-                    _state = _clientCertificate != null ? State.WaitCertificateVerify : State.WaitFinished;
+
+                    // An empty ClientKeyExchange with a key agreement certificate is fixed (EC)DH client
+                    // authentication: no CertificateVerify follows (RFC 5246 §7.4.8, RFC 8422 §3).
+                    bool fixedKeyAgreement = body.Length == 0 && _clientCertificate != null && CipherSuite.IsStaticKeyAgreement;
+                    DeriveKeys(fixedKeyAgreement
+                        ? _keyExchange.ProcessFixedClientKeyExchange(_clientCertificate.GetPublicKey())
+                        : _keyExchange.ProcessClientKeyExchange(body));
+                    _state = _clientCertificate != null && !fixedKeyAgreement ? State.WaitCertificateVerify : State.WaitFinished;
                     break;
 
                 case State.WaitCertificateVerify when type == HandshakeType.CertificateVerify:
@@ -268,7 +279,8 @@ namespace SharpDTLS.DTLS12
             else
             {
                 _clientCertificate = Dtls12ClientConnection.ParseCertificate(certificate.Chain[0]);
-                if (!Dtls12ClientConnection.CertificateTypeAccepted(_certificateRequest, _clientCertificate.GetPublicKey()))
+                if (!Dtls12ClientConnection.CertificateTypeAccepted(_certificateRequest, _clientCertificate.GetPublicKey())
+                    && !(CipherSuite.IsStaticKeyAgreement && Dtls12ClientConnection.FixedTypeAccepted(_certificateRequest, _clientCertificate)))
                     throw new DtlsException(AlertDescription.UnsupportedCertificate, "Client certificate type was not requested.");
                 if (_settings.ClientCertificateValidator != null && !_settings.ClientCertificateValidator(_clientCertificate, certificate.Chain))
                     throw new DtlsException(AlertDescription.BadCertificate, "Client certificate was rejected.");

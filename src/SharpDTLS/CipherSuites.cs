@@ -61,6 +61,10 @@ namespace SharpDTLS
         Rsa,
         Ecdsa,
         Dsa,
+        /// <summary>Static Diffie-Hellman key (DH_DSS, DH_RSA).</summary>
+        Dh,
+        /// <summary>Static elliptic-curve key used for ECDH (ECDH_ECDSA, ECDH_RSA).</summary>
+        Ecdh,
     }
 
     /// <summary>Coarse security classification used to choose default suites.</summary>
@@ -142,6 +146,23 @@ namespace SharpDTLS
             or KeyExchangeAlgorithm.PSK_DHE or KeyExchangeAlgorithm.ECDHE_PSK
             or KeyExchangeAlgorithm.DHE_DSS_EXPORT or KeyExchangeAlgorithm.DHE_RSA_EXPORT;
 
+        /// <summary>
+        /// Static (EC)DH: the server's key agreement key is in its certificate and there is no forward secrecy
+        /// (RFC 5246 DH_DSS/DH_RSA, RFC 8422 ECDH_ECDSA/ECDH_RSA).
+        /// </summary>
+        public bool IsStaticKeyAgreement => KeyExchange is KeyExchangeAlgorithm.DH_DSS or KeyExchangeAlgorithm.DH_RSA
+            or KeyExchangeAlgorithm.ECDH_ECDSA or KeyExchangeAlgorithm.ECDH_RSA
+            or KeyExchangeAlgorithm.DH_DSS_EXPORT or KeyExchangeAlgorithm.DH_RSA_EXPORT;
+
+        /// <summary>For static (EC)DH suites: the algorithm the server certificate must be signed with.</summary>
+        public CertificateKeyType RequiredCertificateSigner => KeyExchange switch
+        {
+            KeyExchangeAlgorithm.DH_DSS or KeyExchangeAlgorithm.DH_DSS_EXPORT => CertificateKeyType.Dsa,
+            KeyExchangeAlgorithm.DH_RSA or KeyExchangeAlgorithm.DH_RSA_EXPORT or KeyExchangeAlgorithm.ECDH_RSA => CertificateKeyType.Rsa,
+            KeyExchangeAlgorithm.ECDH_ECDSA => CertificateKeyType.Ecdsa,
+            _ => CertificateKeyType.None,
+        };
+
         /// <summary>The key exchange authenticates with a pre-shared key (RFC 4279, RFC 5489).</summary>
         public bool RequiresPsk => KeyExchange is KeyExchangeAlgorithm.PSK or KeyExchangeAlgorithm.DHE_PSK
             or KeyExchangeAlgorithm.PSK_DHE or KeyExchangeAlgorithm.ECDHE_PSK or KeyExchangeAlgorithm.RSA_PSK;
@@ -192,6 +213,8 @@ namespace SharpDTLS
                 or KeyExchangeAlgorithm.ECDHE_RSA or KeyExchangeAlgorithm.RSA_PSK or KeyExchangeAlgorithm.SRP_SHA_RSA => CertificateKeyType.Rsa,
             KeyExchangeAlgorithm.DHE_DSS or KeyExchangeAlgorithm.DHE_DSS_EXPORT or KeyExchangeAlgorithm.SRP_SHA_DSS => CertificateKeyType.Dsa,
             KeyExchangeAlgorithm.ECDHE_ECDSA => CertificateKeyType.Ecdsa,
+            KeyExchangeAlgorithm.DH_DSS or KeyExchangeAlgorithm.DH_RSA or KeyExchangeAlgorithm.DH_DSS_EXPORT or KeyExchangeAlgorithm.DH_RSA_EXPORT => CertificateKeyType.Dh,
+            KeyExchangeAlgorithm.ECDH_ECDSA or KeyExchangeAlgorithm.ECDH_RSA => CertificateKeyType.Ecdh,
             _ => CertificateKeyType.None,
         };
 
@@ -278,6 +301,8 @@ namespace SharpDTLS
             KeyExchangeAlgorithm.ECDHE_RSA, KeyExchangeAlgorithm.ECDHE_ECDSA,
             KeyExchangeAlgorithm.PSK, KeyExchangeAlgorithm.DHE_PSK, KeyExchangeAlgorithm.PSK_DHE,
             KeyExchangeAlgorithm.ECDHE_PSK, KeyExchangeAlgorithm.RSA_PSK,
+            KeyExchangeAlgorithm.DH_anon, KeyExchangeAlgorithm.ECDH_anon,
+            KeyExchangeAlgorithm.DH_DSS, KeyExchangeAlgorithm.DH_RSA, KeyExchangeAlgorithm.ECDH_ECDSA, KeyExchangeAlgorithm.ECDH_RSA,
         };
 
         private static readonly HashSet<BulkCipherAlgorithm> ImplementedCiphers = new()
@@ -330,6 +355,7 @@ namespace SharpDTLS
             => _implemented
                 .Where(s => s.Security != CipherSuiteSecurity.Weak)
                 .Where(s => includePsk || !s.RequiresPsk)
+                .Where(s => !s.IsStaticKeyAgreement)
                 .Where(s => s.IsUsableWith(maximumVersion) || s.IsUsableWith(minimumVersion))
                 .Select(s => s.Id)
                 .ToList();
@@ -360,7 +386,9 @@ namespace SharpDTLS
             KeyExchangeAlgorithm.RSA => 6,
             KeyExchangeAlgorithm.RSA_PSK => 7,
             KeyExchangeAlgorithm.PSK => 8,
-            _ => 9,
+            KeyExchangeAlgorithm.ECDH_ECDSA or KeyExchangeAlgorithm.ECDH_RSA => 9,
+            KeyExchangeAlgorithm.DH_DSS or KeyExchangeAlgorithm.DH_RSA => 10,
+            _ => 11,
         };
     }
 }

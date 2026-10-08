@@ -63,7 +63,7 @@ namespace Dtls13Test.Tests
         {
             var (suite, openSslName, versionFlag, version) = Prepare(id);
             string dir = OpenSsl.NewTempDirectory();
-            var (keyPair, certificate) = TestCredentials.For(suite.ServerCertificateType);
+            var (keyPair, certificate) = TestCredentials.For(suite);
             string certPath = OpenSsl.WritePem(dir, "cert.pem", certificate);
             string keyPath = OpenSsl.WritePem(dir, "key.pem", keyPair.Private);
             int port = OpenSsl.FreeUdpPort();
@@ -109,7 +109,7 @@ namespace Dtls13Test.Tests
         {
             var (suite, openSslName, versionFlag, version) = Prepare(id);
             string dir = OpenSsl.NewTempDirectory();
-            var (keyPair, certificate) = TestCredentials.For(suite.ServerCertificateType);
+            var (keyPair, certificate) = TestCredentials.For(suite);
 
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
             var server = new Dtls12Server(transport, keyPair, certificate)
