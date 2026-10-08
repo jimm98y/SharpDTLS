@@ -27,6 +27,7 @@ namespace SharpDTLS
         InternalError                = 80,
         InappropriateFallback        = 86,
         UserCanceled                 = 90,
+        NoRenegotiation              = 100,
         MissingExtension             = 109,
         UnsupportedExtension         = 110,
         UnrecognizedName             = 112,

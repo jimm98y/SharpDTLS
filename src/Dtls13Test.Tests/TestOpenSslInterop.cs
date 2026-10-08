@@ -1,6 +1,7 @@
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.OpenSsl;
 using Org.BouncyCastle.X509;
+using SharpDTLS;
 using SharpDTLS.DTLS10;
 using SharpDTLS.DTLS12;
 using SharpSRTP.UDP;
@@ -191,6 +192,66 @@ namespace Dtls13Test.Tests
 
             server.SendApplicationData(received.Task.Result.Item1, Encoding.UTF8.GetBytes("hello-from-sharpdtls\n"));
             Assert.IsTrue(client.WaitForOutput("hello-from-sharpdtls", Timeout), "s_client did not receive data:\n" + client.Output);
+        }
+
+        // CBC suites: OpenSSL negotiates encrypt_then_mac by default, so this also exercises RFC 7366.
+        [DataRow("ECDHE-RSA-AES128-SHA256", false, true)]
+        [DataRow("ECDHE-ECDSA-AES256-SHA384", true, true)]
+        [DataRow("ECDHE-RSA-AES256-SHA", false, true)]
+        [DataRow("ECDHE-RSA-AES128-SHA256", false, false)]
+        [TestMethod]
+        public void CbcSuites_BothDirections(string cipher, bool ecCertificate, bool encryptThenMac)
+        {
+            OpenSsl.RequireOpenSsl();
+            string dir = OpenSsl.NewTempDirectory();
+            var (kp, cert) = Credentials(ecCertificate);
+            string certPath = OpenSsl.WritePem(dir, "cert.pem", cert);
+            string keyPath = OpenSsl.WritePem(dir, "key.pem", kp.Private);
+            string etm = encryptThenMac ? "" : " -no_etm";
+
+            // SharpDTLS client -> OpenSSL server
+            int port = OpenSsl.FreeUdpPort();
+            using (var server = new OpenSslProcess($"s_server -dtls1_2 -accept 127.0.0.1:{port} -cert {certPath} -key {keyPath} -cipher {cipher}{etm}", dir))
+            {
+                Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), server.Output);
+                using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
+                var client = new Dtls12Client(transport);
+                var handshake = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                client.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
+                client.Failed += (_, ex) => handshake.TrySetException(ex);
+                client.BeginHandshake();
+                Assert.IsTrue(handshake.Task.Wait(Timeout), "Handshake did not complete:\n" + server.Output);
+                Assert.AreEqual(encryptThenMac, client.EncryptThenMacNegotiated);
+
+                client.SendApplicationData(Encoding.UTF8.GetBytes("cbc-from-sharpdtls\n"));
+                Assert.IsTrue(server.WaitForOutput("cbc-from-sharpdtls", Timeout), server.Output);
+            }
+
+            // OpenSSL client -> SharpDTLS server
+            using var serverTransport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
+            var sharpServer = new Dtls12Server(serverTransport, kp, cert);
+            var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            sharpServer.ApplicationDataReceived += (_, e) => received.TrySetResult(Encoding.UTF8.GetString(e.Data));
+            using var openSslClient = new OpenSslProcess($"s_client -dtls1_2 -connect 127.0.0.1:{serverTransport.LocalEndpoint.Port} -cipher {cipher}{etm} -quiet", dir);
+            openSslClient.WriteLine("cbc-from-openssl");
+            Assert.IsTrue(received.Task.Wait(Timeout), "Server did not receive data:\n" + openSslClient.Output);
+            StringAssert.Contains(received.Task.Result, "cbc-from-openssl");
+            Assert.AreEqual(encryptThenMac, sharpServer.Connections.Single().EncryptThenMacNegotiated);
+        }
+
+        [TestMethod]
+        public void OpenSslAnyVersionClient_NegotiatesDtls12()
+        {
+            OpenSsl.RequireOpenSsl();
+            string dir = OpenSsl.NewTempDirectory();
+            using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
+            var server = new Dtls12Server(transport) { MinimumVersion = DtlsVersion.Dtls10 };
+            var handshake = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            server.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
+
+            using var client = new OpenSslProcess($"s_client -dtls -connect 127.0.0.1:{transport.LocalEndpoint.Port} -quiet", dir);
+            Assert.IsTrue(handshake.Task.Wait(Timeout), "Handshake did not complete:\n" + client.Output);
+            Assert.AreEqual(DtlsVersion.Dtls12, server.Connections.Single().NegotiatedVersion);
         }
 
         [TestMethod]

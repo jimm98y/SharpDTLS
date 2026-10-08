@@ -11,10 +11,6 @@ namespace SharpDTLS.DTLS10
         public ushort RecordSequenceNumber  { get; set; } = 0;
         public ushort MessageSequenceNumber { get; set; } = 0;
         public ushort Epoch { get; set; } = 0;
-        // Server-side retransmission state: the last flight sent and its timer.
-        internal List<System.Func<IEnumerable<byte[]>>> Flight { get; } = new List<System.Func<IEnumerable<byte[]>>>();
-        internal RetransmitTimer RetransmitTimer { get; set; }
-
         /// <summary>The SRTP protection profile negotiated via use_srtp (RFC 5764), or null.</summary>
         public ushort? SrtpProtectionProfile { get; set; }
 
