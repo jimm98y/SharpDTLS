@@ -116,6 +116,7 @@ namespace SharpDTLS.DTLS13.Messages
                     CertificateTypeExtension.ClientType => new CertificateTypeExtension(CertificateTypeExtension.ClientType),
                     CertificateTypeExtension.ServerType => new CertificateTypeExtension(CertificateTypeExtension.ServerType),
                     StatusRequestExtension.Type => new StatusRequestExtension(),
+                    CompressCertificateExtension.Type => new CompressCertificateExtension(),
                     ConnectionIdExtension.Type => new ConnectionIdExtension(),
                     0x0033 => new ClientKeyShareExtension(),
                     0x002b => new ClientSupportedVersions(),

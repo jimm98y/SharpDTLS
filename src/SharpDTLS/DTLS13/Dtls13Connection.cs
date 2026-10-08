@@ -356,6 +356,7 @@ namespace SharpDTLS.DTLS13
                 NewConnectionIdDatagram.HandshakeType => new NewConnectionIdDatagram(),
                 0x08 => new EncryptedExtensionsDatagram(),
                 0x0b => new CertificateDatagram(),
+                CompressedCertificateDatagram.HandshakeType => new CompressedCertificateDatagram(),
                 0x0d => new CertificateRequestDatagram(),
                 0x0f => new CertificateVerifyDatagram(),
                 0x14 => new FinishedDatagram(),

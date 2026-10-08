@@ -65,6 +65,16 @@ namespace SharpDTLS.DTLS13
         /// </summary>
         public int? MaxFragmentLength { get; set; }
 
+        /// <summary>
+        /// Certificate compression algorithms we accept (RFC 8879), in preference order, e.g.
+        /// <see cref="CertificateCompression.Supported"/>; null to not offer compression. Also used to compress our own
+        /// certificate when the server's CertificateRequest allows it.
+        /// </summary>
+        public IList<ushort> CertificateCompressionAlgorithms { get; set; }
+
+        /// <summary>The algorithm the server compressed its certificate with, or null when it was not compressed.</summary>
+        public ushort? CertificateCompressionAlgorithm { get; private set; }
+
         /// <summary>Ask the server to staple an OCSP response for its certificate (status_request, RFC 8446 §4.4.2.1).</summary>
         public bool RequestOcspStapling { get; set; }
 
@@ -246,6 +256,9 @@ namespace SharpDTLS.DTLS13
             clientHello.Extensions.AddRange(RecordSizeNegotiation.Offer(RecordSizeLimit, MaxFragmentLength, dtls13: true));
             if (RequestOcspStapling)
                 clientHello.Extensions.Add(new StatusRequestExtension(request: true));
+            CertificateCompression.Validate(CertificateCompressionAlgorithms);
+            if (CertificateCompressionAlgorithms is { Count: > 0 })
+                clientHello.Extensions.Add(new CompressCertificateExtension(CertificateCompressionAlgorithms));
             if (RawPublicKeys.Offer(CertificateTypeExtension.ServerType, ServerCertificateTypes) is { } serverTypes)
                 clientHello.Extensions.Add(serverTypes);
             if (RawPublicKeys.Offer(CertificateTypeExtension.ClientType, ClientCertificateTypes) is { } clientTypes)
@@ -495,6 +508,13 @@ namespace SharpDTLS.DTLS13
         {
             var suite = Session.CipherSuite;
 
+            // A CompressedCertificate stands for the Certificate; the transcript keeps the message as received.
+            if (parsed is CompressedCertificateDatagram compressed && _state is State.WaitCertificate or State.WaitCertificateOrCertificateRequest)
+            {
+                parsed = compressed.Decompress(CertificateCompressionAlgorithms);
+                CertificateCompressionAlgorithm = compressed.Algorithm;
+            }
+
             switch (_state)
             {
                 case State.WaitEncryptedExtensions when parsed is EncryptedExtensionsDatagram encryptedExtensions:
@@ -683,7 +703,9 @@ namespace SharpDTLS.DTLS13
             var chain = !scheme.HasValue ? Array.Empty<byte[]>()
                 : rawPublicKey ? new[] { RawPublicKeys.Encode(ClientCertificateKeyPair.Public) }
                 : new[] { ClientCertificate.GetEncoded() }.Concat((ClientIntermediateCertificates ?? Array.Empty<X509Certificate>()).Select(c => c.GetEncoded())).ToArray();
-            SendHandshake(new CertificateDatagram(chain, _certificateRequest.RequestContext), keys);
+            var certificate = new CertificateDatagram(chain, _certificateRequest.RequestContext);
+            ushort? compression = chain.Length > 0 ? CertificateCompression.Select(CertificateCompressionAlgorithms, _certificateRequest.CompressionAlgorithms) : null;
+            SendHandshake(compression.HasValue ? new CompressedCertificateDatagram(compression.Value, certificate) : certificate, keys);
 
             if (scheme.HasValue)
             {

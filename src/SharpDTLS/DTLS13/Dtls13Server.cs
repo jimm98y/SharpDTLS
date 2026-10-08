@@ -120,6 +120,12 @@ namespace SharpDTLS.DTLS13
         /// <summary>Certificate types accepted from clients, in preference order (RFC 7250); null for X.509 only.</summary>
         public IList<CertificateType> ClientCertificateTypes { get; set; }
 
+        /// <summary>
+        /// Certificate compression algorithms (RFC 8879) in server preference order: our Certificate is compressed with the
+        /// first one the client offers, and clients may compress theirs with any of them. Null disables compression.
+        /// </summary>
+        public IList<ushort> CertificateCompressionAlgorithms { get; set; } = CertificateCompression.Supported.ToList();
+
         /// <summary>Checks a client's raw public key (DER SubjectPublicKeyInfo); false aborts with bad_certificate.</summary>
         public Func<byte[], bool> ClientRawPublicKeyValidator { get; set; }
 
@@ -518,6 +524,9 @@ namespace SharpDTLS.DTLS13
         /// <summary>The client's certificate, when one was sent.</summary>
         public X509Certificate ClientCertificate => _clientCertificate;
 
+        /// <summary>The algorithm the client compressed its certificate with, or null when it was not compressed.</summary>
+        public ushort? CertificateCompressionAlgorithm { get; private set; }
+
         /// <summary>The client's raw public key (DER SubjectPublicKeyInfo, RFC 7250), when it authenticated with one.</summary>
         public byte[] ClientRawPublicKey { get; private set; }
 
@@ -760,7 +769,8 @@ namespace SharpDTLS.DTLS13
                 {
                     if (_clientCertificateType == null)
                         throw new DtlsException(AlertDescription.UnsupportedCertificate, "No client certificate type in common.");
-                    _certificateRequest = new CertificateRequestDatagram();
+                    CertificateCompression.Validate(_server.CertificateCompressionAlgorithms);
+                    _certificateRequest = new CertificateRequestDatagram { CompressionAlgorithms = _server.CertificateCompressionAlgorithms };
                     SendHandshake(_certificateRequest, handshakeKeys);
                     Session.RequiresClientAuth = true;
                 }
@@ -775,7 +785,11 @@ namespace SharpDTLS.DTLS13
                     chain.Add(_certificate.GetEncoded());
                     chain.AddRange((_intermediates ?? Array.Empty<X509Certificate>()).Select(c => c.GetEncoded()));
                 }
-                SendHandshake(new CertificateDatagram(chain) { OcspResponse = _ocspResponse }, handshakeKeys);
+                var certificate = new CertificateDatagram(chain) { OcspResponse = _ocspResponse };
+                CertificateCompression.Validate(_server.CertificateCompressionAlgorithms);
+                ushort? compression = CertificateCompression.Select(_server.CertificateCompressionAlgorithms,
+                    _clientHello.Extensions.OfType<CompressCertificateExtension>().FirstOrDefault()?.Algorithms);
+                SendHandshake(compression.HasValue ? new CompressedCertificateDatagram(compression.Value, certificate) : certificate, handshakeKeys);
 
                 var clientSchemes = _clientHello.Extensions.OfType<ClientSignatureAlgorithms>().FirstOrDefault()?.SignatureAlgorithms;
                 ushort scheme = Dtls13Signatures.SelectScheme(_keyPair.Private, clientSchemes)
@@ -838,6 +852,13 @@ namespace SharpDTLS.DTLS13
         protected override void OnHandshakeMessage(byte[] message, IHandshakeDatagram parsed)
         {
             var suite = Session.CipherSuite;
+
+            // A CompressedCertificate stands for the Certificate; the transcript keeps the message as received.
+            if (parsed is CompressedCertificateDatagram compressed && _state == State.WaitClientCertificate)
+            {
+                parsed = compressed.Decompress(_certificateRequest.CompressionAlgorithms);
+                CertificateCompressionAlgorithm = compressed.Algorithm;
+            }
 
             switch (_state)
             {

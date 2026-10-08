@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 
 namespace SharpDTLS.DTLS13.Messages
@@ -16,6 +17,9 @@ namespace SharpDTLS.DTLS13.Messages
         public ushort[] SignatureAlgorithms { get; set; } = Dtls13Signatures.Supported;
 
         public byte[] Bytes { get; private set; }
+
+        /// <summary>The certificate compression algorithms the server can decompress (RFC 8879 §3), or null.</summary>
+        public IList<ushort> CompressionAlgorithms { get; set; }
 
         public CertificateRequestDatagram()
         {
@@ -45,6 +49,7 @@ namespace SharpDTLS.DTLS13.Messages
             if (pos + extensionsLength != end) throw new DtlsException(AlertDescription.DecodeError, "Inconsistent CertificateRequest extensions length.");
 
             SignatureAlgorithms = null;
+            CompressionAlgorithms = null;
             while (pos < end)
             {
                 if (pos + 4 > end) throw new DtlsException(AlertDescription.DecodeError, "Truncated extension.");
@@ -58,6 +63,12 @@ namespace SharpDTLS.DTLS13.Messages
                     ext.Read(pos, bytes);
                     SignatureAlgorithms = ext.SignatureAlgorithms;
                 }
+                else if (type == CompressCertificateExtension.Type)
+                {
+                    var ext = new CompressCertificateExtension();
+                    ext.Read(pos, bytes);
+                    CompressionAlgorithms = ext.Algorithms;
+                }
 
                 pos += 4 + extLength;
             }
@@ -69,7 +80,8 @@ namespace SharpDTLS.DTLS13.Messages
         public byte[] ToBytes()
         {
             var sigAlgs = new ClientSignatureAlgorithms(SignatureAlgorithms);
-            int extensionsLength = sigAlgs.CalculateLength();
+            var compression = CompressionAlgorithms is { Count: > 0 } ? new CompressCertificateExtension(CompressionAlgorithms) : null;
+            int extensionsLength = sigAlgs.CalculateLength() + (compression?.CalculateLength() ?? 0);
             int bodyLength = 1 + RequestContext.Length + 2 + extensionsLength;
 
             byte[] data = new byte[12 + bodyLength + 1];
@@ -92,6 +104,8 @@ namespace SharpDTLS.DTLS13.Messages
             data[pos++] = (byte)(extensionsLength >> 8);
             data[pos++] = (byte)extensionsLength;
             pos += sigAlgs.Write(pos, data);
+            if (compression != null)
+                pos += compression.Write(pos, data);
 
             data[pos] = 0x16; // inner content type (handshake)
 
