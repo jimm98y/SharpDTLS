@@ -54,6 +54,9 @@ namespace SharpDTLS.TLS12
 
         public IReadOnlyCollection<Dtls12ServerConnection> Connections => _connections.Keys.ToList();
 
+        /// <summary>Set by <see cref="SharpDTLS.TLS13.TlsServer"/> while TLS 1.3 is also offered (RFC 8446 §4.1.3 downgrade sentinel).</summary>
+        internal bool SignalTls13Downgrade { get => Settings.SignalTls13Downgrade; set => Settings.SignalTls13Downgrade = value; }
+
         /// <summary>The address the listener is bound to, once started.</summary>
         public IPEndPoint LocalEndpoint => (IPEndPoint)_listener?.LocalEndpoint;
 
