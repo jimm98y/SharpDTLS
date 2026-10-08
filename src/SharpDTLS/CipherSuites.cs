@@ -175,8 +175,15 @@ namespace SharpDTLS
         /// <summary>The key exchange authenticates with a TLS-PWD password (RFC 8492).</summary>
         public bool RequiresPwd => KeyExchange == KeyExchangeAlgorithm.ECCPWD;
 
+        /// <summary>
+        /// Export suites (including the KRB5 export suites) must not be negotiated by TLS 1.1 and later
+        /// (RFC 4346 Appendix A.5, RFC 5246 Appendix A.5), so never by DTLS, which is defined on TLS 1.1 and 1.2.
+        /// IANA marks them DTLS-OK only because they use no stream cipher.
+        /// </summary>
+        public bool IsProhibited => IsExport;
+
         /// <summary>Whether this implementation supports the suite.</summary>
-        public bool IsImplemented => DtlsOk && CipherSuites.IsKeyExchangeImplemented(KeyExchange) && CipherSuites.IsCipherImplemented(Cipher)
+        public bool IsImplemented => DtlsOk && !IsProhibited && CipherSuites.IsKeyExchangeImplemented(KeyExchange) && CipherSuites.IsCipherImplemented(Cipher)
             && Mac is not (MacAlgorithm.Unknown or MacAlgorithm.None);
 
         public CipherSuiteSecurity Security
@@ -289,7 +296,8 @@ namespace SharpDTLS
                     MinimumVersion = DtlsVersion.Dtls12;
             }
 
-            // RFC 5246 Appendix A.5 / RFC 5469: export, DES and IDEA suites must not be used with TLS 1.2.
+            // RFC 5469: DES and IDEA suites must not be used with TLS 1.2. Export suites are prohibited
+            // altogether (IsProhibited); this records only that they predate TLS 1.1.
             if (IsExport || Cipher is BulkCipherAlgorithm.DesCbc or BulkCipherAlgorithm.IdeaCbc)
                 MaximumVersion = DtlsVersion.Dtls10;
         }

@@ -204,6 +204,10 @@ namespace Dtls13Test.Tests
             Assert.IsFalse(CipherSuites.DefaultFor(DtlsVersion.Dtls10, DtlsVersion.Dtls12).Any(id => CipherSuites.Get(id).Security == CipherSuiteSecurity.Weak));
             Assert.IsFalse(CipherSuites.DefaultFor(DtlsVersion.Dtls10, DtlsVersion.Dtls12).Any(id => CipherSuites.Get(id).RequiresSrp), "SRP suites need credentials");
             Assert.IsTrue(CipherSuites.DefaultFor(DtlsVersion.Dtls10, DtlsVersion.Dtls12, includeSrp: true).Any(id => CipherSuites.Get(id).RequiresSrp));
+
+            var export = CipherSuites.Registry.Where(s => s.IsExport).ToList();
+            Assert.HasCount(15, export, "9 export and 6 KRB5 export suites");
+            Assert.IsTrue(export.All(s => s.IsProhibited && !s.IsImplemented), "export suites must never be negotiated");
         }
     }
 }
