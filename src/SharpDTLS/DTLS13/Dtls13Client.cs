@@ -51,6 +51,17 @@ namespace SharpDTLS.DTLS13
         /// <summary>Application protocols to offer with ALPN (RFC 7301), in preference order; null to not offer any.</summary>
         public IList<string> ApplicationProtocols { get; set; }
 
+        /// <summary>
+        /// Offer connection IDs (RFC 9147 §9) so the association survives our address changing: a server that agrees
+        /// gives us a CID to send in every record.
+        /// </summary>
+        public bool UseConnectionId { get; set; }
+
+        /// <summary>Length of the CID we ask the server to send us; 0 (the default) when only our address may change.</summary>
+        public int ConnectionIdLength { get; set; }
+
+        private byte[] _offeredConnectionId;
+
         /// <summary>A ticket from an earlier connection to resume with (PSK resumption, RFC 8446 §2.2).</summary>
         public Dtls13SessionTicket ResumptionTicket { get; set; }
 
@@ -161,6 +172,11 @@ namespace SharpDTLS.DTLS13
                 clientHello.Extensions.Add(new ServerNameExtension(ServerName));
             if (ApplicationProtocols is { Count: > 0 })
                 clientHello.Extensions.Add(new AlpnExtension(ApplicationProtocols));
+            if (UseConnectionId)
+            {
+                _offeredConnectionId ??= Dtls13CryptoUtils.GenerateRandom(ConnectionIdLength);
+                clientHello.Extensions.Add(new ConnectionIdExtension(_offeredConnectionId));
+            }
             if (SrtpProtectionProfiles != null && SrtpProtectionProfiles.Length > 0)
                 clientHello.Extensions.Add(new UseSrtpExtension(SrtpProtectionProfiles));
             if (cookie != null)
@@ -354,6 +370,15 @@ namespace SharpDTLS.DTLS13
             else if (pskOnly)
             {
                 throw new DtlsException(AlertDescription.MissingExtension, "ServerHello has neither key_share nor pre_shared_key.");
+            }
+
+            var serverCid = serverHello.Extensions.OfType<ConnectionIdExtension>().FirstOrDefault();
+            if (serverCid != null)
+            {
+                if (_offeredConnectionId == null)
+                    throw new DtlsException(AlertDescription.UnsupportedExtension, "Unsolicited connection_id extension.");
+                WriteConnectionId = serverCid.ConnectionId;
+                ReadConnectionId = _offeredConnectionId;
             }
 
             Session.Transcript.AddPlaintextRecord(record);

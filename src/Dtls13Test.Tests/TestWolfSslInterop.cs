@@ -310,6 +310,60 @@ namespace Dtls13Test.Tests
             Assert.IsTrue(server.WaitForOutput("RECV:over-psk", Timeout), server.Output);
         }
 
+        [DataRow("a1a2a3")]
+        [DataRow("-")]
+        [TestMethod]
+        public void WolfSslClient_WithConnectionIds_To_SharpDtlsServer(string clientCid)
+        {
+            WolfSsl.RequireWolfSsl();
+            string dir = OpenSsl.NewTempDirectory();
+            using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
+            var server = new Dtls13Server(transport) { UseConnectionIds = true };
+            var received = new List<string>();
+            server.ApplicationDataReceived += (_, e) => { lock (received) received.Add(Encoding.UTF8.GetString(e.Data)); };
+
+            using var client = new OpenSslProcess($"client {transport.LocalEndpoint.Port} -cid {clientCid}", dir, WolfSsl.Harness);
+            Assert.IsTrue(client.WaitForOutput("CONNECTED", Timeout), client.Output);
+            Assert.IsTrue(WaitFor(() => server.Connections.Any(c => c.IsHandshakeComplete)), client.Output);
+            var connection = server.Connections.Single();
+            Assert.HasCount(8, connection.ConnectionId);
+            if (clientCid == "-")
+                Assert.IsNull(connection.PeerConnectionId);
+            else
+                CollectionAssert.AreEqual(Convert.FromHexString(clientCid), connection.PeerConnectionId);
+
+            client.WriteLine("over-cid");
+            Assert.IsTrue(WaitFor(() => Contains(received, "over-cid")), client.Output);
+            connection.SendApplicationData(Encoding.UTF8.GetBytes("back\n"));
+            Assert.IsTrue(client.WaitForOutput("RECV:back", Timeout), client.Output);
+        }
+
+        [DataRow(4)]
+        [DataRow(0)]
+        [TestMethod]
+        public void SharpDtlsClient_WithConnectionIds_To_WolfSslServer(int clientCidLength)
+        {
+            WolfSsl.RequireWolfSsl();
+            string dir = OpenSsl.NewTempDirectory();
+            var (kp, cert) = Credentials(ec: true);
+            string certPath = OpenSsl.WritePem(dir, "cert.pem", cert);
+            string keyPath = OpenSsl.WritePem(dir, "key.pem", kp.Private);
+            using var server = OpenSslProcess.StartServer(p => $"server {p} {certPath} {keyPath} -hrr -cid b1b2b3b4b5", dir, Timeout, out int port, WolfSsl.Harness);
+            Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), server.Output);
+
+            using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
+            var client = Handshake(new Dtls13Client(transport) { UseConnectionId = true, ConnectionIdLength = clientCidLength }, server);
+            CollectionAssert.AreEqual(Convert.FromHexString("b1b2b3b4b5"), client.PeerConnectionId);
+            Assert.AreEqual(clientCidLength, client.ConnectionId?.Length ?? 0);
+
+            var received = new List<string>();
+            client.ApplicationDataReceived += (_, d) => { lock (received) received.Add(Encoding.UTF8.GetString(d)); };
+            client.SendApplicationData(Encoding.UTF8.GetBytes("over-cid\n"));
+            Assert.IsTrue(server.WaitForOutput("RECV:over-cid", Timeout), server.Output);
+            server.WriteLine("back");
+            Assert.IsTrue(WaitFor(() => Contains(received, "back")), server.Output);
+        }
+
         private static Dtls13Client Handshake(Dtls13Client client, OpenSslProcess peer)
         {
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);

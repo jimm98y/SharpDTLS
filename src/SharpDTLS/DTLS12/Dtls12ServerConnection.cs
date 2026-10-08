@@ -74,6 +74,12 @@ namespace SharpDTLS.DTLS12
         /// <summary>Length of the CIDs this server issues (fixed, so records can be routed by CID).</summary>
         public int ConnectionIdLength { get; set; } = 8;
 
+        /// <summary>
+        /// Send to a client's new address as soon as an authenticated, newer record arrives from it (RFC 9146 §6).
+        /// When false the address stays pending until the application verifies it and calls ConfirmPeerAddress.
+        /// </summary>
+        public bool AutoUpdatePeerAddress { get; set; } = true;
+
         /// <summary>Keys for RFC 5077 session tickets (random per server by default); null disables tickets.</summary>
         public SessionTicketKeys TicketKeys { get; set; } = new SessionTicketKeys();
     }
@@ -114,42 +120,48 @@ namespace SharpDTLS.DTLS12
             : base(isClient: false, send)
         {
             _settings = settings;
-            RemoteEndPoint = remoteEndPoint;
+            _address = new PeerAddressTracker(remoteEndPoint);
             MinimumVersion = settings.MinimumVersion;
             MaximumVersion = settings.MaximumVersion;
             InitialRetransmitTimeout = settings.InitialRetransmitTimeout;
             KeyLogWriter = settings.KeyLogWriter;
         }
 
-        public EndPoint RemoteEndPoint { get; private set; }
+        private readonly PeerAddressTracker _address;
+
+        /// <summary>Where this connection sends: the client's address, which can move with connection IDs.</summary>
+        public EndPoint RemoteEndPoint => _address.Current;
+
+        /// <summary>A newer client address awaiting <see cref="ConfirmPeerAddress"/> (when not following automatically).</summary>
+        public EndPoint PendingPeerAddress => _address.Pending;
 
         /// <summary>
-        /// The client's address moved (RFC 9146 §6): a record carrying our CID authenticated, was newer than any
-        /// before, and came from another address. Replies now go there; applications that guard against address
-        /// spoofing can verify the new path (e.g. with a request/response exchange).
+        /// The client appeared at a new address (RFC 9146 §6): a record carrying our CID authenticated, was newer than
+        /// any before and came from elsewhere. With AutoUpdatePeerAddress replies already go there; otherwise the
+        /// address is pending until <see cref="ConfirmPeerAddress"/>.
         /// </summary>
         public event EventHandler<(EndPoint Old, EndPoint New)> PeerAddressChanged;
 
-        private ushort _newestEpoch;
-        private ulong _newestSequence;
-        private bool _anyAuthenticated;
+        /// <summary>Sends to <paramref name="address"/> from now on, after the application has checked it can be reached.</summary>
+        public void ConfirmPeerAddress(EndPoint address) => Locked(() =>
+        {
+            var old = _address.Current;
+            _address.Confirm(address);
+            if (!old.Equals(address))
+                RaiseEvent(() => PeerAddressConfirmed?.Invoke(this, (old, address)));
+        });
+
+        internal event EventHandler<(EndPoint Old, EndPoint New)> PeerAddressConfirmed;
 
         protected override void OnRecordAuthenticated(ushort epoch, ulong sequenceNumber, bool withConnectionId)
         {
-            bool newer = !_anyAuthenticated || epoch > _newestEpoch || (epoch == _newestEpoch && sequenceNumber > _newestSequence);
-            if (!newer)
+            if (!_address.Observe(epoch, sequenceNumber, withConnectionId, DatagramSource, _settings.AutoUpdatePeerAddress, out var old))
                 return;
-            _anyAuthenticated = true;
-            (_newestEpoch, _newestSequence) = (epoch, sequenceNumber);
-
-            if (withConnectionId && DatagramSource != null && !DatagramSource.Equals(RemoteEndPoint))
-            {
-                var old = RemoteEndPoint;
-                RemoteEndPoint = DatagramSource;
-                Debug.WriteLine($"{LogPrefix} Peer address changed from {old} to {RemoteEndPoint}");
-                var change = (old, RemoteEndPoint);
-                RaiseEvent(() => PeerAddressChanged?.Invoke(this, change));
-            }
+            var change = (old, DatagramSource);
+            Debug.WriteLine($"{LogPrefix} Peer address {(_settings.AutoUpdatePeerAddress ? "changed" : "pending")}: {old} -> {DatagramSource}");
+            RaiseEvent(() => PeerAddressChanged?.Invoke(this, change));
+            if (_settings.AutoUpdatePeerAddress)
+                RaiseEvent(() => PeerAddressConfirmed?.Invoke(this, change));
         }
 
         /// <summary>The host name the client asked for in server_name, or null.</summary>

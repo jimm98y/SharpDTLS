@@ -71,6 +71,12 @@ namespace SharpDTLS.DTLS12
         /// <summary>Length of the CIDs this server issues.</summary>
         public int ConnectionIdLength { get => Settings.ConnectionIdLength; set => Settings.ConnectionIdLength = value; }
 
+        /// <summary>
+        /// Send to a client's new address as soon as an authenticated, newer record arrives from it (the default,
+        /// RFC 9146 §6); when false, call ConfirmPeerAddress on the connection after verifying the address.
+        /// </summary>
+        public bool AutoUpdatePeerAddress { get => Settings.AutoUpdatePeerAddress; set => Settings.AutoUpdatePeerAddress = value; }
+
         /// <summary>Application protocols (ALPN, RFC 7301) in server preference order; null to ignore ALPN.</summary>
         public IList<string> ApplicationProtocols { get => Settings.ApplicationProtocols; set => Settings.ApplicationProtocols = value; }
 
@@ -203,7 +209,7 @@ namespace SharpDTLS.DTLS12
             connection.HandshakeFinished += (_, _) => OnConnectionEstablished(connection);
             connection.ApplicationDataReceived += (_, data) => OnApplicationData(connection, data);
             connection.AlertReceived += (_, alert) => OnAlert(connection, alert);
-            connection.PeerAddressChanged += (_, change) =>
+            connection.PeerAddressConfirmed += (_, change) =>
             {
                 _connections.TryRemove(new KeyValuePair<string, Dtls12ServerConnection>(change.Old.ToString(), connection));
                 _connections[change.New.ToString()] = connection;

@@ -11,6 +11,7 @@
  *   -verify <ca.pem>    server: require and verify a client certificate; client: verify the server chain
  *   -host <name>        client: with -verify, also check the server certificate's host name
  *   -sni <name>         client: send server_name
+ *   -cid <hex>          negotiate connection IDs, asking the peer to send this CID ("-" for none)
  *   -alpn <p1,p2,...>   offer (client) or accept (server) these ALPN protocols; prints "ALPN:<protocol>"
  *   <cert.pem> / -cert  may hold the certificate followed by its intermediates
  *   -cert <c> -key <k>  client: present a client certificate
@@ -87,7 +88,7 @@ int main(int argc, char **argv)
     const char *cert = NULL, *key = NULL, *cipher = NULL, *verify = NULL, *group = NULL, *srtp = NULL, *exportLabel = NULL;
     int exportLength = 0;
     int hrr = 0, resume = 0, pskOnly = 0, argi = 3;
-    const char *pskHex = NULL, *host = NULL, *sni = NULL, *alpn = NULL;
+    const char *pskHex = NULL, *host = NULL, *sni = NULL, *alpn = NULL, *cidHex = NULL;
 
     if (server) {
         if (argc < 5) { fprintf(stderr, "server needs cert and key\n"); return 2; }
@@ -106,6 +107,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[argi], "-host") && argi + 1 < argc) host = argv[++argi];
         else if (!strcmp(argv[argi], "-sni") && argi + 1 < argc) sni = argv[++argi];
         else if (!strcmp(argv[argi], "-alpn") && argi + 1 < argc) alpn = argv[++argi];
+        else if (!strcmp(argv[argi], "-cid") && argi + 1 < argc) cidHex = argv[++argi];
         else if (!strcmp(argv[argi], "-cert") && argi + 1 < argc) cert = argv[++argi];
         else if (!strcmp(argv[argi], "-key") && argi + 1 < argc) key = argv[++argi];
         else if (!strcmp(argv[argi], "-group") && argi + 1 < argc) group = argv[++argi];
@@ -187,6 +189,17 @@ int main(int argc, char **argv)
         fail("check_domain_name", NULL, 0);
     if (!server && sni && wolfSSL_UseSNI(ssl, WOLFSSL_SNI_HOST_NAME, sni, (unsigned short)strlen(sni)) != WOLFSSL_SUCCESS)
         fail("UseSNI", NULL, 0);
+    if (cidHex) {
+        if (wolfSSL_dtls_cid_use(ssl) != WOLFSSL_SUCCESS)
+            fail("cid_use", NULL, 0);
+        if (strcmp(cidHex, "-") != 0) {
+            unsigned char cid[255];
+            size_t cidLen = strlen(cidHex) / 2;
+            for (size_t i = 0; i < cidLen; i++) sscanf(cidHex + 2 * i, "%2hhx", &cid[i]);
+            if (wolfSSL_dtls_cid_set(ssl, cid, (unsigned int)cidLen) != WOLFSSL_SUCCESS)
+                fail("cid_set", NULL, 0);
+        }
+    }
     if (alpn) {
         char alpnList[256];
         snprintf(alpnList, sizeof(alpnList), "%s", alpn);

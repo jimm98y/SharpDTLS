@@ -111,6 +111,7 @@ namespace SharpDTLS.DTLS13.Messages
                 {
                     ServerNameExtension.Type => new ServerNameExtension(),
                     AlpnExtension.Type => new AlpnExtension(),
+                    ConnectionIdExtension.Type => new ConnectionIdExtension(),
                     0x0033 => new ClientKeyShareExtension(),
                     0x002b => new ClientSupportedVersions(),
                     0x000d => new ClientSignatureAlgorithms(),

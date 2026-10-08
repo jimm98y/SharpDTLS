@@ -40,6 +40,23 @@ namespace SharpDTLS.DTLS13
         public event EventHandler<NewSessionTicketDatagram> NewSessionTicketReceived;
         public event EventHandler<KeyUpdateDatagram> KeyUpdateReceived;
 
+        /// <summary>The CID the peer puts in records it sends us (RFC 9147 §9), or null / empty for none.</summary>
+        protected byte[] ReadConnectionId { get; set; }
+
+        /// <summary>The CID we put in records we send (the peer's choice), or null / empty for none.</summary>
+        protected byte[] WriteConnectionId { get; set; }
+
+        /// <summary>Our connection ID: the peer sends it in every record from the handshake epoch on. Null when not negotiated.</summary>
+        public byte[] ConnectionId => ReadConnectionId is { Length: > 0 } ? ReadConnectionId : null;
+
+        /// <summary>The peer's connection ID, sent in our records. Null when not negotiated.</summary>
+        public byte[] PeerConnectionId => WriteConnectionId is { Length: > 0 } ? WriteConnectionId : null;
+
+        protected override int ReceiveConnectionIdLength => ReadConnectionId?.Length ?? 0;
+
+        /// <summary>A protected record authenticated and passed the replay window (for peer address updates).</summary>
+        protected virtual void OnRecordAuthenticated(ulong epoch, ulong sequenceNumber, bool withConnectionId) { }
+
         protected Dtls13Connection(bool isClient, Action<byte[]> send)
             : base(isClient, send, "DTLS13")
         {
@@ -135,7 +152,13 @@ namespace SharpDTLS.DTLS13
             if (keys == null)
                 throw new DtlsRecordDiscardedException($"No keys for epoch bits {epochBits}");
 
-            var unprotected = Dtls13RecordProtection.Unprotect(keys, fromClient: !IsClient, record);
+            var unprotected = Dtls13RecordProtection.Unprotect(keys, fromClient: !IsClient, record, ReceiveConnectionIdLength);
+
+            // With a CID negotiated it is in every record from the handshake epoch on, and must be ours (RFC 9147 §9).
+            if (ReadConnectionId is { Length: > 0 } && keys.Epoch >= 2
+                && (unprotected.ConnectionId == null || !unprotected.ConnectionId.AsSpan().SequenceEqual(ReadConnectionId)))
+                throw new DtlsRecordDiscardedException("Record without our connection ID");
+            OnRecordAuthenticated(keys.Epoch, unprotected.SequenceNumber, unprotected.ConnectionId != null);
             byte[] inner = unprotected.InnerPlaintext;
             byte contentType = inner[inner.Length - 1];
 
@@ -390,7 +413,8 @@ namespace SharpDTLS.DTLS13
             if (seq >= (1UL << 48) - 1)
                 throw new DtlsException(AlertDescription.InternalError, "Record sequence number space exhausted; a KeyUpdate is required");
 
-            return (Dtls13RecordProtection.Protect(keys, IsClient, (int)keys.Epoch, seq, innerPlaintext), (keys.Epoch, seq));
+            byte[] cid = keys.Epoch >= 2 && WriteConnectionId is { Length: > 0 } ? WriteConnectionId : null;
+            return (Dtls13RecordProtection.Protect(keys, IsClient, (int)keys.Epoch, seq, innerPlaintext, cid), (keys.Epoch, seq));
         }
 
         /// <summary>Protects and queues one record outside any flight. Returns its record number.</summary>

@@ -16,12 +16,16 @@ namespace SharpDTLS.DTLS13
 
         public readonly struct UnprotectedRecord
         {
-            public UnprotectedRecord(int epochBits, ulong sequenceNumber, byte[] innerPlaintext)
+            public UnprotectedRecord(int epochBits, ulong sequenceNumber, byte[] innerPlaintext, byte[] connectionId = null)
             {
                 EpochBits = epochBits;
                 SequenceNumber = sequenceNumber;
                 InnerPlaintext = innerPlaintext;
+                ConnectionId = connectionId;
             }
+
+            /// <summary>The record's connection ID, or null when it had none.</summary>
+            public byte[] ConnectionId { get; }
 
             public int EpochBits { get; }
             public ulong SequenceNumber { get; }
@@ -31,16 +35,20 @@ namespace SharpDTLS.DTLS13
         }
 
         /// <summary>
-        /// Builds a protected record with a full unified header (16-bit sequence number, length present).
+        /// Builds a protected record with a full unified header (16-bit sequence number, length present), carrying
+        /// <paramref name="connectionId"/> when one is given (RFC 9147 §4: C bit, CID right after the first byte).
         /// </summary>
-        public static byte[] Protect(Dtls13CryptoContext ctx, bool fromClient, int epoch, ulong sequenceNumber, byte[] innerPlaintext)
+        public static byte[] Protect(Dtls13CryptoContext ctx, bool fromClient, int epoch, ulong sequenceNumber, byte[] innerPlaintext,
+            byte[] connectionId = null)
         {
+            connectionId ??= Array.Empty<byte>();
             var suite = ctx.Suite;
             byte[] key   = fromClient ? ctx.ClientKey   : ctx.ServerKey;
             byte[] iv    = fromClient ? ctx.ClientIv    : ctx.ServerIv;
             byte[] snKey = fromClient ? ctx.ClientSnKey : ctx.ServerSnKey;
 
-            const int headerLength = 5;
+            int cid = connectionId.Length;
+            int headerLength = 5 + cid;
 
             // RFC 9147 §4.2.3: the record number mask needs 16 bytes of ciphertext, so short records
             // (possible with CCM_8's 8-byte tag) are zero-padded as TLSInnerPlaintext padding.
@@ -52,11 +60,12 @@ namespace SharpDTLS.DTLS13
                 throw new DtlsException(AlertDescription.RecordOverflow, "Record too large");
 
             byte[] record = new byte[headerLength + ciphertextLength];
-            record[0] = (byte)(0x20 | 0x08 | 0x04 | (epoch & 0x03)); // fixed bits, S=1 (16-bit seq), L=1
-            record[1] = (byte)(sequenceNumber >> 8);
-            record[2] = (byte)sequenceNumber;
-            record[3] = (byte)(ciphertextLength >> 8);
-            record[4] = (byte)ciphertextLength;
+            record[0] = (byte)(0x20 | (cid > 0 ? 0x10 : 0) | 0x08 | 0x04 | (epoch & 0x03)); // fixed bits, C, S=1 (16-bit seq), L=1
+            connectionId.CopyTo(record, 1);
+            record[1 + cid] = (byte)(sequenceNumber >> 8);
+            record[2 + cid] = (byte)sequenceNumber;
+            record[3 + cid] = (byte)(ciphertextLength >> 8);
+            record[4 + cid] = (byte)ciphertextLength;
 
             byte[] aad = new byte[headerLength];
             Buffer.BlockCopy(record, 0, aad, 0, headerLength);
@@ -66,8 +75,8 @@ namespace SharpDTLS.DTLS13
             byte[] mask = ComputeMask(suite, snKey, record, headerLength);
             if (mask != null)
             {
-                record[1] ^= mask[0];
-                record[2] ^= mask[1];
+                record[1 + cid] ^= mask[0];
+                record[2 + cid] ^= mask[1];
             }
 
             return record;
@@ -77,9 +86,10 @@ namespace SharpDTLS.DTLS13
         /// Removes record number encryption, reconstructs the sequence number, rejects replays and
         /// decrypts the record. Throws <see cref="DtlsRecordDiscardedException"/> for records that must be dropped.
         /// </summary>
-        public static UnprotectedRecord Unprotect(Dtls13CryptoContext ctx, bool fromClient, byte[] record)
+        /// <param name="connectionIdLength">Length of the CIDs the receiver expects (0 when it expects none).</param>
+        public static UnprotectedRecord Unprotect(Dtls13CryptoContext ctx, bool fromClient, byte[] record, int connectionIdLength = 0)
         {
-            if (!TryReadHeader(ctx, fromClient, record, out int headerLength, out int seqLength, out ulong sequenceNumber))
+            if (!TryReadHeader(ctx, fromClient, record, out int headerLength, out int seqLength, out ulong sequenceNumber, connectionIdLength))
                 throw new DtlsRecordDiscardedException("Malformed DTLS 1.3 record header");
 
             var window = fromClient ? ctx.ClientRecords : ctx.ServerRecords;
@@ -119,19 +129,21 @@ namespace SharpDTLS.DTLS13
             if (end != plaintext.Length)
                 Array.Resize(ref plaintext, end);
 
-            return new UnprotectedRecord(record[0] & 0x03, sequenceNumber, plaintext);
+            byte[] connectionId = (record[0] & 0x10) != 0 ? record.AsSpan(1, connectionIdLength).ToArray() : null;
+            return new UnprotectedRecord(record[0] & 0x03, sequenceNumber, plaintext, connectionId);
         }
 
         /// <summary>
         /// Decodes the full sequence number of a protected record without decrypting it.
         /// Returns false for malformed headers.
         /// </summary>
-        public static bool TryPeekSequenceNumber(Dtls13CryptoContext ctx, bool fromClient, byte[] record, out ulong sequenceNumber)
+        public static bool TryPeekSequenceNumber(Dtls13CryptoContext ctx, bool fromClient, byte[] record, out ulong sequenceNumber, int connectionIdLength = 0)
         {
-            return TryReadHeader(ctx, fromClient, record, out _, out _, out sequenceNumber);
+            return TryReadHeader(ctx, fromClient, record, out _, out _, out sequenceNumber, connectionIdLength);
         }
 
-        private static bool TryReadHeader(Dtls13CryptoContext ctx, bool fromClient, byte[] record, out int headerLength, out int seqLength, out ulong sequenceNumber)
+        private static bool TryReadHeader(Dtls13CryptoContext ctx, bool fromClient, byte[] record, out int headerLength, out int seqLength, out ulong sequenceNumber,
+            int connectionIdLength)
         {
             headerLength = 0;
             seqLength = 0;
@@ -144,11 +156,13 @@ namespace SharpDTLS.DTLS13
             bool seq16     = (record[0] & 0x08) != 0;
             bool hasLength = (record[0] & 0x04) != 0;
 
-            if (hasCid)
-                return false; // connection IDs are not negotiated yet
+            // A CID we did not negotiate makes the record invalid (RFC 9147 §9).
+            int cid = hasCid ? connectionIdLength : 0;
+            if (hasCid && cid == 0)
+                return false;
 
             seqLength = seq16 ? 2 : 1;
-            headerLength = 1 + seqLength + (hasLength ? 2 : 0);
+            headerLength = 1 + cid + seqLength + (hasLength ? 2 : 0);
 
             if (record.Length < headerLength + SampleLength)
                 return false;
@@ -165,8 +179,8 @@ namespace SharpDTLS.DTLS13
             byte[] mask = ComputeMask(suite, snKey, record, headerLength) ?? new byte[2];
 
             ulong truncated = seq16
-                ? (ulong)(((record[1] ^ mask[0]) << 8) | (record[2] ^ mask[1]))
-                : (ulong)(record[1] ^ mask[0]);
+                ? (ulong)(((record[1 + cid] ^ mask[0]) << 8) | (record[2 + cid] ^ mask[1]))
+                : (ulong)(record[1 + cid] ^ mask[0]);
 
             var window = fromClient ? ctx.ClientRecords : ctx.ServerRecords;
             sequenceNumber = window.Reconstruct(truncated, seqLength * 8);

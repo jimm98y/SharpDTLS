@@ -74,6 +74,23 @@ namespace SharpDTLS.DTLS13
         /// <summary>Application protocols (ALPN, RFC 7301) in server preference order; null to ignore ALPN.</summary>
         public IList<string> ApplicationProtocols { get; set; }
 
+        /// <summary>
+        /// Negotiate connection IDs (RFC 9147 §9) with clients that offer them: their records are then routed by CID,
+        /// so the association survives an address change.
+        /// </summary>
+        public bool UseConnectionIds { get; set; }
+
+        /// <summary>Length of the CIDs this server issues.</summary>
+        public int ConnectionIdLength { get; set; } = 8;
+
+        /// <summary>
+        /// Send to a client's new address as soon as an authenticated, newer record arrives from it. Off by default:
+        /// RFC 9147 §11 requires a reachability test first, so verify the pending address and call ConfirmPeerAddress.
+        /// </summary>
+        public bool AutoUpdatePeerAddress { get; set; }
+
+        private readonly ConcurrentDictionary<string, Dtls13ServerConnection> _connectionsById = new();
+
         /// <summary>Optional client certificate validation. Return false to abort with bad_certificate.</summary>
         public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ClientCertificateValidator { get; set; }
 
@@ -180,9 +197,17 @@ namespace SharpDTLS.DTLS13
         {
             var endpoint = (EndPoint)sender;
 
+            // A unified header with the C bit names its connection, whatever address it comes from.
+            if (UseConnectionIds && data.Length > 1 + ConnectionIdLength && (data[0] & 0xF0) == 0x30
+                && _connectionsById.TryGetValue(Convert.ToHexString(data, 1, ConnectionIdLength), out var byId))
+            {
+                byId.ProcessDatagram(data, endpoint);
+                return;
+            }
+
             if (_connections.TryGetValue(endpoint.ToString(), out var connection))
             {
-                connection.ProcessDatagram(data);
+                connection.ProcessDatagram(data, endpoint);
                 return;
             }
 
@@ -276,6 +301,14 @@ namespace SharpDTLS.DTLS13
             }
 
             connection.Start(record, clientHello, Dtls13CipherSuite.Get(suiteId), retry);
+            if (connection.ConnectionId != null && !connection.IsClosed)
+                _connectionsById[Convert.ToHexString(connection.ConnectionId)] = connection;
+        }
+
+        internal void OnPeerAddressConfirmed(Dtls13ServerConnection connection, EndPoint old)
+        {
+            _connections.TryRemove(new KeyValuePair<string, Dtls13ServerConnection>(old.ToString(), connection));
+            _connections[connection.RemoteEndPoint.ToString()] = connection;
         }
 
         private void SendHelloRetryRequest(EndPoint endpoint, byte[] record, ClientHelloDatagram clientHello, ushort suiteId, bool requestKeyShare)
@@ -321,6 +354,8 @@ namespace SharpDTLS.DTLS13
         internal void OnConnectionClosed(Dtls13ServerConnection connection)
         {
             _connections.TryRemove(new KeyValuePair<string, Dtls13ServerConnection>(connection.RemoteEndPoint.ToString(), connection));
+            if (connection.ConnectionId != null)
+                _connectionsById.TryRemove(new KeyValuePair<string, Dtls13ServerConnection>(Convert.ToHexString(connection.ConnectionId), connection));
             ConnectionClosed?.Invoke(this, new Dtls13ConnectionEventArgs(connection.RemoteEndPoint, connection));
         }
 
@@ -373,7 +408,39 @@ namespace SharpDTLS.DTLS13
         private long _earlyDataReceived;
         private bool _earlyDataAccepted;
 
-        public EndPoint RemoteEndPoint { get; }
+        private readonly PeerAddressTracker _address;
+
+        /// <summary>Where this connection sends: the client's address, which can move with connection IDs.</summary>
+        public EndPoint RemoteEndPoint => _address.Current;
+
+        /// <summary>A newer client address awaiting <see cref="ConfirmPeerAddress"/> (when not following automatically).</summary>
+        public EndPoint PendingPeerAddress => _address.Pending;
+
+        /// <summary>
+        /// The client appeared at a new address: a record carrying our CID authenticated, was newer than any before
+        /// and came from elsewhere. Unless the server follows automatically, verify the address (RFC 9147 §11) and
+        /// call <see cref="ConfirmPeerAddress"/>.
+        /// </summary>
+        public event EventHandler<(EndPoint Old, EndPoint New)> PeerAddressChanged;
+
+        /// <summary>Sends to <paramref name="address"/> from now on, after the application has checked it can be reached.</summary>
+        public void ConfirmPeerAddress(EndPoint address) => Locked(() =>
+        {
+            var old = _address.Current;
+            _address.Confirm(address);
+            if (!old.Equals(address))
+                RaiseEvent(() => _server.OnPeerAddressConfirmed(this, old));
+        });
+
+        protected override void OnRecordAuthenticated(ulong epoch, ulong sequenceNumber, bool withConnectionId)
+        {
+            if (!_address.Observe(epoch, sequenceNumber, withConnectionId, DatagramSource, _server.AutoUpdatePeerAddress, out var old))
+                return;
+            var change = (old, DatagramSource);
+            RaiseEvent(() => PeerAddressChanged?.Invoke(this, change));
+            if (_server.AutoUpdatePeerAddress)
+                RaiseEvent(() => _server.OnPeerAddressConfirmed(this, old));
+        }
 
         /// <summary>The host name the client asked for in server_name, or null.</summary>
         public string ServerName { get; private set; }
@@ -397,10 +464,16 @@ namespace SharpDTLS.DTLS13
         public X509Certificate ClientCertificate => _clientCertificate;
 
         internal Dtls13ServerConnection(Dtls13Server server, EndPoint remoteEndPoint)
-            : base(isClient: false, send: data => server.ServerTransport.Send(remoteEndPoint, data))
+            : this(server, new PeerAddressTracker(remoteEndPoint))
+        {
+        }
+
+        // Replies go to the tracked address, which moves with connection IDs.
+        private Dtls13ServerConnection(Dtls13Server server, PeerAddressTracker address)
+            : base(isClient: false, send: data => server.ServerTransport.Send(address.Current, data))
         {
             _server = server;
-            RemoteEndPoint = remoteEndPoint;
+            _address = address;
             InitialRetransmitTimeout = server.InitialRetransmitTimeout;
             KeyLogWriter = server.KeyLogWriter;
 
@@ -433,6 +506,13 @@ namespace SharpDTLS.DTLS13
                     : (_server.ServerKeyPair, _server.ServerCertificate, _server.IntermediateCertificates);
 
                 ApplicationProtocol = AlpnExtension.Select(_server.ApplicationProtocols, _clientHello.Extensions.OfType<AlpnExtension>().FirstOrDefault());
+
+                var offeredCid = _clientHello.Extensions.OfType<ConnectionIdExtension>().FirstOrDefault();
+                if (_server.UseConnectionIds && offeredCid != null)
+                {
+                    WriteConnectionId = offeredCid.ConnectionId;
+                    ReadConnectionId = Dtls13CryptoUtils.GenerateRandom(_server.ConnectionIdLength);
+                }
 
                 SelectPsk(record);
                 if (_psk == null && (_clientHello.PublicKey == null || _certificate == null))
@@ -576,6 +656,8 @@ namespace SharpDTLS.DTLS13
                 serverHello.Extensions.Add(new ServerPreSharedKeyExtension((ushort)_pskIdentity));
             if (_pskOnly)
                 serverHello.Extensions.RemoveAll(e => e is ServerKeyShareExtension);
+            if (ReadConnectionId != null)
+                serverHello.Extensions.Add(new ConnectionIdExtension(ReadConnectionId));
             Session.Transcript.AddPlaintextRecord(SendPlaintextHandshake(serverHello));
 
             byte[] sharedSecret = _pskOnly ? null : Dtls13CryptoUtils.DeriveSharedSecretX25519(Session.PrivateKey, _clientHello.PublicKey);
