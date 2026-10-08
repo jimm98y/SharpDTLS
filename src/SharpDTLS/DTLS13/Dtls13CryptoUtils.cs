@@ -194,7 +194,7 @@ namespace SharpDTLS.DTLS13
 #else
             int labelLength = label.Length;
             if (labelLength < 1)
-                throw new TlsFatalAlert(AlertDescription.internal_error);
+                throw new TlsFatalAlert(Org.BouncyCastle.Tls.AlertDescription.internal_error);
 
             int contextLength = context.Length;
             int expandedLabelLength = Dtls13Prefix.Length + labelLength;
@@ -238,7 +238,7 @@ namespace SharpDTLS.DTLS13
         {
             int labelLength = label.Length;
             if (labelLength < 1)
-                throw new TlsFatalAlert(AlertDescription.internal_error);
+                throw new TlsFatalAlert(Org.BouncyCastle.Tls.AlertDescription.internal_error);
 
             int contextLength = context.Length;
             int expandedLabelLength = Dtls13Prefix.Length + labelLength;
