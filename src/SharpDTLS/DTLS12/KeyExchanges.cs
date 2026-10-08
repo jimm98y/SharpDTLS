@@ -75,6 +75,7 @@ namespace SharpDTLS.DTLS12
         public Func<byte[], byte[]> PskResolver { get; init; }
         public Func<byte[], SrpVerifier> SrpVerifierProvider { get; init; }
         public Func<string, PwdCredential> PwdCredentialProvider { get; init; }
+        public ECPrivateKeyParameters PwdProtectionKey { get; init; }
 
         /// <summary>ClientHello.random | ServerHello.random, once both are known (TLS-PWD hunting and pecking).</summary>
         public Func<byte[]> PwdContext { get; init; }

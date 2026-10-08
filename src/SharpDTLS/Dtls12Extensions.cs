@@ -84,6 +84,17 @@ namespace SharpDTLS
         public byte[] Identity => Name;
     }
 
+    /// <summary>pwd_protect (RFC 8492 §4.3.1): C.x || SIV-encrypt(k, username), opaque to observers.</summary>
+    public class PwdProtectExtension : OpaqueNameExtension
+    {
+        public const ushort Type = 0x001d;
+
+        public PwdProtectExtension() : base(Type, null) { }
+        public PwdProtectExtension(byte[] protectedName) : base(Type, protectedName ?? throw new ArgumentNullException(nameof(protectedName))) { }
+
+        public byte[] ProtectedName => Name;
+    }
+
     /// <summary>pwd_clear (RFC 8492 §4.4.3): the client's TLS-PWD username, unprotected, as UTF-8 OpaqueString.</summary>
     public class PwdClearExtension : OpaqueNameExtension
     {

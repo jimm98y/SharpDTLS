@@ -151,6 +151,47 @@ namespace Dtls13Test.Tests
                 EccPwd.PreMasterSecret(pe, client.Private, serverScalar, serverElement));
         }
 
+        [DataRow("P-256")]
+        [DataRow("P-384")]
+        [DataRow("P-521")]
+        [DataRow("brainpoolP512r1")]
+        [TestMethod]
+        public void ProtectedUsername_RoundTripsAndHidesTheName(string curve)
+        {
+            var keyPair = PwdCredential.GenerateProtectionKeyPair(curve);
+            var serverKey = (Org.BouncyCastle.Crypto.Parameters.ECPrivateKeyParameters)keyPair.Private;
+            byte[] name = EccPwd.ProtectUsername("fred", (Org.BouncyCastle.Crypto.Parameters.ECPublicKeyParameters)keyPair.Public, new SecureRandom());
+
+            Assert.AreEqual("fred", EccPwd.RecoverUsername(name, serverKey));
+            Assert.IsGreaterThanOrEqualTo(128 + 16, name.Length, "usernames are padded to 128 octets");
+            Assert.IsFalse(Encoding.ASCII.GetString(name).Contains("fred"));
+
+            byte[] tampered = (byte[])name.Clone();
+            tampered[^1] ^= 1;
+            Assert.IsNull(EccPwd.RecoverUsername(tampered, serverKey));
+            var otherKey = (Org.BouncyCastle.Crypto.Parameters.ECPrivateKeyParameters)PwdCredential.GenerateProtectionKeyPair(curve).Private;
+            Assert.IsNull(EccPwd.RecoverUsername(name, otherKey));
+        }
+
+        [TestMethod]
+        public void ProtectedUsername_Handshake()
+        {
+            var keyPair = PwdCredential.GenerateProtectionKeyPair();
+            var (client, server) = Pair(0xC0B0, TestCredentials.PwdUsername, TestCredentials.PwdPassword);
+            server.PwdProtectionKey = (Org.BouncyCastle.Crypto.Parameters.ECPrivateKeyParameters)keyPair.Private;
+            client.PwdProtectionKey = (Org.BouncyCastle.Crypto.Parameters.ECPublicKeyParameters)keyPair.Public;
+            Assert.IsNull(Run(client));
+        }
+
+        [TestMethod]
+        public void ProtectedUsername_UnderTheWrongKey_FailsLikeAnUnknownUser()
+        {
+            var (client, server) = Pair(0xC0B0, TestCredentials.PwdUsername, TestCredentials.PwdPassword);
+            server.PwdProtectionKey = (Org.BouncyCastle.Crypto.Parameters.ECPrivateKeyParameters)PwdCredential.GenerateProtectionKeyPair().Private;
+            client.PwdProtectionKey = (Org.BouncyCastle.Crypto.Parameters.ECPublicKeyParameters)PwdCredential.GenerateProtectionKeyPair().Public;
+            Assert.IsInstanceOfType<TimeoutException>(Run(client));
+        }
+
         [TestMethod]
         public void OpaqueString_MapsSpacesAndNormalizes()
         {

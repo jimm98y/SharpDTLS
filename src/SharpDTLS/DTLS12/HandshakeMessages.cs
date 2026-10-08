@@ -33,6 +33,7 @@ namespace SharpDTLS.DTLS12
             0x000e => new UseSrtpExtension(),
             SrpExtension.Type => new SrpExtension(),
             PwdClearExtension.Type => new PwdClearExtension(),
+            PwdProtectExtension.Type => new PwdProtectExtension(),
             0x0016 => new EncryptThenMacExtension(),
             ExtendedMasterSecretExtension.Type => new ExtendedMasterSecretExtension(),
             RenegotiationInfoExtension.Type => new RenegotiationInfoExtension(),

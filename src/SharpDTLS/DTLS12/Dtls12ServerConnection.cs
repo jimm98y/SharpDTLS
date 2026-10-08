@@ -46,6 +46,9 @@ namespace SharpDTLS.DTLS12
         /// and fail like a wrong password, RFC 8492 §4.5.1.1); enables the ECCPWD suites.
         /// </summary>
         public Func<string, PwdCredential> PwdCredentialProvider { get; set; }
+
+        /// <summary>Private key for recovering pwd_protect usernames (RFC 8492 §4.3.2); null accepts only pwd_clear.</summary>
+        public ECPrivateKeyParameters PwdProtectionKey { get; set; }
     }
 
     /// <summary>
@@ -146,7 +149,7 @@ namespace SharpDTLS.DTLS12
                     && (!s.IsStaticKeyAgreement || Dtls12ClientConnection.SignedWith(_settings.Certificate, s.RequiredCertificateSigner))
                     && (!s.RequiresPsk || _settings.PskIdentityResolver != null)
                     && (!s.RequiresSrp || (_settings.SrpVerifierProvider != null && ch.Extension<SrpExtension>() != null))
-                    && (!s.RequiresPwd || (_settings.PwdCredentialProvider != null && ch.Extension<PwdClearExtension>() != null
+                    && (!s.RequiresPwd || (_settings.PwdCredentialProvider != null && EccPwd.HasUsername(ch, _settings.PwdProtectionKey)
                                            && EccPwd.SelectGroup(ch) != 0)))
                 ?? throw new DtlsException(AlertDescription.HandshakeFailure, "No cipher suite in common.");
 
@@ -158,6 +161,7 @@ namespace SharpDTLS.DTLS12
                 PskResolver = _settings.PskIdentityResolver,
                 SrpVerifierProvider = _settings.SrpVerifierProvider,
                 PwdCredentialProvider = _settings.PwdCredentialProvider,
+                PwdProtectionKey = _settings.PwdProtectionKey,
                 PwdContext = () => Concat(ClientRandom, ServerRandom),
             });
 

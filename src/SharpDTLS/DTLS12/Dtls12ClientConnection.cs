@@ -95,6 +95,12 @@ namespace SharpDTLS.DTLS12
         /// <summary>The TLS-PWD password that goes with <see cref="PwdUsername"/>.</summary>
         public string PwdPassword { get; set; }
 
+        /// <summary>
+        /// The server's username-protection public key (RFC 8492 §4.3). When set the username is sent
+        /// encrypted in pwd_protect instead of in the clear.
+        /// </summary>
+        public ECPublicKeyParameters PwdProtectionKey { get; set; }
+
         private bool HavePwd => PwdUsername != null && PwdPassword != null;
 
         /// <summary>Smallest finite-field Diffie-Hellman prime, or SRP group modulus, accepted from a server.</summary>
@@ -153,7 +159,9 @@ namespace SharpDTLS.DTLS12
             if (offeredSuites.Any(s => s.RequiresSrp))
                 ch.Extensions.Add(new SrpExtension(SrpIdentity));
             if (offeredSuites.Any(s => s.RequiresPwd))
-                ch.Extensions.Add(new PwdClearExtension(EccPwd.PrepareOpaqueString(PwdUsername)));
+                ch.Extensions.Add(PwdProtectionKey != null
+                    ? new PwdProtectExtension(EccPwd.ProtectUsername(PwdUsername, PwdProtectionKey, new Org.BouncyCastle.Security.SecureRandom()))
+                    : new PwdClearExtension(EccPwd.PrepareOpaqueString(PwdUsername)));
 
             _clientHello = ch;
 

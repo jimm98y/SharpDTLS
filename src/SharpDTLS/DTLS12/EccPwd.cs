@@ -1,6 +1,7 @@
 using Org.BouncyCastle.Asn1.X9;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Digests;
+using Org.BouncyCastle.Crypto.Generators;
 using Org.BouncyCastle.Crypto.Macs;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Math;
@@ -50,6 +51,20 @@ namespace SharpDTLS.DTLS12
             byte[] result = new byte[hmac.GetMacSize()];
             hmac.DoFinal(result, 0);
             return result;
+        }
+
+        /// <summary>
+        /// A username-protection key pair (RFC 8492 §4.3), on secp256r1 unless another curve is named.
+        /// The server keeps the private key; clients are provisioned with the public key.
+        /// </summary>
+        public static AsymmetricCipherKeyPair GenerateProtectionKeyPair(string curveName = "P-256")
+        {
+            var curve = ECNamedCurveTable.GetByName(curveName) ?? throw new ArgumentException($"Unknown curve {curveName}.", nameof(curveName));
+            if (!curve.H.Equals(BigInteger.One))
+                throw new ArgumentException("Username protection needs a curve with cofactor 1.", nameof(curveName));
+            var generator = new ECKeyPairGenerator();
+            generator.Init(new ECKeyGenerationParameters(new ECDomainParameters(curve), new SecureRandom()));
+            return generator.GenerateKeyPair();
         }
     }
 
@@ -105,6 +120,91 @@ namespace SharpDTLS.DTLS12
             }
             return Encoding.UTF8.GetBytes(mapped.ToString().Normalize(NormalizationForm.FormC));
         }
+
+        /// <summary>
+        /// Protects a username for pwd_protect (RFC 8492 §4.3.1): an ephemeral-static ECDH with the server's
+        /// protection key gives k = HKDF(Z.x), and the name is C.x || SIV-encrypt(k, username padded to 128 octets).
+        /// </summary>
+        public static byte[] ProtectUsername(string username, ECPublicKeyParameters serverKey, SecureRandom random)
+        {
+            var domain = serverKey.Parameters;
+            int pLength = (domain.Curve.FieldSize + 7) / 8;
+            byte[] name = PrepareOpaqueString(username);
+            byte[] padded = new byte[Math.Max(name.Length, 128)];
+            name.CopyTo(padded, 0);
+            if (pLength + 16 + padded.Length > 255)
+                throw new ArgumentException("The username is too long to protect.", nameof(username));
+
+            BigInteger c = BigIntegers.CreateRandomInRange(BigInteger.Two, domain.N.Subtract(BigInteger.Two), random);
+            ECPoint publicC = domain.G.Multiply(c).Normalize();
+            ECPoint z = serverKey.Q.Multiply(c).Normalize();
+            byte[] u = AesSiv.Encrypt(ProtectionKey(domain, z), padded);
+            return BigIntegers.AsUnsignedByteArray(pLength, publicC.AffineXCoord.ToBigInteger()).Concat(u).ToArray();
+        }
+
+        /// <summary>Recovers a protected username (RFC 8492 §4.3.2), or null when it cannot be recovered.</summary>
+        public static string RecoverUsername(byte[] protectedName, ECPrivateKeyParameters serverKey)
+        {
+            var domain = serverKey.Parameters;
+            int pLength = (domain.Curve.FieldSize + 7) / 8;
+            if (protectedName.Length <= pLength + 16)
+                return null;
+
+            // Compact representation: either y gives the same Z.x, so decode x as a compressed point.
+            ECPoint publicC;
+            try
+            {
+                publicC = domain.Curve.DecodePoint(new byte[] { 0x02 }.Concat(protectedName.AsSpan(0, pLength).ToArray()).ToArray());
+            }
+            catch (ArgumentException)
+            {
+                return null;
+            }
+            if (publicC.IsInfinity || !publicC.IsValid())
+                return null;
+
+            ECPoint z = publicC.Multiply(serverKey.D).Normalize();
+            if (z.IsInfinity)
+                return null;
+            byte[] username = AesSiv.Decrypt(ProtectionKey(domain, z), protectedName.AsSpan(pLength).ToArray());
+            if (username == null)
+                return null;
+            int length = Array.IndexOf(username, (byte)0);
+            return Encoding.UTF8.GetString(username, 0, length < 0 ? username.Length : length);
+        }
+
+        // k = HKDF-expand(HKDF-extract(NULL, Z.x), "", l); SHA-256/384/512 and SIV-128/192/256 by len(p).
+        private static byte[] ProtectionKey(ECDomainParameters domain, ECPoint z)
+        {
+            int pBits = domain.Curve.FieldSize;
+            IDigest digest = pBits <= 256 ? new Sha256Digest() : pBits <= 384 ? new Sha384Digest() : new Sha512Digest();
+            int keyLength = pBits <= 256 ? 32 : pBits <= 384 ? 48 : 64;
+            byte[] zx = BigIntegers.AsUnsignedByteArray((pBits + 7) / 8, z.AffineXCoord.ToBigInteger());
+
+            var hkdf = new HkdfBytesGenerator(digest);
+            hkdf.Init(new HkdfParameters(zx, null, Array.Empty<byte>()));
+            byte[] key = new byte[keyLength];
+            hkdf.GenerateBytes(key, 0, key.Length);
+            return key;
+        }
+
+        /// <summary>
+        /// The client's username from pwd_clear or pwd_protect, or null when a protected name cannot be
+        /// recovered (treated as an unknown user, RFC 8492 §4.3.2).
+        /// </summary>
+        public static string ResolveUsername(ClientHelloMessage clientHello, ECPrivateKeyParameters protectionKey)
+        {
+            var protect = clientHello.Extension<PwdProtectExtension>();
+            if (protect != null && protectionKey != null)
+                return RecoverUsername(protect.ProtectedName, protectionKey);
+            return clientHello.Extension<PwdClearExtension>()?.Username
+                ?? throw new DtlsException(AlertDescription.HandshakeFailure, "ECCPWD cipher suite without a pwd_name extension.");
+        }
+
+        /// <summary>Whether the server can identify the client: pwd_clear, or pwd_protect with a protection key.</summary>
+        public static bool HasUsername(ClientHelloMessage clientHello, ECPrivateKeyParameters protectionKey)
+            => clientHello.Extension<PwdClearExtension>() != null
+               || (protectionKey != null && clientHello.Extension<PwdProtectExtension>() != null);
 
         /// <summary>H(x) = HMAC-hash(zero key, x), with the cipher suite's hash (RFC 8492 §3.3).</summary>
         internal static byte[] H(bool sha384, params byte[][] parts)
@@ -288,8 +388,7 @@ namespace SharpDTLS.DTLS12
 
         public EccPwdServerKeyExchange(ServerKeyExchangeContext context, CipherSuiteInfo suite)
         {
-            string username = context.ClientHello.Extension<PwdClearExtension>()?.Username
-                ?? throw new DtlsException(AlertDescription.HandshakeFailure, "ECCPWD cipher suite without a pwd_clear extension.");
+            string username = EccPwd.ResolveUsername(context.ClientHello, context.PwdProtectionKey);
             Group = EccPwd.SelectGroup(context.ClientHello);
             if (Group == 0)
                 throw new DtlsException(AlertDescription.HandshakeFailure, "No TLS-PWD group in common.");
@@ -300,7 +399,7 @@ namespace SharpDTLS.DTLS12
 
             // RFC 8492 §4.5.1.1: hide unknown users by running the protocol with a random salt and base;
             // the client's Finished then fails like a wrong password, and hunting and pecking costs the same.
-            _credential = context.PwdCredentialProvider?.Invoke(username);
+            _credential = username == null ? null : context.PwdCredentialProvider?.Invoke(username);
             _simulated = _credential == null;
             _credential ??= new PwdCredential(Dtls12CryptoUtils.GenerateRandom(32), Dtls12CryptoUtils.GenerateRandom(32));
         }

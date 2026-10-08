@@ -73,6 +73,9 @@ namespace SharpDTLS.DTLS12
         /// </summary>
         public Func<string, PwdCredential> PwdCredentialProvider { get => Settings.PwdCredentialProvider; set => Settings.PwdCredentialProvider = value; }
 
+        /// <summary>Private key for recovering pwd_protect usernames (RFC 8492 §4.3.2); null accepts only pwd_clear.</summary>
+        public Org.BouncyCastle.Crypto.Parameters.ECPrivateKeyParameters PwdProtectionKey { get => Settings.PwdProtectionKey; set => Settings.PwdProtectionKey = value; }
+
         public IReadOnlyCollection<Dtls12ServerConnection> Connections => _connections.Values.ToList();
 
         public Dtls12ServerConnection GetConnection(EndPoint endpoint)
