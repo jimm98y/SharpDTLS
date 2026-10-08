@@ -72,7 +72,12 @@ namespace Dtls13Test.Tests
                 if (Output.Contains(text))
                     return true;
                 if (_process.HasExited)
+                {
+                    // The parameterless overload also waits for the async stdout/stderr readers to reach EOF,
+                    // so the final lines (e.g. a bind error) are in Output before it is checked.
+                    _process.WaitForExit();
                     return Output.Contains(text);
+                }
                 Thread.Sleep(20);
             }
             return false;
