@@ -66,13 +66,12 @@ namespace Dtls13Test.Tests
             var (keyPair, certificate) = TestCredentials.For(suite);
             string certPath = OpenSsl.WritePem(dir, "cert.pem", certificate);
             string keyPath = OpenSsl.WritePem(dir, "key.pem", keyPair.Private);
-            int port = OpenSsl.FreeUdpPort();
             string credentials = suite.ServerCertificateType == CertificateKeyType.None ? "-nocert" : $"-cert {certPath} -key {keyPath}";
             if (suite.RequiresPsk)
                 credentials += $" -psk {Convert.ToHexString(TestCredentials.PskKey)} -psk_identity {Encoding.ASCII.GetString(TestCredentials.PskIdentity)} -psk_hint {Encoding.ASCII.GetString(TestCredentials.PskHint)}";
 
-            using var server = new OpenSslProcess(
-                $"s_server {versionFlag} {_openSsl.Value.Providers} -accept 127.0.0.1:{port} {credentials} -cipher {openSslName}@SECLEVEL=0", dir);
+            using var server = OpenSslProcess.StartServer(p =>
+                $"s_server {versionFlag} {_openSsl.Value.Providers} -accept 127.0.0.1:{p} {credentials} -cipher {openSslName}@SECLEVEL=0", dir, Timeout, out int port);
             Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), "s_server did not start:\n" + server.Output);
 
             using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));

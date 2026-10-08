@@ -90,9 +90,7 @@ namespace Dtls13Test.Tests
             var (kp, cert) = Credentials(ecCertificate);
             string certPath = OpenSsl.WritePem(dir, "cert.pem", cert);
             string keyPath = OpenSsl.WritePem(dir, "key.pem", kp.Private);
-            int port = OpenSsl.FreeUdpPort();
-
-            using var server = new OpenSslProcess($"server {port} {certPath} {keyPath} -cipher {cipher}{(helloRetry ? " -hrr" : "")}", dir, WolfSsl.Harness);
+            using var server = OpenSslProcess.StartServer(p => $"server {p} {certPath} {keyPath} -cipher {cipher}{(helloRetry ? " -hrr" : "")}", dir, Timeout, out int port, WolfSsl.Harness);
             Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), "server did not start:\n" + server.Output);
 
             using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
@@ -181,9 +179,7 @@ namespace Dtls13Test.Tests
             string certPath = OpenSsl.WritePem(dir, "cert.pem", serverCert);
             string keyPath = OpenSsl.WritePem(dir, "key.pem", serverKp.Private);
             string caPath = OpenSsl.WritePem(dir, "client-ca.pem", clientCert);
-            int port = OpenSsl.FreeUdpPort();
-
-            using var server = new OpenSslProcess($"server {port} {certPath} {keyPath} -hrr -verify {caPath}", dir, WolfSsl.Harness);
+            using var server = OpenSslProcess.StartServer(p => $"server {p} {certPath} {keyPath} -hrr -verify {caPath}", dir, Timeout, out int port, WolfSsl.Harness);
             Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), "server did not start:\n" + server.Output);
 
             using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));

@@ -44,12 +44,11 @@ namespace Dtls13Test.Tests
             var (kp, cert) = Dtls12CryptoUtils.GenerateSelfSignedCertificate();
             string certPath = OpenSsl.WritePem(dir, "cert.pem", cert);
             string keyPath = OpenSsl.WritePem(dir, "key.pem", kp.Private);
-            int port = OpenSsl.FreeUdpPort();
             int length = DtlsSrtp.KeyingMaterialLength(profile);
             string cipher = version == "-dtls1" ? " -cipher DEFAULT@SECLEVEL=0" : "";
 
-            using var server = new OpenSslProcess(
-                $"s_server {version} -accept 127.0.0.1:{port} -cert {certPath} -key {keyPath}{cipher} -use_srtp {profileName} -keymatexport {DtlsSrtp.ExporterLabel} -keymatexportlen {length} -msg", dir);
+            using var server = OpenSslProcess.StartServer(p =>
+                $"s_server {version} -accept 127.0.0.1:{p} -cert {certPath} -key {keyPath}{cipher} -use_srtp {profileName} -keymatexport {DtlsSrtp.ExporterLabel} -keymatexportlen {length} -msg", dir, Timeout, out int port);
             Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), server.Output);
 
             using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
@@ -132,9 +131,7 @@ namespace Dtls13Test.Tests
             var (kp, cert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
             string certPath = OpenSsl.WritePem(dir, "cert.pem", cert);
             string keyPath = OpenSsl.WritePem(dir, "key.pem", kp.Private);
-            int port = OpenSsl.FreeUdpPort();
-
-            using var server = new OpenSslProcess($"server {port} {certPath} {keyPath} -cipher {cipher} -srtp {profileName} -export EXPORTER-sharpdtls-test 48", dir, WolfSsl.Harness);
+            using var server = OpenSslProcess.StartServer(p => $"server {p} {certPath} {keyPath} -cipher {cipher} -srtp {profileName} -export EXPORTER-sharpdtls-test 48", dir, Timeout, out int port, WolfSsl.Harness);
             Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), server.Output);
 
             using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));

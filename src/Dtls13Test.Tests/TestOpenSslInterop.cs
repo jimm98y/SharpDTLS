@@ -48,6 +48,22 @@ namespace Dtls13Test.Tests
 
         public string Output { get { lock (_output) return _output.ToString(); } }
 
+        /// <summary>
+        /// Starts a server on a free port and waits until it accepts. The probe in <see cref="OpenSsl.FreeUdpPort"/>
+        /// can race with other binds during parallel runs, so a server that fails to bind is retried on a new port.
+        /// </summary>
+        public static OpenSslProcess StartServer(Func<int, string> arguments, string workingDirectory, TimeSpan timeout, out int port, string fileName = null)
+        {
+            for (int attempt = 1; ; attempt++)
+            {
+                port = OpenSsl.FreeUdpPort();
+                var server = new OpenSslProcess(arguments(port), workingDirectory, fileName);
+                if (server.WaitForOutput("ACCEPT", timeout) || attempt == 3 || !server.Output.Contains("in use"))
+                    return server;
+                server.Dispose();
+            }
+        }
+
         public bool WaitForOutput(string text, TimeSpan timeout)
         {
             var sw = Stopwatch.StartNew();
@@ -150,10 +166,7 @@ namespace Dtls13Test.Tests
             var (kp, cert) = Credentials(ecCertificate);
             string certPath = OpenSsl.WritePem(dir, "cert.pem", cert);
             string keyPath = OpenSsl.WritePem(dir, "key.pem", kp.Private);
-            int port = OpenSsl.FreeUdpPort();
-
-            using var server = new OpenSslProcess(
-                $"s_server -dtls1_2 -accept 127.0.0.1:{port} -cert {certPath} -key {keyPath} -cipher {cipher} -groups {groups} -msg", dir);
+            using var server = OpenSslProcess.StartServer(p => $"s_server -dtls1_2 -accept 127.0.0.1:{p} -cert {certPath} -key {keyPath} -cipher {cipher} -groups {groups} -msg", dir, Timeout, out int port);
             Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), "s_server did not start:\n" + server.Output);
 
             using var clientTransport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
@@ -226,8 +239,7 @@ namespace Dtls13Test.Tests
             string etm = encryptThenMac ? "" : " -no_etm";
 
             // SharpDTLS client -> OpenSSL server
-            int port = OpenSsl.FreeUdpPort();
-            using (var server = new OpenSslProcess($"s_server -dtls1_2 -accept 127.0.0.1:{port} -cert {certPath} -key {keyPath} -cipher {cipher}{etm}", dir))
+            using (var server = OpenSslProcess.StartServer(p => $"s_server -dtls1_2 -accept 127.0.0.1:{p} -cert {certPath} -key {keyPath} -cipher {cipher}{etm}", dir, Timeout, out int port))
             {
                 Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), server.Output);
                 using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
@@ -280,10 +292,7 @@ namespace Dtls13Test.Tests
             string certPath = OpenSsl.WritePem(dir, "cert.pem", serverCert);
             string keyPath = OpenSsl.WritePem(dir, "key.pem", serverKp.Private);
             string caPath = OpenSsl.WritePem(dir, "client-ca.pem", clientCert);
-            int port = OpenSsl.FreeUdpPort();
-
-            using var server = new OpenSslProcess(
-                $"s_server -dtls1_2 -accept 127.0.0.1:{port} -cert {certPath} -key {keyPath} -Verify 1 -CAfile {caPath} -verify_return_error", dir);
+            using var server = OpenSslProcess.StartServer(p => $"s_server -dtls1_2 -accept 127.0.0.1:{p} -cert {certPath} -key {keyPath} -Verify 1 -CAfile {caPath} -verify_return_error", dir, Timeout, out int port);
             Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), "s_server did not start:\n" + server.Output);
 
             using var clientTransport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
@@ -326,10 +335,7 @@ namespace Dtls13Test.Tests
             var (kp, cert) = Credentials(ecCertificate);
             string certPath = OpenSsl.WritePem(dir, "cert.pem", cert);
             string keyPath = OpenSsl.WritePem(dir, "key.pem", kp.Private);
-            int port = OpenSsl.FreeUdpPort();
-
-            using var server = new OpenSslProcess(
-                $"s_server -dtls1 -accept 127.0.0.1:{port} -cert {certPath} -key {keyPath} -cipher {cipher}@SECLEVEL=0 -groups {groups} -msg", dir);
+            using var server = OpenSslProcess.StartServer(p => $"s_server -dtls1 -accept 127.0.0.1:{p} -cert {certPath} -key {keyPath} -cipher {cipher}@SECLEVEL=0 -groups {groups} -msg", dir, Timeout, out int port);
             Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), "s_server did not start:\n" + server.Output);
 
             using var clientTransport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
