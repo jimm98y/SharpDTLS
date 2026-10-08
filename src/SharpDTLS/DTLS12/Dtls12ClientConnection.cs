@@ -124,6 +124,12 @@ namespace SharpDTLS.DTLS12
         /// <summary>Whether the server resumed <see cref="ResumptionSession"/>.</summary>
         public bool IsResumed { get; private set; }
 
+        /// <summary>
+        /// The server's host name, sent in server_name (RFC 6066) so the server can pick its certificate. Sessions
+        /// are only resumed for the same name. Not an IP address literal.
+        /// </summary>
+        public string ServerName { get; set; }
+
         /// <summary>Advertise RFC 5077 session tickets (and present the ticket of <see cref="ResumptionSession"/>).</summary>
         public bool UseSessionTickets { get; set; } = true;
 
@@ -168,6 +174,8 @@ namespace SharpDTLS.DTLS12
             // client-generated session ID, which the server echoes when it accepts the ticket (RFC 5077 §3.4).
             // The ID is kept across a HelloVerifyRequest so both ClientHellos offer the same session.
             var resumable = ResumptionSession;
+            if (resumable != null && !string.Equals(resumable.ServerName, ServerName, StringComparison.OrdinalIgnoreCase))
+                resumable = null; // RFC 6066 §3: a session belongs to one server name
             bool presentTicket = resumable?.Ticket != null && UseSessionTickets;
             _offeredSession = resumable != null && (presentTicket || resumable.SessionId.Length != 0) && offered.Contains(resumable.CipherSuite)
                               && DtlsVersion.IsAtLeast(resumable.Version, MinimumVersion) && DtlsVersion.IsAtLeast(MaximumVersion, resumable.Version)
@@ -203,6 +211,8 @@ namespace SharpDTLS.DTLS12
             ch.Extensions.Add(new RenegotiationInfoExtension());
             if (SrtpProtectionProfiles != null && SrtpProtectionProfiles.Length > 0)
                 ch.Extensions.Add(new UseSrtpExtension(SrtpProtectionProfiles));
+            if (ServerName != null)
+                ch.Extensions.Add(new ServerNameExtension(ServerName));
             if (UseSessionTickets)
                 ch.Extensions.Add(new SessionTicketExtension(presentTicket && _offeredSession != null ? _offeredSession.Ticket : null));
             if (offeredSuites.Any(s => s.RequiresSrp))
@@ -326,6 +336,9 @@ namespace SharpDTLS.DTLS12
             }
 
             UseExtendedMasterSecret = sh.Extension<ExtendedMasterSecretExtension>() != null;
+
+            if (sh.Extension<ServerNameExtension>() != null && ServerName == null)
+                throw new DtlsException(AlertDescription.UnsupportedExtension, "Unsolicited server_name extension.");
 
             // An empty SessionTicket extension announces a NewSessionTicket before the server's ChangeCipherSpec.
             _ticketExpected = sh.Extension<SessionTicketExtension>() != null;
@@ -509,7 +522,7 @@ namespace SharpDTLS.DTLS12
             else if (_newSessionId != null || (_newTicket is { Ticket.Length: > 0 } && UseExtendedMasterSecret))
             {
                 SessionState = new Dtls12SessionState(_newSessionId ?? Array.Empty<byte>(), NegotiatedVersion, CipherSuite.Id, MasterSecret,
-                    UseEncryptThenMac, _serverCertificate?.GetEncoded());
+                    UseEncryptThenMac, _serverCertificate?.GetEncoded(), serverName: ServerName);
             }
 
             // A zero-length ticket means the server changed its mind (RFC 5077 §3.3).

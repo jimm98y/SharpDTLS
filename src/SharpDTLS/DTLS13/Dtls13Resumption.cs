@@ -10,9 +10,10 @@ namespace SharpDTLS.DTLS13
     public sealed class Dtls13SessionTicket
     {
         internal Dtls13SessionTicket(byte[] ticket, uint lifetimeSeconds, uint ageAdd, ushort cipherSuite, byte[] psk, byte[] serverCertificate,
-            uint maxEarlyDataSize = 0)
+            uint maxEarlyDataSize = 0, string serverName = null)
         {
             MaxEarlyDataSize = maxEarlyDataSize;
+            ServerName = serverName;
             Ticket = ticket;
             LifetimeSeconds = lifetimeSeconds;
             AgeAdd = ageAdd;
@@ -34,6 +35,9 @@ namespace SharpDTLS.DTLS13
         public byte[] ServerCertificate { get; }
 
         public DateTime ReceivedUtc { get; }
+
+        /// <summary>The server_name of the connection that issued the ticket; it is offered only for the same name.</summary>
+        public string ServerName { get; }
 
         /// <summary>How much 0-RTT data the server accepts with this ticket (0: none).</summary>
         public uint MaxEarlyDataSize { get; }
@@ -85,6 +89,7 @@ namespace SharpDTLS.DTLS13
         public DateTime IssuedUtc { get; init; }
         public byte[] ClientCertificate { get; init; }
         public uint MaxEarlyDataSize { get; init; }
+        public string ServerName { get; init; }
 
         public byte[] Seal(SessionTicketKeys keys)
             => keys.Seal(new TlsWriter()
@@ -95,6 +100,7 @@ namespace SharpDTLS.DTLS13
                 .WriteUInt32((uint)(new DateTimeOffset(IssuedUtc).ToUnixTimeMilliseconds() >> 32)).WriteUInt32((uint)new DateTimeOffset(IssuedUtc).ToUnixTimeMilliseconds())
                 .WriteOpaque8(Psk)
                 .WriteOpaque24(ClientCertificate ?? Array.Empty<byte>())
+                .WriteOpaque16(System.Text.Encoding.ASCII.GetBytes(ServerName ?? ""))
                 .ToArray());
 
         /// <summary>The state in a ticket, or null when it is unknown, forged, from DTLS 1.0/1.2 or expired.</summary>
@@ -113,12 +119,14 @@ namespace SharpDTLS.DTLS13
                 var issuedUtc = DateTimeOffset.FromUnixTimeMilliseconds(((long)r.ReadUInt32() << 32) | r.ReadUInt32()).UtcDateTime;
                 byte[] psk = r.ReadOpaque8();
                 byte[] certificate = r.ReadOpaque24();
+                string serverName = System.Text.Encoding.ASCII.GetString(r.ReadOpaque16());
                 r.EnsureEnd();
                 if (DateTime.UtcNow - issuedUtc >= keys.Lifetime || !Dtls13CipherSuite.IsSupported(cipherSuite))
                     return null;
                 return new Dtls13TicketState
                 {
                     CipherSuite = cipherSuite, AgeAdd = ageAdd, IssuedUtc = issuedUtc, Psk = psk, MaxEarlyDataSize = maxEarlyDataSize,
+                    ServerName = serverName.Length == 0 ? null : serverName,
                     ClientCertificate = certificate.Length == 0 ? null : certificate,
                 };
             }

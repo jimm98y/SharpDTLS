@@ -65,6 +65,12 @@ namespace SharpDTLS.DTLS13
         /// <summary>Intermediate CA certificates sent after the server certificate, issuer of the previous one first.</summary>
         public IList<X509Certificate> IntermediateCertificates { get; set; }
 
+        /// <summary>
+        /// Chooses the credentials for the client's server_name (RFC 6066), which is null when the client sent none.
+        /// Returning null uses the default certificate.
+        /// </summary>
+        public Func<string, ServerCredentials> CertificateSelector { get; set; }
+
         /// <summary>Optional client certificate validation. Return false to abort with bad_certificate.</summary>
         public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ClientCertificateValidator { get; set; }
 
@@ -357,10 +363,17 @@ namespace SharpDTLS.DTLS13
         private bool _helloRetried;
         private Dtls13TicketState _ticketState;
         private Dtls13CryptoContext _earlyKeys;
+        private AsymmetricCipherKeyPair _keyPair;
+        private X509Certificate _certificate;
+        private IList<X509Certificate> _intermediates;
+        private bool _serverNameUsed;
         private long _earlyDataReceived;
         private bool _earlyDataAccepted;
 
         public EndPoint RemoteEndPoint { get; }
+
+        /// <summary>The host name the client asked for in server_name, or null.</summary>
+        public string ServerName { get; private set; }
 
         /// <summary>Whether the client resumed with a ticket (PSK handshake).</summary>
         public bool IsResumed => _psk != null && ExternalPskIdentity == null;
@@ -409,10 +422,17 @@ namespace SharpDTLS.DTLS13
                     Session.Transcript.AddPlaintextRecord(hrr.ToBytes());
                 }
                 _helloRetried = retry != null;
+                ServerName = _clientHello.Extensions.OfType<ServerNameExtension>().FirstOrDefault()?.HostName;
+                var selected = _server.CertificateSelector?.Invoke(ServerName);
+                _serverNameUsed = selected != null && ServerName != null;
+                (_keyPair, _certificate, _intermediates) = selected != null
+                    ? (selected.KeyPair, selected.Certificate, selected.IntermediateCertificates)
+                    : (_server.ServerKeyPair, _server.ServerCertificate, _server.IntermediateCertificates);
+
                 SelectPsk(record);
-                if (_psk == null && (_clientHello.PublicKey == null || _server.ServerCertificate == null))
+                if (_psk == null && (_clientHello.PublicKey == null || _certificate == null))
                     throw new DtlsException(AlertDescription.HandshakeFailure,
-                        _server.ServerCertificate == null ? "PSK-only server and no acceptable PSK." : "No key share and no acceptable PSK.");
+                        _certificate == null ? "PSK-only server and no acceptable PSK." : "No key share and no acceptable PSK.");
                 Session.Transcript.AddPlaintextRecord(record);
 
                 // 0-RTT keys come from the ClientHello alone (RFC 8446 §7.1).
@@ -465,8 +485,10 @@ namespace SharpDTLS.DTLS13
                 var state = _server.TicketKeys != null ? Dtls13TicketState.Open(_server.TicketKeys, identity) : null;
                 if (state != null)
                 {
+                    // RFC 8446 §4.6.1 / RFC 6066 §3: a ticket is only good for the server name it was issued under.
                     if (Dtls13CipherSuite.Get(state.CipherSuite).HashAlgorithm != suite.HashAlgorithm
-                        || (_server.RequireClientCertificate && state.ClientCertificate == null))
+                        || (_server.RequireClientCertificate && state.ClientCertificate == null)
+                        || !string.Equals(state.ServerName, ServerName, StringComparison.OrdinalIgnoreCase))
                         continue;
                     psk = state.Psk;
                     clientCertificate = state.ClientCertificate;
@@ -568,15 +590,15 @@ namespace SharpDTLS.DTLS13
                     Session.RequiresClientAuth = true;
                 }
 
-                var chain = new List<byte[]> { _server.ServerCertificate.GetEncoded() };
-                chain.AddRange((_server.IntermediateCertificates ?? Array.Empty<X509Certificate>()).Select(c => c.GetEncoded()));
+                var chain = new List<byte[]> { _certificate.GetEncoded() };
+                chain.AddRange((_intermediates ?? Array.Empty<X509Certificate>()).Select(c => c.GetEncoded()));
                 SendHandshake(new CertificateDatagram(chain), handshakeKeys);
 
                 var clientSchemes = _clientHello.Extensions.OfType<ClientSignatureAlgorithms>().FirstOrDefault()?.SignatureAlgorithms;
-                ushort scheme = Dtls13Signatures.SelectScheme(_server.ServerKeyPair.Private, clientSchemes)
+                ushort scheme = Dtls13Signatures.SelectScheme(_keyPair.Private, clientSchemes)
                     ?? throw new DtlsException(AlertDescription.HandshakeFailure, "No signature scheme in common with the client.");
                 byte[] content = Dtls13Signatures.BuildSignedContent(server: true, Session.Transcript.Hash(suite));
-                SendHandshake(new CertificateVerifyDatagram(Dtls13Signatures.Sign(scheme, _server.ServerKeyPair.Private, content), scheme), handshakeKeys);
+                SendHandshake(new CertificateVerifyDatagram(Dtls13Signatures.Sign(scheme, _keyPair.Private, content), scheme), handshakeKeys);
             }
 
             byte[] verifyData = Dtls13CryptoUtils.CalculateFinished(handshakeKeys.ServerSecret, Session.Transcript.Hash(suite), suite);
@@ -603,6 +625,9 @@ namespace SharpDTLS.DTLS13
             }
             if (_earlyKeys != null)
                 extensions.Extensions.Add(new EarlyDataExtension());
+            // Acknowledge a server_name that chose the certificate (RFC 6066 §3).
+            if (_serverNameUsed && _psk == null)
+                extensions.Extensions.Add(new ServerNameExtension());
 
             return extensions;
         }
@@ -748,6 +773,7 @@ namespace SharpDTLS.DTLS13
             var state = new Dtls13TicketState
             {
                 MaxEarlyDataSize = _server.MaxEarlyDataSize,
+                ServerName = ServerName,
                 CipherSuite = suite.Id,
                 Psk = Dtls13CryptoUtils.CalculateResumptionPsk(Session.ResumptionMasterSecret, nonce, suite),
                 AgeAdd = ageAdd,

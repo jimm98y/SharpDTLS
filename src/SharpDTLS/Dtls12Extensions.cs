@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 
 namespace SharpDTLS
 {
@@ -138,6 +139,77 @@ namespace SharpDTLS
             destination[offset + 3] = (byte)Ticket.Length;
             Buffer.BlockCopy(Ticket, 0, destination, offset + 4, Ticket.Length);
             return 4 + Ticket.Length;
+        }
+    }
+
+    /// <summary>
+    /// server_name (RFC 6066 §3): the client's host_name, or empty in a ServerHello / EncryptedExtensions to
+    /// acknowledge that the server used it. Host names are ASCII (A-labels), without a trailing dot, and never
+    /// IP address literals.
+    /// </summary>
+    public class ServerNameExtension : ITlsExtension
+    {
+        public const ushort Type = 0x0000;
+
+        public ServerNameExtension() { }
+
+        public ServerNameExtension(string hostName)
+        {
+            if (!IsValidHostName(hostName))
+                throw new ArgumentException($"'{hostName}' is not a host name usable in server_name.", nameof(hostName));
+            HostName = hostName;
+        }
+
+        /// <summary>The requested host name; null for the empty acknowledgement.</summary>
+        public string HostName { get; private set; }
+
+        public static bool IsValidHostName(string hostName)
+            => !string.IsNullOrEmpty(hostName) && hostName.Length <= 253 && !hostName.EndsWith('.')
+               && hostName.All(c => c < 0x80 && (char.IsLetterOrDigit(c) || c == '-' || c == '.'))
+               && !System.Net.IPAddress.TryParse(hostName, out _);
+
+        public int CalculateLength() => HostName == null ? 4 : 4 + 2 + 1 + 2 + HostName.Length;
+
+        public int Read(int offset, byte[] source)
+        {
+            int length = (source[offset + 2] << 8) | source[offset + 3];
+            if (source.Length < offset + 4 + length)
+                throw new DtlsException(AlertDescription.DecodeError, "Invalid server_name extension.");
+            if (length == 0)
+                return 4;
+
+            var list = new TlsReader(new TlsReader(source.AsSpan(offset + 4, length).ToArray()).ReadOpaque16());
+            while (list.Remaining > 0)
+            {
+                byte nameType = list.ReadUInt8();
+                byte[] name = list.ReadOpaque16();
+                if (nameType != 0)
+                    continue; // only host_name is defined
+                if (HostName != null)
+                    throw new DtlsException(AlertDescription.IllegalParameter, "server_name lists two host names.");
+                HostName = System.Text.Encoding.ASCII.GetString(name);
+                if (!IsValidHostName(HostName))
+                    throw new DtlsException(AlertDescription.IllegalParameter, "Invalid host name in server_name.");
+            }
+            return 4 + length;
+        }
+
+        public int Write(int offset, byte[] destination)
+        {
+            destination[offset] = 0x00;
+            destination[offset + 1] = 0x00;
+            if (HostName == null)
+            {
+                destination[offset + 2] = 0;
+                destination[offset + 3] = 0;
+                return 4;
+            }
+            byte[] name = System.Text.Encoding.ASCII.GetBytes(HostName);
+            byte[] body = new TlsWriter().WriteOpaque16(new TlsWriter().WriteUInt8(0).WriteOpaque16(name).ToArray()).ToArray();
+            destination[offset + 2] = (byte)(body.Length >> 8);
+            destination[offset + 3] = (byte)body.Length;
+            body.CopyTo(destination, offset + 4);
+            return 4 + body.Length;
         }
     }
 

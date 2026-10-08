@@ -10,6 +10,7 @@
  *   -hrr                server: send a HelloRetryRequest cookie
  *   -verify <ca.pem>    server: require and verify a client certificate; client: verify the server chain
  *   -host <name>        client: with -verify, also check the server certificate's host name
+ *   -sni <name>         client: send server_name
  *   <cert.pem> / -cert  may hold the certificate followed by its intermediates
  *   -cert <c> -key <k>  client: present a client certificate
  *   -group <name>       client: initial key share (x25519 | p256)
@@ -85,7 +86,7 @@ int main(int argc, char **argv)
     const char *cert = NULL, *key = NULL, *cipher = NULL, *verify = NULL, *group = NULL, *srtp = NULL, *exportLabel = NULL;
     int exportLength = 0;
     int hrr = 0, resume = 0, pskOnly = 0, argi = 3;
-    const char *pskHex = NULL, *host = NULL;
+    const char *pskHex = NULL, *host = NULL, *sni = NULL;
 
     if (server) {
         if (argc < 5) { fprintf(stderr, "server needs cert and key\n"); return 2; }
@@ -102,6 +103,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[argi], "-psk_only")) pskOnly = 1;
         else if (!strcmp(argv[argi], "-verify") && argi + 1 < argc) verify = argv[++argi];
         else if (!strcmp(argv[argi], "-host") && argi + 1 < argc) host = argv[++argi];
+        else if (!strcmp(argv[argi], "-sni") && argi + 1 < argc) sni = argv[++argi];
         else if (!strcmp(argv[argi], "-cert") && argi + 1 < argc) cert = argv[++argi];
         else if (!strcmp(argv[argi], "-key") && argi + 1 < argc) key = argv[++argi];
         else if (!strcmp(argv[argi], "-group") && argi + 1 < argc) group = argv[++argi];
@@ -181,6 +183,8 @@ int main(int argc, char **argv)
         fail("set session", NULL, 0);
     if (!server && host && wolfSSL_check_domain_name(ssl, host) != WOLFSSL_SUCCESS)
         fail("check_domain_name", NULL, 0);
+    if (!server && sni && wolfSSL_UseSNI(ssl, WOLFSSL_SNI_HOST_NAME, sni, (unsigned short)strlen(sni)) != WOLFSSL_SUCCESS)
+        fail("UseSNI", NULL, 0);
     /* the socket is connect()ed, so wolfSSL must use send/recv rather than sendto (EISCONN on macOS) */
     if (wolfSSL_set_dtls_fd_connected(ssl, fd) != WOLFSSL_SUCCESS)
         fail("set fd", NULL, 0);

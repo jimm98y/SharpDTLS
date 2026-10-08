@@ -27,6 +27,7 @@ namespace SharpDTLS.DTLS12
     {
         public static ITlsExtension ForClientHello(ushort type) => type switch
         {
+            ServerNameExtension.Type => new ServerNameExtension(),
             0x000a => new SupportedGroupsExtension(),
             0x000b => new EcPointFormatsExtension(),
             0x000d => new SignatureAlgorithmsExtension(),
@@ -43,6 +44,7 @@ namespace SharpDTLS.DTLS12
 
         public static ITlsExtension ForServerHello(ushort type) => type switch
         {
+            ServerNameExtension.Type => new ServerNameExtension(),
             0x000b => new ServerEcPointFormatsExtension(),
             0x000e => new ServerUseSrtpExtension(),
             SessionTicketExtension.Type => new SessionTicketExtension(),

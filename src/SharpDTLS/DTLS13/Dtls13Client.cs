@@ -42,6 +42,12 @@ namespace SharpDTLS.DTLS13
 
         public event EventHandler<EventArgs> HandshakeFinished;
 
+        /// <summary>
+        /// The server's host name, sent in server_name (RFC 6066) so the server can pick its certificate. Tickets are
+        /// only offered for the same name. Not an IP address literal.
+        /// </summary>
+        public string ServerName { get; set; }
+
         /// <summary>A ticket from an earlier connection to resume with (PSK resumption, RFC 8446 §2.2).</summary>
         public Dtls13SessionTicket ResumptionTicket { get; set; }
 
@@ -148,6 +154,8 @@ namespace SharpDTLS.DTLS13
             clientHello.Extensions.RemoveAll(e => e is ClientSignatureAlgorithms || e is EncryptThenMac);
             clientHello.Extensions.Add(new ClientSignatureAlgorithms(Dtls13Signatures.Supported));
 
+            if (ServerName != null)
+                clientHello.Extensions.Add(new ServerNameExtension(ServerName));
             if (SrtpProtectionProfiles != null && SrtpProtectionProfiles.Length > 0)
                 clientHello.Extensions.Add(new UseSrtpExtension(SrtpProtectionProfiles));
             if (cookie != null)
@@ -184,7 +192,7 @@ namespace SharpDTLS.DTLS13
                 : CipherSuites.Any(id => Dtls13CipherSuite.Get(id).HashAlgorithm == hashSuite.HashAlgorithm);
 
             var ticket = ResumptionTicket;
-            if (UseSessionTickets && ticket != null && !ticket.IsExpired && Dtls13CipherSuite.IsSupported(ticket.CipherSuite)
+            if (UseSessionTickets && ticket != null && !ticket.IsExpired && string.Equals(ticket.ServerName, ServerName, StringComparison.OrdinalIgnoreCase) && Dtls13CipherSuite.IsSupported(ticket.CipherSuite)
                 && Compatible(Dtls13CipherSuite.Get(ticket.CipherSuite)))
                 _offeredPsks.Add(new OfferedPsk(ticket.Ticket, ticket.ObfuscatedAge, ticket.Psk, Dtls13CipherSuite.Get(ticket.CipherSuite), ticket));
 
@@ -373,6 +381,9 @@ namespace SharpDTLS.DTLS13
                         EarlyDataAccepted = true;
                     }
 
+                    if (encryptedExtensions.Extensions.OfType<ServerNameExtension>().Any() && ServerName == null)
+                        throw new DtlsException(AlertDescription.UnsupportedExtension, "Unsolicited server_name extension.");
+
                     var srtp = encryptedExtensions.Extensions.OfType<UseSrtpExtension>().FirstOrDefault();
                     if (srtp != null)
                     {
@@ -493,7 +504,7 @@ namespace SharpDTLS.DTLS13
             var suite = Session.CipherSuite;
             byte[] psk = Dtls13CryptoUtils.CalculateResumptionPsk(Session.ResumptionMasterSecret, nst.TicketNonce ?? Array.Empty<byte>(), suite);
             SessionTicket = new Dtls13SessionTicket(nst.Ticket, Math.Min(nst.TicketLifetime, 604800u), nst.TicketAgeAdd, suite.Id, psk,
-                Session.PeerCertificate, nst.MaxEarlyDataSize);
+                Session.PeerCertificate, nst.MaxEarlyDataSize, ServerName);
         }
 
         private void SendClientCertificate()

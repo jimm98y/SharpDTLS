@@ -56,6 +56,7 @@ namespace SharpDTLS.DTLS13.Messages
 
                 ITlsExtension matching = extType switch
                 {
+                    ServerNameExtension.Type => new ServerNameExtension(),
                     0x000a => new SupportedGroups(),
                     0x000e => new UseSrtpExtension(),
                     EarlyDataExtension.Type => new EarlyDataExtension(),

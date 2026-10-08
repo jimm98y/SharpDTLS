@@ -11,8 +11,9 @@ namespace SharpDTLS.DTLS12
     public sealed class Dtls12SessionState
     {
         internal Dtls12SessionState(byte[] sessionId, ushort version, ushort cipherSuite, byte[] masterSecret, bool encryptThenMac,
-            byte[] peerCertificate, DateTime? createdUtc = null, byte[] ticket = null, uint ticketLifetimeHint = 0)
+            byte[] peerCertificate, DateTime? createdUtc = null, byte[] ticket = null, uint ticketLifetimeHint = 0, string serverName = null)
         {
+            ServerName = serverName;
             SessionId = sessionId;
             Version = version;
             CipherSuite = cipherSuite;
@@ -44,10 +45,13 @@ namespace SharpDTLS.DTLS12
 
         public DateTime CreatedUtc { get; }
 
+        /// <summary>The server_name of the full handshake; resumption requires the same name (RFC 6066 §3).</summary>
+        public string ServerName { get; }
+
         internal byte[] MasterSecret { get; }
 
         internal Dtls12SessionState WithTicket(byte[] ticket, uint lifetimeHint)
-            => new(SessionId, Version, CipherSuite, MasterSecret, EncryptThenMac, PeerCertificate, CreatedUtc, ticket, lifetimeHint);
+            => new(SessionId, Version, CipherSuite, MasterSecret, EncryptThenMac, PeerCertificate, CreatedUtc, ticket, lifetimeHint, ServerName);
 
         // The server-side state sealed into a ticket (the session ID is not part of it).
         internal byte[] Serialize()
@@ -56,6 +60,7 @@ namespace SharpDTLS.DTLS12
                 .WriteUInt16(Version).WriteUInt16(CipherSuite).WriteUInt8(EncryptThenMac ? (byte)1 : (byte)0)
                 .WriteUInt32((uint)(new DateTimeOffset(CreatedUtc).ToUnixTimeSeconds() >> 32)).WriteUInt32((uint)new DateTimeOffset(CreatedUtc).ToUnixTimeSeconds())
                 .WriteOpaque8(MasterSecret).WriteOpaque24(PeerCertificate ?? Array.Empty<byte>())
+                .WriteOpaque16(System.Text.Encoding.ASCII.GetBytes(ServerName ?? ""))
                 .ToArray();
 
         internal byte[] Seal(SessionTicketKeys keys) => keys.Seal(Serialize());
@@ -89,9 +94,11 @@ namespace SharpDTLS.DTLS12
             long seconds = ((long)r.ReadUInt32() << 32) | r.ReadUInt32();
             byte[] masterSecret = r.ReadOpaque8();
             byte[] peerCertificate = r.ReadOpaque24();
+            string serverName = System.Text.Encoding.ASCII.GetString(r.ReadOpaque16());
             r.EnsureEnd();
             return new Dtls12SessionState(Array.Empty<byte>(), version, cipherSuite, masterSecret, encryptThenMac,
-                peerCertificate.Length == 0 ? null : peerCertificate, DateTimeOffset.FromUnixTimeSeconds(seconds).UtcDateTime);
+                peerCertificate.Length == 0 ? null : peerCertificate, DateTimeOffset.FromUnixTimeSeconds(seconds).UtcDateTime,
+                serverName: serverName.Length == 0 ? null : serverName);
         }
     }
 

@@ -55,6 +55,12 @@ namespace SharpDTLS.DTLS12
         /// <summary>Intermediate CA certificates sent after the server certificate, issuer of the previous one first.</summary>
         public IList<X509Certificate> IntermediateCertificates { get => Settings.IntermediateCertificates; set => Settings.IntermediateCertificates = value; }
 
+        /// <summary>
+        /// Chooses the credentials for the client's server_name (RFC 6066), which is null when the client sent none.
+        /// Returning null uses the default certificate.
+        /// </summary>
+        public Func<string, ServerCredentials> CertificateSelector { get => Settings.CertificateSelector; set => Settings.CertificateSelector = value; }
+
         public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ClientCertificateValidator
         {
             get => Settings.ClientCertificateValidator;

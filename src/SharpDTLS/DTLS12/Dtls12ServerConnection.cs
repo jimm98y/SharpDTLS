@@ -56,6 +56,12 @@ namespace SharpDTLS.DTLS12
         /// <summary>Intermediate CA certificates sent after the server certificate, issuer of the previous one first.</summary>
         public IList<X509Certificate> IntermediateCertificates { get; set; }
 
+        /// <summary>
+        /// Chooses the credentials for the client's server_name (RFC 6066), which is null when the client sent none.
+        /// Returning null uses the default certificate.
+        /// </summary>
+        public Func<string, ServerCredentials> CertificateSelector { get; set; }
+
         /// <summary>Keys for RFC 5077 session tickets (random per server by default); null disables tickets.</summary>
         public SessionTicketKeys TicketKeys { get; set; } = new SessionTicketKeys();
     }
@@ -85,6 +91,10 @@ namespace SharpDTLS.DTLS12
         private Dtls12SessionState _resumedSession;
         private byte[] _sessionId = Array.Empty<byte>();
         private bool _issueTicket;
+        private AsymmetricCipherKeyPair _keyPair;
+        private X509Certificate _certificate;
+        private IList<X509Certificate> _intermediates;
+        private bool _serverNameUsed;
 
         public event EventHandler<EventArgs> HandshakeFinished;
 
@@ -100,6 +110,9 @@ namespace SharpDTLS.DTLS12
         }
 
         public EndPoint RemoteEndPoint { get; }
+
+        /// <summary>The host name the client asked for in server_name, or null.</summary>
+        public string ServerName { get; private set; }
 
         /// <summary>The client's certificate, when one was sent.</summary>
         public X509Certificate ClientCertificate => _clientCertificate;
@@ -166,10 +179,18 @@ namespace SharpDTLS.DTLS12
             ServerRandom = Dtls12CryptoUtils.GenerateRandom(32);
             SelectedSrtpProtectionProfile = DtlsSrtp.Select(_settings.SrtpProtectionProfiles, ch.Extension<UseSrtpExtension>()?.ProtectionProfiles);
 
+            // Credentials for the requested name come first: the certificate key decides which suites are possible.
+            ServerName = ch.Extension<ServerNameExtension>()?.HostName;
+            var selected = _settings.CertificateSelector?.Invoke(ServerName);
+            _serverNameUsed = selected != null && ServerName != null;
+            (_keyPair, _certificate, _intermediates) = selected != null
+                ? (selected.KeyPair, selected.Certificate, selected.IntermediateCertificates)
+                : (_settings.KeyPair, _settings.Certificate, _settings.IntermediateCertificates);
+
             if (TryResume(ch, version))
                 return;
 
-            var serverKey = _settings.KeyPair?.Private;
+            var serverKey = _keyPair?.Private;
             // Without explicit configuration weak suites (export, DES, NULL, anonymous...) are never selected.
             var preference = _settings.CipherSuites
                 ?? SharpDTLS.CipherSuites.All.Where(s => s.Security != CipherSuiteSecurity.Weak).Select(s => s.Id).ToList();
@@ -178,7 +199,7 @@ namespace SharpDTLS.DTLS12
                 .Select(id => SharpDTLS.CipherSuites.TryGet(id, out var s) ? s : null)
                 .FirstOrDefault(s => s != null && s.IsUsableWith(version)
                     && (s.ServerCertificateType == CertificateKeyType.None || (serverKey != null && Dtls12ClientConnection.KeyMatches(s.ServerCertificateType, serverKey)))
-                    && (!s.IsStaticKeyAgreement || Dtls12ClientConnection.SignedWith(_settings.Certificate, s.RequiredCertificateSigner))
+                    && (!s.IsStaticKeyAgreement || Dtls12ClientConnection.SignedWith(_certificate, s.RequiredCertificateSigner))
                     && (!s.RequiresPsk || _settings.PskIdentityResolver != null)
                     && (!s.RequiresSrp || (_settings.SrpVerifierProvider != null && ch.Extension<SrpExtension>() != null))
                     && (!s.RequiresPwd || (_settings.PwdCredentialProvider != null && EccPwd.HasUsername(ch, _settings.PwdProtectionKey)
@@ -223,6 +244,10 @@ namespace SharpDTLS.DTLS12
             if (session == null && ch.SessionId.Length != 0 && _settings.SessionCache != null)
                 session = _settings.SessionCache.Find(ch.SessionId);
             if (session == null)
+                return false;
+
+            // RFC 6066 §3: never resume a session for another server name.
+            if (!string.Equals(session.ServerName, ServerName, StringComparison.OrdinalIgnoreCase))
                 return false;
 
             // RFC 7627 §5.3: an EMS session offered without the extension must not be resumed.
@@ -272,6 +297,9 @@ namespace SharpDTLS.DTLS12
                 sh.Extensions.Add(new ServerUseSrtpExtension(SelectedSrtpProtectionProfile.Value, ch.Extension<UseSrtpExtension>().MasterKeyIdentifier));
             if (_issueTicket)
                 sh.Extensions.Add(new SessionTicketExtension());
+            // Acknowledge a server_name we acted on, except when resuming (RFC 6066 §3).
+            if (_serverNameUsed && !IsResumed)
+                sh.Extensions.Add(new ServerNameExtension());
             SendHandshake(HandshakeType.ServerHello, sh.Encode());
 
             if (IsResumed)
@@ -293,8 +321,8 @@ namespace SharpDTLS.DTLS12
             if (certificateBased)
             {
                 var certificate = new CertificateMessage();
-                certificate.Chain.Add(_settings.Certificate.GetEncoded());
-                foreach (var intermediate in _settings.IntermediateCertificates ?? Array.Empty<X509Certificate>())
+                certificate.Chain.Add(_certificate.GetEncoded());
+                foreach (var intermediate in _intermediates ?? Array.Empty<X509Certificate>())
                     certificate.Chain.Add(intermediate.GetEncoded());
                 SendHandshake(HandshakeType.Certificate, certificate.Encode());
             }
@@ -306,7 +334,7 @@ namespace SharpDTLS.DTLS12
                 if (_keyExchange.SignsParams)
                 {
                     byte[] signed = Concat(Concat(ClientRandom, ServerRandom), serverParams);
-                    byte[] signature = Sign(_settings.KeyPair.Private, signed, ch.Extension<SignatureAlgorithmsExtension>()?.Algorithms, out ushort? scheme);
+                    byte[] signature = Sign(_keyPair.Private, signed, ch.Extension<SignatureAlgorithmsExtension>()?.Algorithms, out ushort? scheme);
                     if (scheme.HasValue)
                         ske.WriteUInt16(scheme.Value);
                     ske.WriteOpaque16(signature);
@@ -418,13 +446,13 @@ namespace SharpDTLS.DTLS12
                 BeginFlight();
                 if (_issueTicket)
                     SendNewSessionTicket(new Dtls12SessionState(Array.Empty<byte>(), NegotiatedVersion, CipherSuite.Id, MasterSecret,
-                        UseEncryptThenMac, _clientCertificate?.GetEncoded()));
+                        UseEncryptThenMac, _clientCertificate?.GetEncoded(), serverName: ServerName));
                 SendChangeCipherSpec();
                 SendHandshake(HandshakeType.Finished, ComputeVerifyData(fromClient: false));
 
                 if (_sessionId.Length != 0)
                     _settings.SessionCache.Store(new Dtls12SessionState(_sessionId, NegotiatedVersion, CipherSuite.Id, MasterSecret,
-                        UseEncryptThenMac, _clientCertificate?.GetEncoded()));
+                        UseEncryptThenMac, _clientCertificate?.GetEncoded(), serverName: ServerName));
             }
 
             _state = State.Connected;

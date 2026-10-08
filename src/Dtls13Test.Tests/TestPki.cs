@@ -37,12 +37,13 @@ namespace Dtls13Test.Tests
             return generator.GenerateKeyPair();
         }
 
-        /// <summary>An end-entity certificate issued by the intermediate CA.</summary>
+        /// <summary>An end-entity certificate issued by the intermediate CA (or directly by the root).</summary>
         public (AsymmetricCipherKeyPair Key, X509Certificate Cert) Leaf(string[] dnsNames = null, string[] ipAddresses = null,
-            KeyPurposeID usage = null, DateTime? notBefore = null, DateTime? notAfter = null, string commonName = "leaf")
+            KeyPurposeID usage = null, DateTime? notBefore = null, DateTime? notAfter = null, string commonName = "leaf", bool fromRoot = false)
         {
             var key = NewKey();
-            var cert = Issue(key.Public, $"CN={commonName}", Intermediate.Key.Private, Intermediate.Cert.SubjectDN.ToString(), Intermediate.Key.Public,
+            var issuer = fromRoot ? Root : Intermediate;
+            var cert = Issue(key.Public, $"CN={commonName}", issuer.Key.Private, issuer.Cert.SubjectDN.ToString(), issuer.Key.Public,
                 ca: false, dnsNames, ipAddresses, usage ?? KeyPurposeID.id_kp_serverAuth, notBefore, notAfter);
             return (key, cert);
         }
