@@ -73,6 +73,9 @@ namespace SharpDTLS.DTLS12
         /// </summary>
         public Func<string, PwdCredential> PwdCredentialProvider { get => Settings.PwdCredentialProvider; set => Settings.PwdCredentialProvider = value; }
 
+        /// <summary>Resumable sessions by session ID; null disables session ID resumption.</summary>
+        public IDtls12SessionCache SessionCache { get => Settings.SessionCache; set => Settings.SessionCache = value; }
+
         /// <summary>Private key for recovering pwd_protect usernames (RFC 8492 §4.3.2); null accepts only pwd_clear.</summary>
         public Org.BouncyCastle.Crypto.Parameters.ECPrivateKeyParameters PwdProtectionKey { get => Settings.PwdProtectionKey; set => Settings.PwdProtectionKey = value; }
 

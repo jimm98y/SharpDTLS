@@ -49,6 +49,9 @@ namespace SharpDTLS.DTLS12
 
         /// <summary>Private key for recovering pwd_protect usernames (RFC 8492 §4.3.2); null accepts only pwd_clear.</summary>
         public ECPrivateKeyParameters PwdProtectionKey { get; set; }
+
+        /// <summary>Resumable sessions by session ID; null disables session ID resumption.</summary>
+        public IDtls12SessionCache SessionCache { get; set; } = new Dtls12SessionCache();
     }
 
     /// <summary>
@@ -73,6 +76,8 @@ namespace SharpDTLS.DTLS12
         private CertificateRequestMessage _certificateRequest;
         private IServerKeyExchange _keyExchange;
         private X509Certificate _clientCertificate;
+        private Dtls12SessionState _resumedSession;
+        private byte[] _sessionId = Array.Empty<byte>();
 
         public event EventHandler<EventArgs> HandshakeFinished;
 
@@ -99,7 +104,11 @@ namespace SharpDTLS.DTLS12
         public byte[] ClientRandomBytes => ClientRandom;
         public byte[] ServerRandomBytes => ServerRandom;
 
-        protected override bool ResendFinalFlightOnPeerRetransmit => true;
+        /// <summary>Whether this handshake resumed a previous session (abbreviated handshake).</summary>
+        public bool IsResumed => _resumedSession != null;
+
+        // In an abbreviated handshake the client sends the final flight (RFC 6347 §4.2.4).
+        protected override bool ResendFinalFlightOnPeerRetransmit => !IsResumed;
 
         /// <summary>
         /// Starts the handshake from a (cookie-verified, defragmented) ClientHello.
@@ -142,6 +151,17 @@ namespace SharpDTLS.DTLS12
             if (!ch.CompressionMethods.Contains((byte)0))
                 throw new DtlsException(AlertDescription.IllegalParameter, "Client does not offer null compression.");
 
+            var renegotiationInfo = ch.Extension<RenegotiationInfoExtension>();
+            if (renegotiationInfo != null && renegotiationInfo.RenegotiatedConnection.Length != 0)
+                throw new DtlsException(AlertDescription.HandshakeFailure, "Non-empty renegotiation_info in initial handshake.");
+
+            ClientRandom = ch.Random;
+            ServerRandom = Dtls12CryptoUtils.GenerateRandom(32);
+            SelectedSrtpProtectionProfile = DtlsSrtp.Select(_settings.SrtpProtectionProfiles, ch.Extension<UseSrtpExtension>()?.ProtectionProfiles);
+
+            if (TryResume(ch, version))
+                return;
+
             var serverKey = _settings.KeyPair?.Private;
             // Without explicit configuration weak suites (export, DES, NULL, anonymous...) are never selected.
             var preference = _settings.CipherSuites
@@ -170,17 +190,46 @@ namespace SharpDTLS.DTLS12
                 PwdContext = () => Concat(ClientRandom, ServerRandom),
             });
 
-            // RFC 5746: secure renegotiation is signalled by the extension or the SCSV.
-            var renegotiationInfo = ch.Extension<RenegotiationInfoExtension>();
-            if (renegotiationInfo != null && renegotiationInfo.RenegotiatedConnection.Length != 0)
-                throw new DtlsException(AlertDescription.HandshakeFailure, "Non-empty renegotiation_info in initial handshake.");
-
             UseExtendedMasterSecret = ch.Extension<ExtendedMasterSecretExtension>() != null;
             UseEncryptThenMac = CipherSuite.IsCbc && ch.Extension<EncryptThenMacExtension>() != null;
-            SelectedSrtpProtectionProfile = DtlsSrtp.Select(_settings.SrtpProtectionProfiles, ch.Extension<UseSrtpExtension>()?.ProtectionProfiles);
 
-            ClientRandom = ch.Random;
-            ServerRandom = Dtls12CryptoUtils.GenerateRandom(32);
+            // A new session gets an ID only when it will be resumable (RFC 7627 §5.3: EMS sessions only).
+            if (_settings.SessionCache != null && UseExtendedMasterSecret)
+                _sessionId = Dtls12CryptoUtils.GenerateRandom(32);
+        }
+
+        /// <summary>
+        /// Accepts the session the client offers by ID when it is cached, uses the negotiated version, a suite
+        /// the client still offers and we still allow, and the same encrypt-then-MAC setting (RFC 5246 §7.4.1.2).
+        /// </summary>
+        private bool TryResume(ClientHelloMessage ch, ushort version)
+        {
+            if (ch.SessionId.Length == 0 || _settings.SessionCache == null)
+                return false;
+            var session = _settings.SessionCache.Find(ch.SessionId);
+            if (session == null)
+                return false;
+
+            // RFC 7627 §5.3: an EMS session offered without the extension must not be resumed.
+            bool clientEms = ch.Extension<ExtendedMasterSecretExtension>() != null;
+            if (!clientEms)
+                throw new DtlsException(AlertDescription.HandshakeFailure, "Resumption of an extended master secret session without the extension.");
+
+            if (session.Version != version || !ch.CipherSuites.Contains(session.CipherSuite)
+                || !SharpDTLS.CipherSuites.TryGet(session.CipherSuite, out var suite)
+                || (_settings.CipherSuites != null ? !_settings.CipherSuites.Contains(session.CipherSuite) : suite.Security == CipherSuiteSecurity.Weak)
+                || session.EncryptThenMac != (suite.IsCbc && ch.Extension<EncryptThenMacExtension>() != null)
+                || (_settings.RequireClientCertificate && suite.ServerCertificateType != CertificateKeyType.None && session.PeerCertificate == null))
+                return false;
+
+            _resumedSession = session;
+            _sessionId = session.SessionId;
+            CipherSuite = suite;
+            UseExtendedMasterSecret = true;
+            UseEncryptThenMac = session.EncryptThenMac;
+            if (session.PeerCertificate != null)
+                _clientCertificate = Dtls12ClientConnection.ParseCertificate(session.PeerCertificate);
+            return true;
         }
 
         private void SendServerFlight()
@@ -192,6 +241,7 @@ namespace SharpDTLS.DTLS12
             {
                 ServerVersion = NegotiatedVersion,
                 Random = ServerRandom,
+                SessionId = _sessionId,
                 CipherSuite = CipherSuite.Id,
             };
             if (ch.Extension<RenegotiationInfoExtension>() != null || ch.CipherSuites.Contains(SharpDTLS.CipherSuites.TLS_EMPTY_RENEGOTIATION_INFO_SCSV))
@@ -205,6 +255,18 @@ namespace SharpDTLS.DTLS12
             if (SelectedSrtpProtectionProfile.HasValue)
                 sh.Extensions.Add(new ServerUseSrtpExtension(SelectedSrtpProtectionProfile.Value, ch.Extension<UseSrtpExtension>().MasterKeyIdentifier));
             SendHandshake(HandshakeType.ServerHello, sh.Encode());
+
+            if (IsResumed)
+            {
+                // Abbreviated handshake: ServerHello, ChangeCipherSpec, Finished; the client answers with its own.
+                DeriveKeysFromMasterSecret(_resumedSession.MasterSecret);
+                SendChangeCipherSpec();
+                SendHandshake(HandshakeType.Finished, ComputeVerifyData(fromClient: false));
+                ArmRetransmission();
+                _state = State.WaitFinished;
+                Debug.WriteLine($"{LogPrefix} Resuming session: {DtlsVersion.Name(NegotiatedVersion)}, {CipherSuite}");
+                return;
+            }
 
             bool certificateBased = CipherSuite.ServerCertificateType != CertificateKeyType.None;
             if (certificateBased)
@@ -323,10 +385,21 @@ namespace SharpDTLS.DTLS12
                 throw new DtlsException(AlertDescription.DecryptError, "Client Finished verification failed.");
             AddToTranscript(message);
 
-            // Final flight: not retransmitted on a timer, only when the client retransmits (RFC 6347 §4.2.4).
-            BeginFlight();
-            SendChangeCipherSpec();
-            SendHandshake(HandshakeType.Finished, ComputeVerifyData(fromClient: false));
+            if (IsResumed)
+            {
+                StopRetransmission();
+            }
+            else
+            {
+                // Final flight: not retransmitted on a timer, only when the client retransmits (RFC 6347 §4.2.4).
+                BeginFlight();
+                SendChangeCipherSpec();
+                SendHandshake(HandshakeType.Finished, ComputeVerifyData(fromClient: false));
+
+                if (_sessionId.Length != 0)
+                    _settings.SessionCache.Store(new Dtls12SessionState(_sessionId, NegotiatedVersion, CipherSuite.Id, MasterSecret,
+                        UseEncryptThenMac, _clientCertificate?.GetEncoded()));
+            }
 
             _state = State.Connected;
             IsHandshakeComplete = true;

@@ -287,6 +287,71 @@ namespace Dtls13Test.Tests
             Assert.AreEqual(DtlsVersion.Dtls12, server.Connections.Single().NegotiatedVersion);
         }
 
+        [DataRow("-dtls1_2")]
+        [DataRow("-dtls1")]
+        [TestMethod]
+        public void OpenSslClient_ResumesSessionId_WithSharpDtlsServer(string versionFlag)
+        {
+            OpenSsl.RequireOpenSsl();
+            string dir = OpenSsl.NewTempDirectory();
+            string sessionFile = System.IO.Path.Combine(dir, "session.pem");
+            using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
+            var server = new Dtls12Server(transport) { MinimumVersion = DtlsVersion.Dtls10 };
+            string connect = $"s_client {versionFlag} -cipher ECDHE-RSA-AES128-SHA@SECLEVEL=0 -connect 127.0.0.1:{transport.LocalEndpoint.Port}";
+
+            using (var first = new OpenSslProcess($"{connect} -sess_out {sessionFile}", dir))
+            {
+                Assert.IsTrue(first.WaitForOutput("New, ", Timeout), "first handshake:\n" + first.Output);
+                Assert.IsTrue(SpinWait.SpinUntil(() => System.IO.File.Exists(sessionFile) && new System.IO.FileInfo(sessionFile).Length > 0, Timeout));
+            }
+
+            using var second = new OpenSslProcess($"{connect} -sess_in {sessionFile}", dir);
+            Assert.IsTrue(second.WaitForOutput("Reused, ", Timeout), "OpenSSL did not resume:\n" + second.Output);
+            Assert.IsTrue(SpinWait.SpinUntil(() => server.Connections.Any(c => c.IsResumed && c.IsHandshakeComplete), Timeout));
+        }
+
+        [TestMethod]
+        public void SharpDtlsClient_ResumesSessionId_WithOpenSslServer()
+        {
+            OpenSsl.RequireOpenSsl();
+            string dir = OpenSsl.NewTempDirectory();
+            var (keyPair, certificate) = TestCredentials.For(CertificateKeyType.Rsa);
+            string certPath = OpenSsl.WritePem(dir, "cert.pem", certificate);
+            string keyPath = OpenSsl.WritePem(dir, "key.pem", keyPair.Private);
+            using var server = OpenSslProcess.StartServer(p =>
+                $"s_server -dtls1_2 -accept 127.0.0.1:{p} -cert {certPath} -key {keyPath}", dir, Timeout, out int port);
+            Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), "s_server did not start:\n" + server.Output);
+
+            Dtls12SessionState session;
+            using (var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port)))
+            {
+                var client = Handshake(new Dtls12Client(transport), server);
+                Assert.IsFalse(client.IsResumed);
+                session = client.SessionState;
+                Assert.IsNotNull(session, "OpenSSL assigns a session ID");
+                client.Close();
+            }
+            Assert.IsTrue(server.WaitForOutput("DONE", Timeout), server.Output); // s_server finished the connection and accepts the next
+
+            using (var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port)))
+            {
+                var client = Handshake(new Dtls12Client(transport) { ResumptionSession = session }, server);
+                Assert.IsTrue(client.IsResumed, "OpenSSL did not resume:\n" + server.Output);
+                client.SendApplicationData(Encoding.UTF8.GetBytes("resumed\n"));
+                Assert.IsTrue(server.WaitForOutput("resumed", Timeout), server.Output);
+            }
+        }
+
+        private static Dtls12Client Handshake(Dtls12Client client, OpenSslProcess server)
+        {
+            var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            client.HandshakeFinished += (_, _) => done.TrySetResult(true);
+            client.Failed += (_, ex) => done.TrySetException(ex);
+            client.BeginHandshake();
+            Assert.IsTrue(done.Task.Wait(Timeout), "handshake did not complete:\n" + server.Output);
+            return client;
+        }
+
         [TestMethod]
         public void OpenSslFallbackClient_IsRejectedWithInappropriateFallback()
         {

@@ -401,10 +401,18 @@ namespace SharpDTLS.DTLS12
         /// </summary>
         protected void DeriveKeys(byte[] preMasterSecret)
         {
-            MasterSecret = UseExtendedMasterSecret
+            DeriveKeysFromMasterSecret(UseExtendedMasterSecret
                 ? Prf(preMasterSecret, "extended master secret", TranscriptHash(), 48)
-                : Prf(preMasterSecret, "master secret", Concat(ClientRandom, ServerRandom), 48);
+                : Prf(preMasterSecret, "master secret", Concat(ClientRandom, ServerRandom), 48));
+        }
 
+        /// <summary>
+        /// The pending ciphers from an existing master secret: a resumed session's keys come from its master
+        /// secret and the new hello randoms (RFC 5246 §7.3).
+        /// </summary>
+        protected void DeriveKeysFromMasterSecret(byte[] masterSecret)
+        {
+            MasterSecret = masterSecret;
             byte[] keyBlock = Prf(MasterSecret, "key expansion", Concat(ServerRandom, ClientRandom), RecordCiphers.KeyBlockLength(CipherSuite));
             var (clientWrite, serverWrite) = RecordCiphers.Create(CipherSuite, keyBlock, UseEncryptThenMac && CipherSuite.IsCbc);
             _pendingReadCipher = IsClient ? serverWrite : clientWrite;

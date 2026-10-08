@@ -36,6 +36,8 @@ namespace SharpDTLS.DTLS12
         private X509Certificate _serverCertificate;
         private IClientKeyExchange _keyExchange;
         private CertificateRequestMessage _certificateRequest;
+        private Dtls12SessionState _offeredSession;
+        private byte[] _newSessionId;
 
         public event EventHandler<EventArgs> HandshakeFinished;
         public event EventHandler<NewSessionTicketMessage> NewSessionTicketMessageReceived;
@@ -104,6 +106,21 @@ namespace SharpDTLS.DTLS12
         private bool HavePwd => PwdUsername != null && PwdPassword != null;
 
         /// <summary>
+        /// A session from an earlier handshake to resume (abbreviated handshake, RFC 5246 §7.3). The server may
+        /// decline, in which case a full handshake follows.
+        /// </summary>
+        public Dtls12SessionState ResumptionSession { get; set; }
+
+        /// <summary>The resumable session after the handshake, or null when the server did not make it resumable.</summary>
+        public Dtls12SessionState SessionState { get; private set; }
+
+        /// <summary>Whether the server resumed <see cref="ResumptionSession"/>.</summary>
+        public bool IsResumed { get; private set; }
+
+        // In an abbreviated handshake the client sends the final flight (RFC 6347 §4.2.4).
+        protected override bool ResendFinalFlightOnPeerRetransmit => IsResumed;
+
+        /// <summary>
         /// Set when this handshake is a retry at a lower version after a failed one: sends TLS_FALLBACK_SCSV
         /// so a server supporting a higher version detects the downgrade (RFC 7507 §4).
         /// </summary>
@@ -137,10 +154,17 @@ namespace SharpDTLS.DTLS12
             if (offered.Count == 0)
                 throw new InvalidOperationException("No configured cipher suite is usable with the configured versions.");
 
+            // Offer a session only within the version range and with its suite still offered.
+            var resumable = ResumptionSession;
+            _offeredSession = resumable != null && resumable.SessionId.Length != 0 && offered.Contains(resumable.CipherSuite)
+                              && DtlsVersion.IsAtLeast(resumable.Version, MinimumVersion) && DtlsVersion.IsAtLeast(MaximumVersion, resumable.Version)
+                ? resumable : null;
+
             var ch = new ClientHelloMessage
             {
                 ClientVersion = MaximumVersion,
                 Random = ClientRandom,
+                SessionId = _offeredSession?.SessionId ?? Array.Empty<byte>(),
                 Cookie = cookie,
                 CipherSuites = IsFallback ? offered.Append(SharpDTLS.CipherSuites.TLS_FALLBACK_SCSV).ToList() : offered,
             };
@@ -293,6 +317,28 @@ namespace SharpDTLS.DTLS12
             AddToTranscript(message);
             Debug.WriteLine($"{LogPrefix} ServerHello: {DtlsVersion.Name(NegotiatedVersion)}, {suite}");
 
+            if (_offeredSession != null && sh.SessionId.AsSpan().SequenceEqual(_offeredSession.SessionId))
+            {
+                // Abbreviated handshake: the server's ChangeCipherSpec and Finished follow (RFC 5246 §7.3).
+                var session = _offeredSession;
+                if (sh.ServerVersion != session.Version || sh.CipherSuite != session.CipherSuite || UseEncryptThenMac != session.EncryptThenMac)
+                    throw new DtlsException(AlertDescription.IllegalParameter, "Server resumed the session with different parameters.");
+                // RFC 7627 §5.3: resumable sessions use the extended master secret, so the ServerHello must too.
+                if (!UseExtendedMasterSecret)
+                    throw new DtlsException(AlertDescription.HandshakeFailure, "Server resumed without the extended master secret.");
+
+                IsResumed = true;
+                SessionState = session;
+                if (session.PeerCertificate != null)
+                    _serverCertificate = ParseCertificate(session.PeerCertificate);
+                DeriveKeysFromMasterSecret(session.MasterSecret);
+                _state = State.WaitFinished;
+                return;
+            }
+
+            if (sh.SessionId.Length != 0 && UseExtendedMasterSecret)
+                _newSessionId = sh.SessionId;
+
             // Suites authenticated by a pre-shared key alone send no Certificate.
             if (suite.ServerCertificateType == CertificateKeyType.None)
                 CreateKeyExchange();
@@ -416,9 +462,23 @@ namespace SharpDTLS.DTLS12
 
             AddToTranscript(message);
             StopRetransmission();
+
+            if (IsResumed)
+            {
+                // Final flight of an abbreviated handshake: resent only when the server retransmits.
+                BeginFlight();
+                SendChangeCipherSpec();
+                SendHandshake(HandshakeType.Finished, ComputeVerifyData(fromClient: true));
+            }
+            else if (_newSessionId != null)
+            {
+                SessionState = new Dtls12SessionState(_newSessionId, NegotiatedVersion, CipherSuite.Id, MasterSecret, UseEncryptThenMac,
+                    _serverCertificate?.GetEncoded());
+            }
+
             _state = State.Connected;
             IsHandshakeComplete = true;
-            Debug.WriteLine($"{LogPrefix} Handshake complete");
+            Debug.WriteLine($"{LogPrefix} Handshake complete{(IsResumed ? " (resumed)" : "")}");
             RaiseEvent(() => HandshakeFinished?.Invoke(this, EventArgs.Empty));
         }
 
