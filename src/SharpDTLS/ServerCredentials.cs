@@ -18,5 +18,11 @@ namespace SharpDTLS
         public AsymmetricCipherKeyPair KeyPair { get; }
         public X509Certificate Certificate { get; }
         public IList<X509Certificate> IntermediateCertificates { get; }
+
+        /// <summary>
+        /// A DER OCSP response for <see cref="Certificate"/> to staple for clients that ask (RFC 6066 §8); null for none.
+        /// Replace it before it expires.
+        /// </summary>
+        public byte[] OcspResponse { get; set; }
     }
 }

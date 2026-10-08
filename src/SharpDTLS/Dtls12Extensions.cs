@@ -463,4 +463,69 @@ namespace SharpDTLS
             return 5;
         }
     }
+
+    /// <summary>
+    /// status_request (RFC 6066 §8): the client asks for a stapled OCSP response (no responder IDs or request
+    /// extensions). A DTLS 1.2 server answers with an empty extension and a CertificateStatus message; DTLS 1.3 carries
+    /// the CertificateStatus in the leaf's CertificateEntry (RFC 8446 §4.4.2.1).
+    /// </summary>
+    public class StatusRequestExtension : ITlsExtension
+    {
+        public const ushort Type = 0x0005;
+        public const byte Ocsp = 1;
+
+        /// <summary>The request form (status_type ocsp), or the empty acknowledgement in a DTLS 1.2 ServerHello.</summary>
+        public StatusRequestExtension(bool request) => IsRequest = request;
+
+        public StatusRequestExtension() : this(true) { }
+
+        public bool IsRequest { get; private set; }
+
+        /// <summary>The requested status_type; only ocsp (1) is understood.</summary>
+        public byte StatusType { get; private set; } = Ocsp;
+
+        public int CalculateLength() => IsRequest ? 9 : 4;
+
+        public int Read(int offset, byte[] source)
+        {
+            int length = (source[offset + 2] << 8) | source[offset + 3];
+            if (source.Length < offset + 4 + length)
+                throw new DtlsException(AlertDescription.DecodeError, "Invalid status_request extension.");
+            IsRequest = length > 0;
+            if (IsRequest)
+                StatusType = source[offset + 4]; // the request body of other status types is opaque to us
+            return 4 + length;
+        }
+
+        public int Write(int offset, byte[] destination)
+        {
+            destination[offset] = 0x00;
+            destination[offset + 1] = 0x05;
+            destination[offset + 2] = 0x00;
+            destination[offset + 3] = (byte)(IsRequest ? 5 : 0);
+            if (IsRequest)
+            {
+                destination[offset + 4] = Ocsp;
+                Array.Clear(destination, offset + 5, 4); // empty responder_id_list and request_extensions
+            }
+            return CalculateLength();
+        }
+
+        /// <summary>CertificateStatus { status_type ocsp; opaque OCSPResponse&lt;1..2^24-1&gt; }.</summary>
+        public static byte[] EncodeCertificateStatus(byte[] ocspResponse)
+            => new TlsWriter().WriteUInt8(Ocsp).WriteOpaque24(ocspResponse).ToArray();
+
+        /// <summary>The OCSP response in a CertificateStatus body.</summary>
+        public static byte[] DecodeCertificateStatus(byte[] body)
+        {
+            var reader = new TlsReader(body);
+            if (reader.ReadUInt8() != Ocsp)
+                throw new DtlsException(AlertDescription.DecodeError, "CertificateStatus is not an OCSP response.");
+            byte[] response = reader.ReadOpaque24();
+            reader.EnsureEnd();
+            if (response.Length == 0)
+                throw new DtlsException(AlertDescription.DecodeError, "Empty OCSP response.");
+            return response;
+        }
+    }
 }

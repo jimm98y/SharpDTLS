@@ -6,6 +6,7 @@ using Org.BouncyCastle.Crypto.Generators;
 using Org.BouncyCastle.Crypto.Operators;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Math;
+using Org.BouncyCastle.Ocsp;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.X509;
 using Org.BouncyCastle.X509.Extension;
@@ -46,6 +47,23 @@ namespace Dtls13Test.Tests
             var cert = Issue(key.Public, $"CN={commonName}", issuer.Key.Private, issuer.Cert.SubjectDN.ToString(), issuer.Key.Public,
                 ca: false, dnsNames, ipAddresses, usage ?? KeyPurposeID.id_kp_serverAuth, notBefore, notAfter);
             return (key, cert);
+        }
+
+        /// <summary>
+        /// A DER OCSP response for <paramref name="leaf"/>: good unless <paramref name="status"/> says otherwise, signed by
+        /// the issuing CA or by <paramref name="responder"/> (a delegated responder certificate, sent along).
+        /// </summary>
+        public byte[] OcspResponse(X509Certificate leaf, CertificateStatus status = null, bool fromRoot = false, DateTime? thisUpdate = null,
+            DateTime? nextUpdate = null, (AsymmetricCipherKeyPair Key, X509Certificate Cert)? responder = null)
+        {
+            var issuer = fromRoot ? Root : Intermediate;
+            var signer = responder ?? issuer;
+            var generator = new BasicOcspRespGenerator(signer.Key.Public);
+            generator.AddResponse(new CertificateID(CertificateID.HashSha1, issuer.Cert, leaf.SerialNumber), status,
+                thisUpdate ?? DateTime.UtcNow.AddHours(-1), nextUpdate ?? DateTime.UtcNow.AddDays(1), null);
+            var basic = generator.Generate(new Asn1SignatureFactory("SHA256WITHECDSA", signer.Key.Private, new SecureRandom()),
+                responder.HasValue ? new[] { responder.Value.Cert } : null, DateTime.UtcNow);
+            return new OCSPRespGenerator().Generate(OCSPRespGenerator.Successful, basic).GetEncoded();
         }
 
         private static X509Certificate Issue(AsymmetricKeyParameter subjectKey, string subject, AsymmetricKeyParameter issuerKey, string issuer,

@@ -79,6 +79,12 @@ namespace SharpDTLS.DTLS13
         public int? RecordSizeLimit { get; set; }
 
         /// <summary>
+        /// A DER OCSP response for the server certificate to staple for clients that ask (RFC 8446 §4.4.2.1); null for
+        /// none. Certificates from the CertificateSelector staple their own <see cref="ServerCredentials.OcspResponse"/>.
+        /// </summary>
+        public byte[] OcspResponse { get; set; }
+
+        /// <summary>
         /// Key exchange groups in server preference order (see <see cref="Dtls13Groups"/>). A group the client already
         /// sent a share for is preferred, to avoid a HelloRetryRequest; otherwise the server asks for its best group.
         /// </summary>
@@ -435,6 +441,7 @@ namespace SharpDTLS.DTLS13
         private IList<X509Certificate> _intermediates;
         private bool _serverNameUsed;
         private ITlsExtension _recordSizeResponse;
+        private byte[] _ocspResponse;
         private long _earlyDataReceived;
         private bool _earlyDataAccepted;
 
@@ -534,9 +541,11 @@ namespace SharpDTLS.DTLS13
                 ServerName = _clientHello.Extensions.OfType<ServerNameExtension>().FirstOrDefault()?.HostName;
                 var selected = _server.CertificateSelector?.Invoke(ServerName);
                 _serverNameUsed = selected != null && ServerName != null;
-                (_keyPair, _certificate, _intermediates) = selected != null
-                    ? (selected.KeyPair, selected.Certificate, selected.IntermediateCertificates)
-                    : (_server.ServerKeyPair, _server.ServerCertificate, _server.IntermediateCertificates);
+                (_keyPair, _certificate, _intermediates, _ocspResponse) = selected != null
+                    ? (selected.KeyPair, selected.Certificate, selected.IntermediateCertificates, selected.OcspResponse)
+                    : (_server.ServerKeyPair, _server.ServerCertificate, _server.IntermediateCertificates, _server.OcspResponse);
+                if (_clientHello.Extensions.OfType<StatusRequestExtension>().FirstOrDefault()?.StatusType != StatusRequestExtension.Ocsp)
+                    _ocspResponse = null;
 
                 ApplicationProtocol = AlpnExtension.Select(_server.ApplicationProtocols, _clientHello.Extensions.OfType<AlpnExtension>().FirstOrDefault());
 
@@ -724,7 +733,7 @@ namespace SharpDTLS.DTLS13
 
                 var chain = new List<byte[]> { _certificate.GetEncoded() };
                 chain.AddRange((_intermediates ?? Array.Empty<X509Certificate>()).Select(c => c.GetEncoded()));
-                SendHandshake(new CertificateDatagram(chain), handshakeKeys);
+                SendHandshake(new CertificateDatagram(chain) { OcspResponse = _ocspResponse }, handshakeKeys);
 
                 var clientSchemes = _clientHello.Extensions.OfType<ClientSignatureAlgorithms>().FirstOrDefault()?.SignatureAlgorithms;
                 ushort scheme = Dtls13Signatures.SelectScheme(_keyPair.Private, clientSchemes)

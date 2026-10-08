@@ -20,6 +20,7 @@ namespace SharpDTLS.DTLS12
         public const byte CertificateVerify = 15;
         public const byte ClientKeyExchange = 16;
         public const byte Finished = 20;
+        public const byte CertificateStatus = 22;
     }
 
     /// <summary>Extension factories for the hello messages.</summary>
@@ -31,6 +32,7 @@ namespace SharpDTLS.DTLS12
             AlpnExtension.Type => new AlpnExtension(),
             RecordSizeLimitExtension.Type => new RecordSizeLimitExtension(),
             MaxFragmentLengthExtension.Type => new MaxFragmentLengthExtension(),
+            StatusRequestExtension.Type => new StatusRequestExtension(),
             ConnectionIdExtension.Type => new ConnectionIdExtension(),
             0x000a => new SupportedGroupsExtension(),
             0x000b => new EcPointFormatsExtension(),
@@ -52,6 +54,7 @@ namespace SharpDTLS.DTLS12
             AlpnExtension.Type => new AlpnExtension(),
             RecordSizeLimitExtension.Type => new RecordSizeLimitExtension(),
             MaxFragmentLengthExtension.Type => new MaxFragmentLengthExtension(),
+            StatusRequestExtension.Type => new StatusRequestExtension(),
             ConnectionIdExtension.Type => new ConnectionIdExtension(),
             0x000b => new ServerEcPointFormatsExtension(),
             0x000e => new ServerUseSrtpExtension(),

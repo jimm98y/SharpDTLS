@@ -20,6 +20,8 @@
  *   -export <label> <n> print "EXPORT:<hex>" of n bytes exported with label (empty context)
  *   -psk <hex> -psk_identity <id>   authenticate with an external PSK (TLS 1.3 PSK callbacks)
  *   -psk_only           with -psk: psk_ke, no (EC)DHE
+ *   -ocsp               client: request an OCSP staple and verify it (with -verify); a bad staple fails the handshake
+ *   -ocsp_resp <der>    server: staple this OCSP response for clients that ask
  *   -resume             two connections: the client resumes the first one's session ticket, the server
  *                       accepts the second connection with the same context; both print "RESUMED" or
  *                       "NOT RESUMED" after the second handshake
@@ -67,6 +69,24 @@ static unsigned int server_psk_cb(WOLFSSL *ssl, const char *identity, unsigned c
     return pskKeyLen;
 }
 
+static const char *ocspRespFile;
+
+/* Server status callback: staple the response from -ocsp_resp (wolfSSL takes ownership of the buffer). */
+static int status_cb(WOLFSSL *ssl, void *arg)
+{
+    (void)arg;
+    FILE *f = fopen(ocspRespFile, "rb");
+    if (!f) return 3; /* SSL_TLSEXT_ERR_NOACK */
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    unsigned char *resp = (unsigned char *)XMALLOC(len, NULL, DYNAMIC_TYPE_OPENSSL);
+    if (!resp || fread(resp, 1, len, f) != (size_t)len) { fclose(f); return 3; }
+    fclose(f);
+    wolfSSL_set_tlsext_status_ocsp_resp(ssl, resp, (int)len);
+    return 0; /* SSL_TLSEXT_ERR_OK */
+}
+
 static void fail(const char *what, WOLFSSL *ssl, int ret)
 {
     char buf[WOLFSSL_MAX_ERROR_SZ];
@@ -87,7 +107,7 @@ int main(int argc, char **argv)
     int port = atoi(argv[2]);
     const char *cert = NULL, *key = NULL, *cipher = NULL, *verify = NULL, *group = NULL, *srtp = NULL, *exportLabel = NULL;
     int exportLength = 0;
-    int hrr = 0, resume = 0, pskOnly = 0, mfl = 0, argi = 3;
+    int hrr = 0, resume = 0, pskOnly = 0, mfl = 0, ocsp = 0, argi = 3;
     const char *pskHex = NULL, *host = NULL, *sni = NULL, *alpn = NULL, *cidHex = NULL;
 
     if (server) {
@@ -112,6 +132,8 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[argi], "-key") && argi + 1 < argc) key = argv[++argi];
         else if (!strcmp(argv[argi], "-group") && argi + 1 < argc) group = argv[++argi];
         else if (!strcmp(argv[argi], "-mfl") && argi + 1 < argc) mfl = atoi(argv[++argi]);
+        else if (!strcmp(argv[argi], "-ocsp")) ocsp = 1;
+        else if (!strcmp(argv[argi], "-ocsp_resp") && argi + 1 < argc) ocspRespFile = argv[++argi];
         else if (!strcmp(argv[argi], "-srtp") && argi + 1 < argc) srtp = argv[++argi];
         else if (!strcmp(argv[argi], "-export") && argi + 2 < argc) { exportLabel = argv[++argi]; exportLength = atoi(argv[++argi]); }
     }
@@ -137,6 +159,15 @@ int main(int argc, char **argv)
         else wolfSSL_CTX_set_psk_client_tls13_callback(ctx, client_psk_cb);
         if (pskOnly && wolfSSL_CTX_no_dhe_psk(ctx) != 0)
             fail("no_dhe_psk", NULL, 0);
+    }
+
+    if (ocsp && wolfSSL_CTX_EnableOCSPStapling(ctx) != WOLFSSL_SUCCESS)
+        fail("EnableOCSPStapling", NULL, 0);
+    if (ocspRespFile) {
+        if (wolfSSL_CTX_EnableOCSPStapling(ctx) != WOLFSSL_SUCCESS)
+            fail("EnableOCSPStapling", NULL, 0);
+        if (wolfSSL_CTX_set_tlsext_status_cb(ctx, status_cb) != WOLFSSL_SUCCESS)
+            fail("set_tlsext_status_cb", NULL, 0);
     }
 
     if (srtp && wolfSSL_CTX_set_tlsext_use_srtp(ctx, srtp) != 0)
@@ -211,6 +242,8 @@ int main(int argc, char **argv)
     if (wolfSSL_set_dtls_fd_connected(ssl, fd) != WOLFSSL_SUCCESS)
         fail("set fd", NULL, 0);
 
+    if (ocsp && !server && wolfSSL_UseOCSPStapling(ssl, WOLFSSL_CSR_OCSP, 0) != WOLFSSL_SUCCESS)
+        fail("UseOCSPStapling", NULL, 0);
     /* max_fragment_length code 1-4 (2^9 to 2^12); the client asks, the server always accepts */
     if (mfl && !server && wolfSSL_UseMaxFragment(ssl, (unsigned char)mfl) != WOLFSSL_SUCCESS)
         fail("UseMaxFragment", NULL, 0);

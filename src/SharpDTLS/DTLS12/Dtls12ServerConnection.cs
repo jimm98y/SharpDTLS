@@ -72,6 +72,12 @@ namespace SharpDTLS.DTLS12
         public int? RecordSizeLimit { get; set; }
 
         /// <summary>
+        /// A DER OCSP response for <see cref="Certificate"/> to staple for clients that ask (RFC 6066 §8); null for none.
+        /// Certificates from the CertificateSelector staple their own <see cref="ServerCredentials.OcspResponse"/>.
+        /// </summary>
+        public byte[] OcspResponse { get; set; }
+
+        /// <summary>
         /// Negotiate connection IDs (RFC 9146) with clients that offer them: the client then sends our CID in every
         /// encrypted record, so the association survives a change of its address (e.g. NAT rebinding).
         /// </summary>
@@ -119,6 +125,7 @@ namespace SharpDTLS.DTLS12
         private AsymmetricCipherKeyPair _keyPair;
         private X509Certificate _certificate;
         private IList<X509Certificate> _intermediates;
+        private byte[] _ocspResponse;
         private bool _serverNameUsed;
 
         public event EventHandler<EventArgs> HandshakeFinished;
@@ -243,9 +250,11 @@ namespace SharpDTLS.DTLS12
             ServerName = ch.Extension<ServerNameExtension>()?.HostName;
             var selected = _settings.CertificateSelector?.Invoke(ServerName);
             _serverNameUsed = selected != null && ServerName != null;
-            (_keyPair, _certificate, _intermediates) = selected != null
-                ? (selected.KeyPair, selected.Certificate, selected.IntermediateCertificates)
-                : (_settings.KeyPair, _settings.Certificate, _settings.IntermediateCertificates);
+            (_keyPair, _certificate, _intermediates, _ocspResponse) = selected != null
+                ? (selected.KeyPair, selected.Certificate, selected.IntermediateCertificates, selected.OcspResponse)
+                : (_settings.KeyPair, _settings.Certificate, _settings.IntermediateCertificates, _settings.OcspResponse);
+            if (ch.Extension<StatusRequestExtension>()?.StatusType != StatusRequestExtension.Ocsp)
+                _ocspResponse = null;
 
             // Connection IDs are negotiated afresh in every handshake, resumed ones included (RFC 9146 §3).
             var offeredCid = ch.Extension<ConnectionIdExtension>();
@@ -382,6 +391,11 @@ namespace SharpDTLS.DTLS12
                 sh.Extensions.Add(new ConnectionIdExtension(ReadConnectionId));
             if (_recordSizeResponse != null)
                 sh.Extensions.Add(_recordSizeResponse);
+            // A staple goes with a Certificate, so not when resuming or without one.
+            if (IsResumed || CipherSuite.ServerCertificateType == CertificateKeyType.None)
+                _ocspResponse = null;
+            if (_ocspResponse != null)
+                sh.Extensions.Add(new StatusRequestExtension(request: false));
             SendHandshake(HandshakeType.ServerHello, sh.Encode());
 
             if (IsResumed)
@@ -407,6 +421,8 @@ namespace SharpDTLS.DTLS12
                 foreach (var intermediate in _intermediates ?? Array.Empty<X509Certificate>())
                     certificate.Chain.Add(intermediate.GetEncoded());
                 SendHandshake(HandshakeType.Certificate, certificate.Encode());
+                if (_ocspResponse != null)
+                    SendHandshake(HandshakeType.CertificateStatus, StatusRequestExtension.EncodeCertificateStatus(_ocspResponse));
             }
 
             byte[] serverParams = _keyExchange.CreateServerParams();

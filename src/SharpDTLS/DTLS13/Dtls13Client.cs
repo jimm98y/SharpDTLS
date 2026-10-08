@@ -63,6 +63,19 @@ namespace SharpDTLS.DTLS13
         /// </summary>
         public int? MaxFragmentLength { get; set; }
 
+        /// <summary>Ask the server to staple an OCSP response for its certificate (status_request, RFC 8446 §4.4.2.1).</summary>
+        public bool RequestOcspStapling { get; set; }
+
+        /// <summary>
+        /// Checks the server's stapled OCSP response after its certificate: (DER response, or null when the server
+        /// stapled none, and the server's chain as received). Returning false or throwing aborts the handshake;
+        /// <see cref="OcspStapleValidator"/> provides one.
+        /// </summary>
+        public Func<byte[], IReadOnlyList<byte[]>, bool> ServerCertificateStatusValidator { get; set; }
+
+        /// <summary>The OCSP response the server stapled, or null.</summary>
+        public byte[] OcspResponse { get; private set; }
+
         /// <summary>
         /// Offer connection IDs (RFC 9147 §9) so the association survives our address changing: a server that agrees
         /// gives us a CID to send in every record.
@@ -204,6 +217,8 @@ namespace SharpDTLS.DTLS13
             if (ApplicationProtocols is { Count: > 0 })
                 clientHello.Extensions.Add(new AlpnExtension(ApplicationProtocols));
             clientHello.Extensions.AddRange(RecordSizeNegotiation.Offer(RecordSizeLimit, MaxFragmentLength, dtls13: true));
+            if (RequestOcspStapling)
+                clientHello.Extensions.Add(new StatusRequestExtension(request: true));
             if (UseConnectionId)
             {
                 _offeredConnectionId ??= Dtls13CryptoUtils.GenerateRandom(ConnectionIdLength);
@@ -540,6 +555,13 @@ namespace SharpDTLS.DTLS13
             Session.PeerCertificate = certificate.Certificate;
             if (ServerCertificateValidator != null && !ServerCertificateValidator(_serverCertificate, certificate.CertificateChain))
                 throw new DtlsException(AlertDescription.BadCertificate, "Server certificate was rejected.");
+
+            // RFC 8446 §4.4.2: CertificateEntry extensions must answer ClientHello extensions.
+            if (certificate.OcspResponse != null && !RequestOcspStapling)
+                throw new DtlsException(AlertDescription.UnsupportedExtension, "Unsolicited OCSP staple.");
+            OcspResponse = certificate.OcspResponse;
+            if (ServerCertificateStatusValidator != null && !ServerCertificateStatusValidator(OcspResponse, certificate.CertificateChain))
+                throw new DtlsException(AlertDescription.BadCertificateStatusResponse, "The server's certificate status was rejected.");
         }
 
         private void OnServerFinished(byte[] message, FinishedDatagram finished)

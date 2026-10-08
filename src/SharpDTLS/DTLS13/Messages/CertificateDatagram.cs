@@ -25,6 +25,17 @@ namespace SharpDTLS.DTLS13.Messages
 
         public byte[] Bytes { get; private set; }
 
+        /// <summary>The OCSP response stapled to the end-entity certificate (status_request, RFC 8446 §4.4.2.1), or null.</summary>
+        public byte[] OcspResponse { get; set; }
+
+        private byte[] LeafExtensions()
+        {
+            if (OcspResponse == null)
+                return Array.Empty<byte>();
+            byte[] status = StatusRequestExtension.EncodeCertificateStatus(OcspResponse);
+            return new TlsWriter().WriteUInt16(StatusRequestExtension.Type).WriteOpaque16(status).ToArray();
+        }
+
         public CertificateDatagram()
         { }
 
@@ -74,14 +85,30 @@ namespace SharpDTLS.DTLS13.Messages
                 pos += certLength;
 
                 int extensionsLength = (bytes[pos] << 8) | bytes[pos + 1];
-                pos += 2 + extensionsLength; // per-certificate extensions (OCSP, SCT) are not interpreted
-                if (pos > listEnd) throw new DtlsException(AlertDescription.DecodeError, "Invalid certificate entry extensions.");
+                pos += 2;
+                if (pos + extensionsLength > listEnd) throw new DtlsException(AlertDescription.DecodeError, "Invalid certificate entry extensions.");
+                if (CertificateChain.Count == 1)
+                    ReadLeafExtensions(bytes.AsSpan(pos, extensionsLength).ToArray());
+                pos += extensionsLength; // other extensions (e.g. SCTs) and other entries' extensions are not interpreted
+            }
+        }
+
+        private void ReadLeafExtensions(byte[] extensions)
+        {
+            var reader = new TlsReader(extensions);
+            while (reader.Remaining > 0)
+            {
+                ushort type = reader.ReadUInt16();
+                byte[] body = reader.ReadOpaque16();
+                if (type == StatusRequestExtension.Type)
+                    OcspResponse = StatusRequestExtension.DecodeCertificateStatus(body);
             }
         }
 
         public byte[] ToBytes()
         {
-            int listLength = CertificateChain.Sum(c => 3 + c.Length + 2);
+            byte[] leafExtensions = LeafExtensions();
+            int listLength = CertificateChain.Sum(c => 3 + c.Length + 2) + leafExtensions.Length;
             int bodyLength = 1 + RequestContext.Length + 3 + listLength;
             byte[] data = new byte[12 + bodyLength + 1];
 
@@ -105,15 +132,19 @@ namespace SharpDTLS.DTLS13.Messages
             data[pos++] = (byte)(listLength >> 8);
             data[pos++] = (byte)listLength;
 
-            foreach (var cert in CertificateChain)
+            for (int i = 0; i < CertificateChain.Count; i++)
             {
+                byte[] cert = CertificateChain[i];
                 data[pos++] = (byte)(cert.Length >> 16);
                 data[pos++] = (byte)(cert.Length >> 8);
                 data[pos++] = (byte)cert.Length;
                 Buffer.BlockCopy(cert, 0, data, pos, cert.Length);
                 pos += cert.Length;
-                data[pos++] = 0; // no certificate extensions
-                data[pos++] = 0;
+                byte[] extensions = i == 0 ? leafExtensions : Array.Empty<byte>();
+                data[pos++] = (byte)(extensions.Length >> 8);
+                data[pos++] = (byte)extensions.Length;
+                extensions.CopyTo(data, pos);
+                pos += extensions.Length;
             }
 
             data[pos] = 0x16; // inner content type (handshake)

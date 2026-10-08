@@ -83,6 +83,9 @@ namespace SharpDTLS.DTLS12
         /// <summary>The most payload per record we accept, advertised with record_size_limit (RFC 8449); null for 16384.</summary>
         public int? RecordSizeLimit { get => Settings.RecordSizeLimit; set => Settings.RecordSizeLimit = value; }
 
+        /// <summary>A DER OCSP response for the certificate, stapled for clients that ask (RFC 6066 §8); null for none.</summary>
+        public byte[] OcspResponse { get => Settings.OcspResponse; set => Settings.OcspResponse = value; }
+
         public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ClientCertificateValidator
         {
             get => Settings.ClientCertificateValidator;

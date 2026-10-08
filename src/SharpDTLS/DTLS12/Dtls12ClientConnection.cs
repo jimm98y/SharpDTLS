@@ -34,6 +34,9 @@ namespace SharpDTLS.DTLS12
         private ClientHelloMessage _clientHello;
         private int _helloVerifyRequests;
         private X509Certificate _serverCertificate;
+        private IReadOnlyList<byte[]> _serverChain;
+        private bool _statusExpected;
+        private bool _statusChecked;
         private IClientKeyExchange _keyExchange;
         private CertificateRequestMessage _certificateRequest;
         private Dtls12SessionState _offeredSession;
@@ -132,6 +135,19 @@ namespace SharpDTLS.DTLS12
 
         /// <summary>Application protocols to offer with ALPN (RFC 7301), in preference order; null to not offer any.</summary>
         public IList<string> ApplicationProtocols { get; set; }
+
+        /// <summary>Ask the server to staple an OCSP response for its certificate (status_request, RFC 6066 §8).</summary>
+        public bool RequestOcspStapling { get; set; }
+
+        /// <summary>
+        /// Checks the server's stapled OCSP response once the certificate and the response are known: (DER response, or
+        /// null when the server stapled none, and the server's chain as received). Returning false or throwing aborts
+        /// the handshake; <see cref="OcspStapleValidator"/> provides one.
+        /// </summary>
+        public Func<byte[], IReadOnlyList<byte[]>, bool> ServerCertificateStatusValidator { get; set; }
+
+        /// <summary>The OCSP response the server stapled, or null.</summary>
+        public byte[] OcspResponse { get; private set; }
 
         /// <summary>
         /// Offer record_size_limit (RFC 8449): the most payload per record we accept, 64 to 16384; null to not offer it.
@@ -244,6 +260,8 @@ namespace SharpDTLS.DTLS12
             if (ApplicationProtocols is { Count: > 0 })
                 ch.Extensions.Add(new AlpnExtension(ApplicationProtocols));
             ch.Extensions.AddRange(RecordSizeNegotiation.Offer(RecordSizeLimit, MaxFragmentLength, dtls13: false));
+            if (RequestOcspStapling)
+                ch.Extensions.Add(new StatusRequestExtension(request: true));
             if (UseConnectionId)
             {
                 _offeredConnectionId ??= Dtls12CryptoUtils.GenerateRandom(ConnectionIdLength);
@@ -276,6 +294,20 @@ namespace SharpDTLS.DTLS12
                 OnPostHandshakeMessage(type, body);
                 return;
             }
+
+            if (type == HandshakeType.CertificateStatus)
+            {
+                // Only right after the Certificate, and only when the ServerHello announced it.
+                if (!_statusExpected || _serverChain == null || _statusChecked)
+                    throw new DtlsException(AlertDescription.UnexpectedMessage, "Unexpected CertificateStatus.");
+                OcspResponse = StatusRequestExtension.DecodeCertificateStatus(body);
+                AddToTranscript(message);
+                CheckCertificateStatus();
+                return;
+            }
+            // The server may announce a CertificateStatus and still send none.
+            if (_serverChain != null && !_statusChecked)
+                CheckCertificateStatus();
 
             switch (_state)
             {
@@ -388,6 +420,12 @@ namespace SharpDTLS.DTLS12
                 ReadConnectionId = _offeredConnectionId;
             }
 
+            // An empty status_request announces a CertificateStatus after the Certificate (RFC 6066 §8).
+            _statusExpected = sh.Extension<StatusRequestExtension>() != null;
+            (_serverChain, _statusChecked, OcspResponse) = (null, false, null);
+            if (_statusExpected && !RequestOcspStapling)
+                throw new DtlsException(AlertDescription.UnsupportedExtension, "Unsolicited status_request extension.");
+
             // An empty SessionTicket extension announces a NewSessionTicket before the server's ChangeCipherSpec.
             _ticketExpected = sh.Extension<SessionTicketExtension>() != null;
             if (_ticketExpected && _clientHello.Extension<SessionTicketExtension>() == null)
@@ -447,9 +485,17 @@ namespace SharpDTLS.DTLS12
                 throw new DtlsException(AlertDescription.UnsupportedCertificate, "Server certificate key does not match the cipher suite.");
             if (ServerCertificateValidator != null && !ServerCertificateValidator(_serverCertificate, certificate.Chain))
                 throw new DtlsException(AlertDescription.BadCertificate, "Server certificate was rejected.");
+            _serverChain = certificate.Chain;
 
             AddToTranscript(message);
             CreateKeyExchange();
+        }
+
+        private void CheckCertificateStatus()
+        {
+            _statusChecked = true;
+            if (ServerCertificateStatusValidator != null && !ServerCertificateStatusValidator(OcspResponse, _serverChain))
+                throw new DtlsException(AlertDescription.BadCertificateStatusResponse, "The server's certificate status was rejected.");
         }
 
         private void CreateKeyExchange()
