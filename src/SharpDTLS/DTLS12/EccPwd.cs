@@ -63,7 +63,7 @@ namespace SharpDTLS.DTLS12
             if (!curve.H.Equals(BigInteger.One))
                 throw new ArgumentException("Username protection needs a curve with cofactor 1.", nameof(curveName));
             var generator = new ECKeyPairGenerator();
-            generator.Init(new ECKeyGenerationParameters(new ECDomainParameters(curve), new SecureRandom()));
+            generator.Init(new ECKeyGenerationParameters(ECNamedCurveTable.GetOid(curveName), new SecureRandom()));
             return generator.GenerateKeyPair();
         }
     }

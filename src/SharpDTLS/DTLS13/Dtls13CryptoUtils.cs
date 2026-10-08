@@ -106,10 +106,10 @@ namespace SharpDTLS.DTLS13
 
         public static (AsymmetricCipherKeyPair keyPair, X509Certificate certificate) GenerateSelfSignedEcCertificate()
         {
-            var ecCurve = ECNamedCurveTable.GetByName("P-256");
-            var domainParams = new ECDomainParameters(ecCurve.Curve, ecCurve.G, ecCurve.N, ecCurve.H);
+            // Named curve (OID) parameters: RFC 5480 §2.1.1 forbids explicit curve parameters in certificates,
+            // and platform validators (e.g. Apple's) reject them.
             var ecGenerator = new ECKeyPairGenerator();
-            ecGenerator.Init(new ECKeyGenerationParameters(domainParams, new SecureRandom()));
+            ecGenerator.Init(new ECKeyGenerationParameters(ECNamedCurveTable.GetOid("P-256"), new SecureRandom()));
             var keyPair = ecGenerator.GenerateKeyPair();
             return (keyPair, CreateSelfSigned(keyPair, "SHA256WITHECDSA"));
         }

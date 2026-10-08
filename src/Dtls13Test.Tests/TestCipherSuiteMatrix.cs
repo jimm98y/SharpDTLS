@@ -101,9 +101,8 @@ namespace Dtls13Test.Tests
 
         private static (AsymmetricCipherKeyPair, X509Certificate) GenerateEcdh(AsymmetricKeyParameter issuerKey, string algorithm)
         {
-            var ec = Org.BouncyCastle.Asn1.X9.ECNamedCurveTable.GetByName("P-256");
             var generator = new ECKeyPairGenerator();
-            generator.Init(new ECKeyGenerationParameters(new ECDomainParameters(ec.Curve, ec.G, ec.N, ec.H), new SecureRandom()));
+            generator.Init(new ECKeyGenerationParameters(Org.BouncyCastle.Asn1.X9.ECNamedCurveTable.GetOid("P-256"), new SecureRandom()));
             var keyPair = generator.GenerateKeyPair();
             return (keyPair, Certify(keyPair.Public, issuerKey, algorithm, "SharpDTLS static ECDH"));
         }
