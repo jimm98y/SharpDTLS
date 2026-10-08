@@ -76,12 +76,20 @@ namespace Dtls13Test.Tests
             ["TLS13-AES128-GCM-SHA256"] = 0x1301,
             ["TLS13-AES256-GCM-SHA384"] = 0x1302,
             ["TLS13-CHACHA20-POLY1305-SHA256"] = 0x1303,
+            ["TLS13-AES128-CCM-SHA256"] = 0x1304,
+            ["TLS13-AES128-CCM-8-SHA256"] = 0x1305,
+            ["TLS13-SHA256-SHA256"] = 0xC0B4,
+            ["TLS13-SHA384-SHA384"] = 0xC0B5,
         };
 
         [DataRow("TLS13-AES128-GCM-SHA256", false, false)]
         [DataRow("TLS13-AES256-GCM-SHA384", true, false)]
         [DataRow("TLS13-CHACHA20-POLY1305-SHA256", true, true)]
         [DataRow("TLS13-AES128-GCM-SHA256", true, true)]
+        [DataRow("TLS13-AES128-CCM-SHA256", true, false)]
+        [DataRow("TLS13-AES128-CCM-8-SHA256", true, false)]
+        [DataRow("TLS13-SHA256-SHA256", true, false)]
+        [DataRow("TLS13-SHA384-SHA384", false, true)]
         [TestMethod]
         public void SharpDtlsClient_To_WolfSslServer(string cipher, bool helloRetry, bool ecCertificate)
         {
@@ -94,7 +102,7 @@ namespace Dtls13Test.Tests
             Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), "server did not start:\n" + server.Output);
 
             using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
-            var client = new Dtls13Client(transport);
+            var client = new Dtls13Client(transport) { CipherSuites = new List<ushort> { SuiteIds[cipher] } };
             var handshake = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var received = new List<string>();
             client.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
@@ -132,6 +140,10 @@ namespace Dtls13Test.Tests
         [DataRow("TLS13-CHACHA20-POLY1305-SHA256", true, "x25519")]
         [DataRow("TLS13-AES128-GCM-SHA256", false, "p256")]   // server must ask for an x25519 share
         [DataRow("TLS13-AES256-GCM-SHA384", true, "p256")]
+        [DataRow("TLS13-AES128-CCM-SHA256", true, "x25519")]
+        [DataRow("TLS13-AES128-CCM-8-SHA256", false, "p256")]
+        [DataRow("TLS13-SHA256-SHA256", true, "x25519")]
+        [DataRow("TLS13-SHA384-SHA384", true, "x25519")]
         [TestMethod]
         public void WolfSslClient_To_SharpDtlsServer(string cipher, bool helloRetry, string group)
         {
@@ -139,7 +151,7 @@ namespace Dtls13Test.Tests
             string dir = OpenSsl.NewTempDirectory();
 
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
-            var server = new Dtls13Server(transport) { ShouldSendHelloRetry = helloRetry };
+            var server = new Dtls13Server(transport) { ShouldSendHelloRetry = helloRetry, CipherSuites = new List<ushort> { SuiteIds[cipher] } };
 
             var handshake = new TaskCompletionSource<Dtls13ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
             var received = new List<string>();

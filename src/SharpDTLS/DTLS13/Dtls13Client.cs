@@ -41,7 +41,7 @@ namespace SharpDTLS.DTLS13
         public AsymmetricCipherKeyPair ClientCertificateKeyPair { get; set; }
         public X509Certificate ClientCertificate { get; set; }
 
-        /// <summary>Cipher suites to offer, in preference order. Must be a subset of <see cref="Dtls13CipherSuite.Supported"/>.</summary>
+        /// <summary>Cipher suites to offer, in preference order: the defaults in <see cref="Dtls13CipherSuite.Supported"/>, or any of <see cref="Dtls13CipherSuite.All"/>.</summary>
         public IList<ushort> CipherSuites { get; set; } = new List<ushort>(Dtls13CipherSuite.Supported);
 
         /// <summary>SRTP protection profiles offered in use_srtp (RFC 5764); null to not offer DTLS-SRTP.</summary>

@@ -41,6 +41,12 @@ namespace SharpDTLS.DTLS13
             byte[] snKey = fromClient ? ctx.ClientSnKey : ctx.ServerSnKey;
 
             const int headerLength = 5;
+
+            // RFC 9147 §4.2.3: the record number mask needs 16 bytes of ciphertext, so short records
+            // (possible with CCM_8's 8-byte tag) are zero-padded as TLSInnerPlaintext padding.
+            if (innerPlaintext.Length + suite.TagLength < SampleLength)
+                Array.Resize(ref innerPlaintext, SampleLength - suite.TagLength);
+
             int ciphertextLength = innerPlaintext.Length + suite.TagLength;
             if (ciphertextLength > 0xFFFF)
                 throw new DtlsException(AlertDescription.RecordOverflow, "Record too large");
@@ -55,14 +61,14 @@ namespace SharpDTLS.DTLS13
             byte[] aad = new byte[headerLength];
             Buffer.BlockCopy(record, 0, aad, 0, headerLength);
 
-            var aead = suite.CreateAead();
-            aead.Init(true, new AeadParameters(new KeyParameter(key), suite.TagLength * 8, BuildNonce(iv, sequenceNumber), aad));
-            int written = aead.ProcessBytes(innerPlaintext, 0, innerPlaintext.Length, record, headerLength);
-            aead.DoFinal(record, headerLength + written);
+            suite.Cipher.Seal(key, BuildNonce(iv, sequenceNumber), aad, innerPlaintext).CopyTo(record, headerLength);
 
             byte[] mask = ComputeMask(suite, snKey, record, headerLength);
-            record[1] ^= mask[0];
-            record[2] ^= mask[1];
+            if (mask != null)
+            {
+                record[1] ^= mask[0];
+                record[2] ^= mask[1];
+            }
 
             return record;
         }
@@ -98,19 +104,8 @@ namespace SharpDTLS.DTLS13
                 aad[seqOffset] = (byte)sequenceNumber;
             }
 
-            int ciphertextLength = record.Length - headerLength;
-            byte[] plaintext = new byte[ciphertextLength - suite.TagLength];
-            try
-            {
-                var aead = suite.CreateAead();
-                aead.Init(false, new AeadParameters(new KeyParameter(key), suite.TagLength * 8, BuildNonce(iv, sequenceNumber), aad));
-                int written = aead.ProcessBytes(record, headerLength, ciphertextLength, plaintext, 0);
-                aead.DoFinal(plaintext, written);
-            }
-            catch (InvalidCipherTextException ex)
-            {
-                throw new DtlsRecordDiscardedException("Record failed authentication", ex);
-            }
+            byte[] plaintext = suite.Cipher.Open(key, BuildNonce(iv, sequenceNumber), aad, record.AsSpan(headerLength).ToArray())
+                ?? throw new DtlsRecordDiscardedException("Record failed authentication");
 
             window.Mark(sequenceNumber);
 
@@ -167,7 +162,7 @@ namespace SharpDTLS.DTLS13
 
             var suite = ctx.Suite;
             byte[] snKey = fromClient ? ctx.ClientSnKey : ctx.ServerSnKey;
-            byte[] mask = ComputeMask(suite, snKey, record, headerLength);
+            byte[] mask = ComputeMask(suite, snKey, record, headerLength) ?? new byte[2];
 
             ulong truncated = seq16
                 ? (ulong)(((record[1] ^ mask[0]) << 8) | (record[2] ^ mask[1]))
@@ -188,24 +183,9 @@ namespace SharpDTLS.DTLS13
             return nonce;
         }
 
-        // RFC 9147 §4.2.3
+        // RFC 9147 §4.2.3; null when the suite sends record numbers in the clear.
         internal static byte[] ComputeMask(Dtls13CipherSuite suite, byte[] snKey, byte[] record, int ciphertextOffset)
-        {
-            if (suite.IsChaCha20)
-            {
-                uint counter = BinaryPrimitives.ReadUInt32LittleEndian(record.AsSpan(ciphertextOffset, 4));
-                byte[] nonce = new byte[12];
-                Buffer.BlockCopy(record, ciphertextOffset + 4, nonce, 0, 12);
-                return ChaCha20Block.Compute(snKey, counter, nonce);
-            }
-
-            byte[] sample = new byte[SampleLength];
-            Buffer.BlockCopy(record, ciphertextOffset, sample, 0, SampleLength);
-            var aes = new AesEngine();
-            aes.Init(true, new KeyParameter(snKey));
-            aes.ProcessBlock(sample, 0, sample, 0);
-            return sample;
-        }
+            => suite.Cipher.Mask(snKey, record.AsSpan(ciphertextOffset));
     }
 
     /// <summary>

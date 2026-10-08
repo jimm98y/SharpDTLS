@@ -56,7 +56,7 @@ namespace SharpDTLS.DTLS13
         /// <summary>Request a client certificate and abort with certificate_required if none is sent.</summary>
         public bool RequireClientCertificate { get; set; } = false;
 
-        /// <summary>Cipher suites in server preference order. Must be a subset of <see cref="Dtls13CipherSuite.Supported"/>.</summary>
+        /// <summary>Cipher suites in server preference order: the defaults in <see cref="Dtls13CipherSuite.Supported"/>, or any of <see cref="Dtls13CipherSuite.All"/>.</summary>
         public IList<ushort> CipherSuites { get; set; } = new List<ushort>(Dtls13CipherSuite.Supported);
 
         /// <summary>SRTP protection profiles in server preference order; null to never negotiate use_srtp.</summary>

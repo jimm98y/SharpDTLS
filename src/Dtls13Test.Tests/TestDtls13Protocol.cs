@@ -117,10 +117,18 @@ namespace Dtls13Test.Tests
         [DataRow((ushort)0x1301)]
         [DataRow((ushort)0x1302)]
         [DataRow((ushort)0x1303)]
+        [DataRow((ushort)0x1304)]
+        [DataRow((ushort)0x1305)]
+        [DataRow((ushort)0x1306)]
+        [DataRow((ushort)0x1307)]
+        [DataRow((ushort)0xC0B4)]
+        [DataRow((ushort)0xC0B5)]
         [TestMethod]
         public void Handshake_WithHelloRetryRequest_EachCipherSuite(ushort suite)
         {
-            var h = new Harness(configureClient: c => c.CipherSuites = new List<ushort> { suite });
+            var h = new Harness(
+                configureServer: s => s.CipherSuites = new List<ushort> { suite },
+                configureClient: c => c.CipherSuites = new List<ushort> { suite });
             h.Handshake();
 
             Assert.AreEqual(suite, h.Client.Session.CipherSuite.Id);
@@ -134,6 +142,68 @@ namespace Dtls13Test.Tests
             h.Server.SendApplicationData(ScriptedTransportPair.ClientEndpoint, Encoding.UTF8.GetBytes("pong"));
             CollectionAssert.AreEqual(new[] { "ping" }, h.ServerReceived);
             CollectionAssert.AreEqual(new[] { "pong" }, h.ClientReceived);
+        }
+
+        [DataRow((ushort)0x1304)]
+        [DataRow((ushort)0x1305)]
+        [DataRow((ushort)0x1306)]
+        [DataRow((ushort)0x1307)]
+        [DataRow((ushort)0xC0B4)]
+        [DataRow((ushort)0xC0B5)]
+        [TestMethod]
+        public void RecordLayer_ShortRecordsManyRecordsAndKeyUpdates_EachAdditionalSuite(ushort suite)
+        {
+            var h = new Harness(
+                configureServer: s => { s.CipherSuites = new List<ushort> { suite }; s.ShouldSendHelloRetry = false; },
+                configureClient: c => c.CipherSuites = new List<ushort> { suite });
+            h.Handshake();
+
+            // One-byte records stay at least 16 bytes of ciphertext (padded for CCM_8's 8-byte tag).
+            for (int i = 0; i < 300; i++)
+            {
+                h.Client.SendApplicationData(Encoding.UTF8.GetBytes(((char)('a' + i % 26)).ToString()));
+                h.Server.SendApplicationData(ScriptedTransportPair.ClientEndpoint, Encoding.UTF8.GetBytes($"s{i}"));
+            }
+            Assert.HasCount(300, h.ServerReceived);
+            Assert.AreEqual("s299", h.ClientReceived[^1]);
+
+            h.Client.SendKeyUpdate(requestUpdate: true);
+            for (int i = 0; i < 4; i++)
+                h.Server.SendKeyUpdate(ScriptedTransportPair.ClientEndpoint);
+            h.Client.SendApplicationData(Encoding.UTF8.GetBytes("after-update"));
+            h.Server.SendApplicationData(ScriptedTransportPair.ClientEndpoint, Encoding.UTF8.GetBytes("after-update"));
+            Assert.AreEqual("after-update", h.ServerReceived[^1]);
+            Assert.AreEqual("after-update", h.ClientReceived[^1]);
+        }
+
+        [DataRow((ushort)0xC0B4, 32)]
+        [DataRow((ushort)0xC0B5, 48)]
+        [TestMethod]
+        public void IntegrityOnly_SendsPlaintextAndClearRecordNumbers(ushort suite, int tagLength)
+        {
+            var h = new Harness(
+                configureServer: s => { s.CipherSuites = new List<ushort> { suite }; s.ShouldSendHelloRetry = false; },
+                configureClient: c => c.CipherSuites = new List<ushort> { suite });
+            h.Handshake();
+
+            int before = h.Pair.ClientSent.Count;
+            h.Client.SendApplicationData(Encoding.UTF8.GetBytes("visible-on-the-wire"));
+            byte[] record = h.Pair.ClientSent.Skip(before).Single();
+
+            // RFC 9150: DTLSInnerPlaintext || HMAC, with the 16-bit record number in the clear (§9).
+            Assert.AreEqual(0x2C, record[0] & 0xFC, "unified header with 16-bit sequence number and length");
+            ulong sequenceNumber = (ulong)((record[1] << 8) | record[2]);
+            Assert.AreEqual(h.Client.Session.WriteKeys.ClientKeyUseCounter - 1, sequenceNumber);
+            Assert.AreEqual("visible-on-the-wire\u0017", Encoding.ASCII.GetString(record, 5, record.Length - 5 - tagLength));
+            CollectionAssert.AreEqual(new[] { "visible-on-the-wire" }, h.ServerReceived);
+            Assert.IsTrue(Dtls13CipherSuite.Get(suite).IsIntegrityOnly);
+        }
+
+        [TestMethod]
+        public void DefaultSuites_AreGcmAndChaCha20Only()
+        {
+            CollectionAssert.AreEqual(new ushort[] { 0x1301, 0x1302, 0x1303 }, Dtls13CipherSuite.Supported);
+            Assert.HasCount(9, Dtls13CipherSuite.All);
         }
 
         [TestMethod]
