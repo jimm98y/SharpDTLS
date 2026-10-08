@@ -6,7 +6,7 @@ namespace SharpDTLS.DTLS10
     /// <summary>
     /// DTLS 1.0 client (RFC 4347): the DTLS 1.0/1.2 engine restricted to DTLS 1.0.
     /// </summary>
-    public class Dtls10Client : Dtls12ClientConnection
+    public class Dtls10Client : Tls12ClientConnection
     {
         /// <summary>Negotiated parameters, populated when the handshake completes.</summary>
         public Dtls10Session Session { get; } = new Dtls10Session();

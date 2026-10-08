@@ -6,7 +6,7 @@ using System.Linq;
 
 namespace SharpDTLS.DTLS12
 {
-    public abstract partial class Dtls12Connection
+    public abstract partial class Tls12Connection
     {
         /// <summary>
         /// DTLS framing (RFC 6347): explicit epochs and sequence numbers with replay windows, records of the next
@@ -41,7 +41,7 @@ namespace SharpDTLS.DTLS12
             private readonly SortedDictionary<int, (byte[] Message, ushort Epoch)> _bufferedMessages = new();
             private DateTime _lastDuplicateResponse = DateTime.MinValue;
 
-            public DatagramFraming(Dtls12Connection connection) : base(connection) { }
+            public DatagramFraming(Tls12Connection connection) : base(connection) { }
 
             public override bool IsDatagram => true;
 

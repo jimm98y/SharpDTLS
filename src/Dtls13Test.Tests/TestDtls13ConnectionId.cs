@@ -26,7 +26,7 @@ namespace Dtls13Test.Tests
             public List<string> ServerReceived = new();
             public List<string> ClientReceived = new();
             public List<(EndPoint Old, EndPoint New)> Changes = new();
-            public Dtls13ServerConnection Connection => Server.Connections.Single();
+            public Tls13ServerConnection Connection => Server.Connections.Single();
         }
 
         private static Run Connect(bool serverCids = true, int clientCidLength = 0, bool autoUpdate = false, bool helloRetry = true)

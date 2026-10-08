@@ -2,19 +2,19 @@ using System;
 
 namespace SharpDTLS.DTLS12
 {
-    public abstract partial class Dtls12Connection
+    public abstract partial class Tls12Connection
     {
         /// <summary>
         /// The record layer and handshake message transport under the (D)TLS 1.0-1.2 handshake: record protection
         /// state, the ChangeCipherSpec switch, handshake message framing and the transcript form of a message. The
-        /// handshake state machines only use it through <see cref="Dtls12Connection"/>'s protected members.
+        /// handshake state machines only use it through <see cref="Tls12Connection"/>'s protected members.
         /// </summary>
         private abstract class Framing
         {
-            protected Framing(Dtls12Connection connection) => C = connection;
+            protected Framing(Tls12Connection connection) => C = connection;
 
             /// <summary>The connection this framing serves.</summary>
-            protected Dtls12Connection C { get; }
+            protected Tls12Connection C { get; }
 
             /// <summary>Processes received transport bytes (TLS; DTLS splits datagrams into records first).</summary>
             public virtual void ProcessInput(byte[] data, int offset, int count) => throw new NotSupportedException();

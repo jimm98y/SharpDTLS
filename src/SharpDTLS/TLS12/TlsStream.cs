@@ -19,23 +19,23 @@ namespace SharpDTLS.TLS12
     {
         private readonly object _sync = new();
         private readonly Queue<byte[]> _received = new();
-        private readonly Func<DtlsConnectionBase> _connection;
+        private readonly Func<TlsConnectionBase> _connection;
         private byte[] _current;
         private int _currentOffset;
         private bool _ended;
         private Exception _error;
         private TaskCompletionSource<bool> _dataAvailable = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        private TlsStream(Func<DtlsConnectionBase> connection) => _connection = connection;
+        private TlsStream(Func<TlsConnectionBase> connection) => _connection = connection;
 
         /// <summary>
-        /// The connection carrying the stream: a TLS 1.0-1.2 (<see cref="Dtls12Connection"/>) or TLS 1.3
-        /// (<see cref="Dtls13Connection"/>) engine, with its certificates, ALPN and exporter.
+        /// The connection carrying the stream: a TLS 1.0-1.2 (<see cref="Tls12Connection"/>) or TLS 1.3
+        /// (<see cref="Tls13Connection"/>) engine, with its certificates, ALPN and exporter.
         /// </summary>
-        public DtlsConnectionBase Connection => _connection();
+        public TlsConnectionBase Connection => _connection();
 
         /// <summary>The negotiated TLS version.</summary>
-        public ushort NegotiatedVersion => Connection is Dtls12Connection tls12 ? tls12.NegotiatedVersion : TlsVersion.Tls13;
+        public ushort NegotiatedVersion => Connection is Tls12Connection tls12 ? tls12.NegotiatedVersion : TlsVersion.Tls13;
 
         /// <summary>Connects as a client over <paramref name="inner"/> (e.g. a NetworkStream) and completes the handshake.</summary>
         public static async Task<TlsStream> ConnectAsync(Stream inner, Action<TlsClient> configure = null, CancellationToken cancellationToken = default)
@@ -65,15 +65,15 @@ namespace SharpDTLS.TLS12
         public static Task<TlsStream> AcceptAsync(Tls12Server server, Stream inner, CancellationToken cancellationToken = default)
             => Accepted(server.Accept(inner), cancellationToken);
 
-        private static async Task<TlsStream> Accepted(DtlsConnectionBase connection, CancellationToken cancellationToken)
+        private static async Task<TlsStream> Accepted(TlsConnectionBase connection, CancellationToken cancellationToken)
         {
             var stream = new TlsStream(() => connection);
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             EventHandler<EventArgs> finished = (_, _) => done.TrySetResult(true);
-            if (connection is Dtls12ServerConnection tls12)
+            if (connection is Tls12ServerConnection tls12)
                 tls12.HandshakeFinished += finished;
             else
-                ((Dtls13ServerConnection)connection).HandshakeFinished += finished;
+                ((Tls13ServerConnection)connection).HandshakeFinished += finished;
             connection.ApplicationDataReceived += (_, data) => stream.Signal(() => stream._received.Enqueue(data));
             connection.Closed += (_, _) => { stream.Signal(() => stream._ended = true); done.TrySetException(new IOException("The connection closed during the TLS handshake.")); };
             connection.Failed += (_, ex) => { stream.Signal(() => stream._error = ex); done.TrySetException(new IOException("The TLS handshake failed: " + ex.Message, ex)); };

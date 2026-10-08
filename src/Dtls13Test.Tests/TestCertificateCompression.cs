@@ -21,7 +21,7 @@ namespace Dtls13Test.Tests
         private static readonly Lazy<TestPki> _pki = new(() => new TestPki("Compression"));
         private static TestPki Pki => _pki.Value;
 
-        private sealed record Outcome(Exception Error, Dtls13Client Client, Dtls13ServerConnection Server, int ServerBytes);
+        private sealed record Outcome(Exception Error, Dtls13Client Client, Tls13ServerConnection Server, int ServerBytes);
 
         private static Outcome Run(IList<ushort> clientAlgorithms, IList<ushort> serverAlgorithms, bool clientAuth = false)
         {

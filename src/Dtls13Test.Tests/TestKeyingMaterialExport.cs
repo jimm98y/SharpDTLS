@@ -157,7 +157,7 @@ namespace Dtls13Test.Tests
 
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
             var server = new Dtls13Server(transport);
-            var handshake = new TaskCompletionSource<Dtls13ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var handshake = new TaskCompletionSource<Tls13ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
             server.HandshakeFinished += (_, e) => handshake.TrySetResult(((Dtls13ConnectionEventArgs)e).Connection);
 
             using var client = new OpenSslProcess($"client {transport.LocalEndpoint.Port} -cipher TLS13-CHACHA20-POLY1305-SHA256 -srtp SRTP_AEAD_AES_128_GCM:SRTP_AES128_CM_SHA1_80 -export EXPORTER-sharpdtls-test 32", dir, WolfSsl.Harness);

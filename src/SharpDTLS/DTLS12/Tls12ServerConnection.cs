@@ -11,8 +11,8 @@ using System.Security.Cryptography;
 
 namespace SharpDTLS.DTLS12
 {
-    /// <summary>Configuration shared by all associations of a DTLS 1.0/1.2 server.</summary>
-    public sealed class Dtls12ServerSettings
+    /// <summary>Configuration shared by all connections of a (D)TLS 1.0-1.2 server.</summary>
+    public sealed class Tls12ServerSettings
     {
         public AsymmetricCipherKeyPair KeyPair { get; set; }
         public X509Certificate Certificate { get; set; }
@@ -118,10 +118,10 @@ namespace SharpDTLS.DTLS12
     }
 
     /// <summary>
-    /// Server side of one DTLS 1.0/1.2 association, created once the ClientHello has passed the cookie
-    /// exchange (RFC 6347 §4.2.1).
+    /// Server side of one (D)TLS 1.0-1.2 connection: over datagrams created once the ClientHello has passed the
+    /// cookie exchange (RFC 6347 §4.2.1), over a stream reading the ClientHello itself.
     /// </summary>
-    public class Dtls12ServerConnection : Dtls12Connection
+    public class Tls12ServerConnection : Tls12Connection
     {
         private enum State
         {
@@ -133,7 +133,7 @@ namespace SharpDTLS.DTLS12
             Connected,
         }
 
-        private readonly Dtls12ServerSettings _settings;
+        private readonly Tls12ServerSettings _settings;
         private ITlsExtension _recordSizeResponse;
         private State _state = State.Start;
         private ClientHelloMessage _clientHello;
@@ -154,13 +154,13 @@ namespace SharpDTLS.DTLS12
 
         public event EventHandler<EventArgs> HandshakeFinished;
 
-        public Dtls12ServerConnection(Dtls12ServerSettings settings, EndPoint remoteEndPoint, Action<byte[]> send)
+        public Tls12ServerConnection(Tls12ServerSettings settings, EndPoint remoteEndPoint, Action<byte[]> send)
             : this(settings, remoteEndPoint, send, stream: false)
         {
         }
 
         /// <param name="stream">TLS over a reliable byte stream: the ClientHello arrives on it (no cookie exchange).</param>
-        internal Dtls12ServerConnection(Dtls12ServerSettings settings, EndPoint remoteEndPoint, Action<byte[]> send, bool stream)
+        internal Tls12ServerConnection(Tls12ServerSettings settings, EndPoint remoteEndPoint, Action<byte[]> send, bool stream)
             : base(isClient: false, send, stream)
         {
             _settings = settings;
@@ -340,9 +340,9 @@ namespace SharpDTLS.DTLS12
                 .Select(id => SharpDTLS.CipherSuites.TryGet(id, out var s) ? s : null)
                 .FirstOrDefault(s => s != null && s.IsUsableWith(version)
                     && (s.ServerCertificateType == CertificateKeyType.None
-                        || (serverKey != null && _serverCertificateType != null && Dtls12ClientConnection.KeyMatches(s.ServerCertificateType, serverKey)))
+                        || (serverKey != null && _serverCertificateType != null && Tls12ClientConnection.KeyMatches(s.ServerCertificateType, serverKey)))
                     && (!s.IsStaticKeyAgreement
-                        || (_serverCertificateType == CertificateType.X509 && Dtls12ClientConnection.SignedWith(_certificate, s.RequiredCertificateSigner)))
+                        || (_serverCertificateType == CertificateType.X509 && Tls12ClientConnection.SignedWith(_certificate, s.RequiredCertificateSigner)))
                     && (!s.RequiresPsk || _settings.PskIdentityResolver != null)
                     && (!s.RequiresSrp || (_settings.SrpVerifierProvider != null && ch.Extension<SrpExtension>() != null))
                     && (!s.RequiresPwd || (_settings.PwdCredentialProvider != null && EccPwd.HasUsername(ch, _settings.PwdProtectionKey)
@@ -414,7 +414,7 @@ namespace SharpDTLS.DTLS12
             UseExtendedMasterSecret = true;
             UseEncryptThenMac = session.EncryptThenMac;
             if (session.PeerCertificate != null)
-                _clientCertificate = Dtls12ClientConnection.ParseCertificate(session.PeerCertificate);
+                _clientCertificate = Tls12ClientConnection.ParseCertificate(session.PeerCertificate);
             return true;
         }
 
@@ -603,9 +603,9 @@ namespace SharpDTLS.DTLS12
             }
             else
             {
-                _clientCertificate = Dtls12ClientConnection.ParseCertificate(certificate.Chain[0]);
-                if (!Dtls12ClientConnection.CertificateTypeAccepted(_certificateRequest, _clientCertificate.GetPublicKey())
-                    && !(CipherSuite.IsStaticKeyAgreement && Dtls12ClientConnection.FixedTypeAccepted(_certificateRequest, _clientCertificate)))
+                _clientCertificate = Tls12ClientConnection.ParseCertificate(certificate.Chain[0]);
+                if (!Tls12ClientConnection.CertificateTypeAccepted(_certificateRequest, _clientCertificate.GetPublicKey())
+                    && !(CipherSuite.IsStaticKeyAgreement && Tls12ClientConnection.FixedTypeAccepted(_certificateRequest, _clientCertificate)))
                     throw new DtlsException(AlertDescription.UnsupportedCertificate, "Client certificate type was not requested.");
                 if (_settings.ClientCertificateValidator != null && !_settings.ClientCertificateValidator(_clientCertificate, certificate.Chain))
                     throw new DtlsException(AlertDescription.BadCertificate, "Client certificate was rejected.");
@@ -627,7 +627,7 @@ namespace SharpDTLS.DTLS12
             else
             {
                 var key = RawPublicKeys.Decode(spki);
-                if (!Dtls12ClientConnection.CertificateTypeAccepted(_certificateRequest, key))
+                if (!Tls12ClientConnection.CertificateTypeAccepted(_certificateRequest, key))
                     throw new DtlsException(AlertDescription.UnsupportedCertificate, "Client key type was not requested.");
                 if (_settings.ClientRawPublicKeyValidator != null && !_settings.ClientRawPublicKeyValidator(spki))
                     throw new DtlsException(AlertDescription.BadCertificate, "Client raw public key was rejected.");

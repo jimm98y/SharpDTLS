@@ -19,8 +19,8 @@ namespace Dtls13Test.Tests
         {
             public ScriptedTransportPair Pair = new();
             public Dtls12ServerBase Server;
-            public Dtls12ClientConnection Client;
-            public Dtls12ServerConnection ServerConnection => Server.GetConnection(ScriptedTransportPair.ClientEndpoint);
+            public Tls12ClientConnection Client;
+            public Tls12ServerConnection ServerConnection => Server.GetConnection(ScriptedTransportPair.ClientEndpoint);
             public List<string> ServerReceived = new();
             public List<string> ClientReceived = new();
         }

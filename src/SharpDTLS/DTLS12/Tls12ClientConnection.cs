@@ -11,9 +11,10 @@ using System.Security.Cryptography;
 namespace SharpDTLS.DTLS12
 {
     /// <summary>
-    /// Client side of a DTLS 1.0/1.2 association (RFC 6347 §4.2, RFC 5246 §7.3).
+    /// Client side of a (D)TLS 1.0-1.2 connection (RFC 5246 §7.3, RFC 6347 §4.2): <see cref="Dtls12Client"/> over
+    /// datagrams, <see cref="SharpDTLS.TLS12.Tls12Client"/> over a stream.
     /// </summary>
-    public class Dtls12ClientConnection : Dtls12Connection
+    public class Tls12ClientConnection : Tls12Connection
     {
         private const int MaxHelloVerifyRequests = 3;
 
@@ -51,12 +52,12 @@ namespace SharpDTLS.DTLS12
         /// <summary>Raised when the server issues an RFC 5077 session ticket during the handshake.</summary>
         public event EventHandler<NewSessionTicketMessage> NewSessionTicketMessageReceived;
 
-        public Dtls12ClientConnection(Action<byte[]> send) : base(isClient: true, send)
+        public Tls12ClientConnection(Action<byte[]> send) : base(isClient: true, send)
         {
         }
 
         /// <param name="stream">TLS over a reliable byte stream instead of DTLS over datagrams.</param>
-        protected Dtls12ClientConnection(Action<byte[]> send, bool stream) : base(isClient: true, send, stream)
+        protected Tls12ClientConnection(Action<byte[]> send, bool stream) : base(isClient: true, send, stream)
         {
         }
 

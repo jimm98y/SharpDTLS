@@ -224,7 +224,7 @@ namespace Dtls13Test.Tests
                 IntermediateCertificates = new[] { Pki.Intermediate.Cert }, RequireClientCertificate = true,
                 ClientCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }).ForClient(), ApplicationProtocols = new[] { "h2" },
             };
-            var established = new TaskCompletionSource<Dtls12ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var established = new TaskCompletionSource<Tls12ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
             tlsServer.HandshakeFinished += (_, c) => established.TrySetResult(c);
             tlsServer.Start(new IPEndPoint(IPAddress.Loopback, 0));
             using var openSslClient = new OpenSslProcess(

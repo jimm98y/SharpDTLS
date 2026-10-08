@@ -14,13 +14,13 @@ namespace SharpDTLS.TLS12
 {
     public class Tls12DataReceivedEventArgs : EventArgs
     {
-        public Tls12DataReceivedEventArgs(Dtls12ServerConnection connection, byte[] data)
+        public Tls12DataReceivedEventArgs(Tls12ServerConnection connection, byte[] data)
         {
             Connection = connection;
             Data = data;
         }
 
-        public Dtls12ServerConnection Connection { get; }
+        public Tls12ServerConnection Connection { get; }
         public byte[] Data { get; }
     }
 
@@ -30,7 +30,7 @@ namespace SharpDTLS.TLS12
     /// </summary>
     public class Tls12Server : Tls12ServerBase, IDisposable
     {
-        private readonly ConcurrentDictionary<Dtls12ServerConnection, Stream> _connections = new();
+        private readonly ConcurrentDictionary<Tls12ServerConnection, Stream> _connections = new();
         private TcpListener _listener;
 
         public Tls12Server()
@@ -48,11 +48,11 @@ namespace SharpDTLS.TLS12
         {
         }
 
-        public event EventHandler<Dtls12ServerConnection> HandshakeFinished;
+        public event EventHandler<Tls12ServerConnection> HandshakeFinished;
         public event EventHandler<Tls12DataReceivedEventArgs> ApplicationDataReceived;
-        public event EventHandler<Dtls12ServerConnection> ConnectionClosed;
+        public event EventHandler<Tls12ServerConnection> ConnectionClosed;
 
-        public IReadOnlyCollection<Dtls12ServerConnection> Connections => _connections.Keys.ToList();
+        public IReadOnlyCollection<Tls12ServerConnection> Connections => _connections.Keys.ToList();
 
         /// <summary>Set by <see cref="SharpDTLS.TLS13.TlsServer"/> while TLS 1.3 is also offered (RFC 8446 §4.1.3 downgrade sentinel).</summary>
         internal bool SignalTls13Downgrade { get => Settings.SignalTls13Downgrade; set => Settings.SignalTls13Downgrade = value; }
@@ -87,9 +87,9 @@ namespace SharpDTLS.TLS12
         }
 
         /// <summary>Serves a TLS connection on an already connected <paramref name="stream"/>.</summary>
-        public Dtls12ServerConnection Accept(Stream stream, EndPoint remoteEndPoint = null)
+        public Tls12ServerConnection Accept(Stream stream, EndPoint remoteEndPoint = null)
         {
-            var connection = new Dtls12ServerConnection(Settings, remoteEndPoint ?? new IPEndPoint(IPAddress.None, 0),
+            var connection = new Tls12ServerConnection(Settings, remoteEndPoint ?? new IPEndPoint(IPAddress.None, 0),
                 record => TlsStreamPump.Write(stream, record), stream: true);
             _connections[connection] = stream;
             connection.HandshakeFinished += (_, _) => HandshakeFinished?.Invoke(this, connection);

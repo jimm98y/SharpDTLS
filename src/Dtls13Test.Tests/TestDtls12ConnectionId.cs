@@ -25,7 +25,7 @@ namespace Dtls13Test.Tests
             public List<string> ServerReceived = new();
             public List<string> ClientReceived = new();
             public List<(EndPoint Old, EndPoint New)> AddressChanges = new();
-            public Dtls12ServerConnection Connection => Server.Connections.Single();
+            public Tls12ServerConnection Connection => Server.Connections.Single();
         }
 
         private static Run Connect(bool serverCids = true, bool clientCid = true, int clientCidLength = 0, ushort suite = 0xC02F,

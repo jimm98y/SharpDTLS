@@ -17,7 +17,7 @@ namespace Dtls13Test.Tests
     {
         private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
 
-        private static void Handshake(Dtls12ClientConnection client, Dtls12ServerBase server, Action begin)
+        private static void Handshake(Tls12ClientConnection client, Dtls12ServerBase server, Action begin)
         {
             var clientDone = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.HandshakeFinished += (_, _) => clientDone.TrySetResult(true);

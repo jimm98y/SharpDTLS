@@ -120,7 +120,7 @@ namespace Dtls13Test.Tests
                 Assert.IsTrue(Task.WhenAll(ClientDone.Task, ServerDone.Task).Wait(Timeout), "Handshake did not complete in time");
             }
 
-            public Dtls13ServerConnection ServerConnection => Server.GetConnection(ScriptedTransportPair.ClientEndpoint);
+            public Tls13ServerConnection ServerConnection => Server.GetConnection(ScriptedTransportPair.ClientEndpoint);
         }
 
         [DataRow((ushort)0x1301)]

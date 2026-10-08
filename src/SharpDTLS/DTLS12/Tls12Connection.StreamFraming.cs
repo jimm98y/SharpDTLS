@@ -4,7 +4,7 @@ using System.Collections.Generic;
 
 namespace SharpDTLS.DTLS12
 {
-    public abstract partial class Dtls12Connection
+    public abstract partial class Tls12Connection
     {
         /// <summary>
         /// TLS framing over a reliable byte stream (RFC 5246 §6.2): 5-byte record headers, an implicit 64-bit sequence
@@ -22,7 +22,7 @@ namespace SharpDTLS.DTLS12
             private ulong _readSequence, _writeSequence;
             private ushort _readEpoch;
 
-            public StreamFraming(Dtls12Connection connection) : base(connection) { }
+            public StreamFraming(Tls12Connection connection) : base(connection) { }
 
             public override bool IsDatagram => false;
 

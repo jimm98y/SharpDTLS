@@ -28,8 +28,8 @@ namespace Dtls13Test.Tests
         private sealed class Endpoints
         {
             public ScriptedTransportPair Pair;
-            public DtlsConnectionBase Client;
-            public DtlsConnectionBase Server;
+            public TlsConnectionBase Client;
+            public TlsConnectionBase Server;
             public readonly List<byte[]> ClientReceived = new();
             public readonly List<byte[]> ServerReceived = new();
         }
@@ -38,7 +38,7 @@ namespace Dtls13Test.Tests
         {
             var result = new Endpoints { Pair = new ScriptedTransportPair() };
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            Func<DtlsConnectionBase> serverConnection;
+            Func<TlsConnectionBase> serverConnection;
             if (version == 12)
             {
                 var server = new Dtls12Server(result.Pair.Server) { RecordSizeLimit = serverLimit };
@@ -130,7 +130,7 @@ namespace Dtls13Test.Tests
         {
             var e = Connect(version, clientLimit: 1000, clientMfl: 512);
             Assert.AreEqual(1000, e.Server.MaxApplicationDataSize);
-            Assert.AreEqual(DtlsConnectionBase.MaxRecordPayload, e.Client.MaxApplicationDataSize);
+            Assert.AreEqual(TlsConnectionBase.MaxRecordPayload, e.Client.MaxApplicationDataSize);
             Exchange(e, 4000, 1000);
         }
 
@@ -155,7 +155,7 @@ namespace Dtls13Test.Tests
             e.Server.Failed += (_, ex) => failed.TrySetResult(ex);
 
             // A misbehaving client that ignores the server's limit.
-            typeof(DtlsConnectionBase).GetProperty("PeerRecordLimit", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(e.Client, 16384);
+            typeof(TlsConnectionBase).GetProperty("PeerRecordLimit", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(e.Client, 16384);
             e.Client.SendApplicationData(new byte[101]);
             Assert.IsTrue(failed.Task.Wait(Timeout));
             Assert.AreEqual(AlertDescription.RecordOverflow, ((DtlsException)failed.Task.Result).Alert);
@@ -319,7 +319,7 @@ namespace Dtls13Test.Tests
                 bcServer.IsFaulted ? bcServer.Exception.GetBaseException().Message : "");
             client.SendApplicationData(new byte[1000]); // within the test transport's 1500-byte datagrams
             Assert.IsTrue(received.Task.Wait(Timeout), bcServer.IsFaulted ? bcServer.Exception.GetBaseException().ToString() : "no reply");
-            Assert.AreEqual(DtlsConnectionBase.MaxRecordPayload, client.MaxApplicationDataSize);
+            Assert.AreEqual(TlsConnectionBase.MaxRecordPayload, client.MaxApplicationDataSize);
             Assert.IsGreaterThan(256, received.Task.Result);
         }
     }

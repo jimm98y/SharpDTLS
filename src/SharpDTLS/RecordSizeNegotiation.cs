@@ -9,7 +9,7 @@ namespace SharpDTLS
     /// </summary>
     internal static class RecordSizeNegotiation
     {
-        private const int Max = DtlsConnectionBase.MaxRecordPayload;
+        private const int Max = TlsConnectionBase.MaxRecordPayload;
 
         public static void Validate(int? recordSizeLimit, int? maxFragmentLength)
         {

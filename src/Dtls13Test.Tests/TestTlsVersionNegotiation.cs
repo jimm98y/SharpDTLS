@@ -27,7 +27,7 @@ namespace Dtls13Test.Tests
             return server;
         }
 
-        private static DtlsConnectionBase WaitForConnection(TlsServer server)
+        private static TlsConnectionBase WaitForConnection(TlsServer server)
         {
             Assert.IsTrue(SpinWait.SpinUntil(() => server.Connections.Any(c => c.IsHandshakeComplete), Timeout));
             return server.Connections.First(c => c.IsHandshakeComplete);
@@ -38,12 +38,12 @@ namespace Dtls13Test.Tests
         {
             using var server = Start();
             var tls13 = TestTls13.Connect(server.LocalEndpoint);
-            Assert.IsInstanceOfType<Dtls13ServerConnection>(WaitForConnection(server));
+            Assert.IsInstanceOfType<Tls13ServerConnection>(WaitForConnection(server));
             tls13.Close();
             Assert.IsTrue(SpinWait.SpinUntil(() => server.Connections.Count == 0, Timeout));
 
             var tls12 = TestTls12.Connect(server.LocalEndpoint);
-            var connection = (Dtls12ServerConnection)WaitForConnection(server);
+            var connection = (Tls12ServerConnection)WaitForConnection(server);
             Assert.AreEqual(TlsVersion.Tls12, tls12.NegotiatedVersion);
             CollectionAssert.AreEqual(Downgrade12, connection.ServerRandomBytes.AsSpan(24).ToArray(), "TLS 1.2 from a TLS 1.3 server carries the sentinel");
         }
@@ -53,7 +53,7 @@ namespace Dtls13Test.Tests
         {
             using var server = Start(s => s.MaximumVersion = TlsVersion.Tls12);
             TestTls12.Connect(server.LocalEndpoint);
-            var connection = (Dtls12ServerConnection)WaitForConnection(server);
+            var connection = (Tls12ServerConnection)WaitForConnection(server);
             CollectionAssert.AreNotEqual(Downgrade12, connection.ServerRandomBytes.AsSpan(24).ToArray());
 
             var tcp = new System.Net.Sockets.TcpClient();

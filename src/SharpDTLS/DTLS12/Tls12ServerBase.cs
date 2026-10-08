@@ -17,7 +17,7 @@ namespace SharpDTLS.DTLS12
             if (certificate != null && keyPair == null)
                 throw new ArgumentException("A certificate needs its key pair.");
 
-            Settings = new Dtls12ServerSettings
+            Settings = new Tls12ServerSettings
             {
                 KeyPair = keyPair,
                 Certificate = certificate,
@@ -26,7 +26,7 @@ namespace SharpDTLS.DTLS12
             };
         }
 
-        protected Dtls12ServerSettings Settings { get; }
+        protected Tls12ServerSettings Settings { get; }
 
         public bool RequireClientCertificate { get => Settings.RequireClientCertificate; set => Settings.RequireClientCertificate = value; }
 

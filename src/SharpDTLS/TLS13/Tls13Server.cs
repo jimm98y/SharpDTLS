@@ -16,13 +16,13 @@ namespace SharpDTLS.TLS13
 {
     public class Tls13DataReceivedEventArgs : EventArgs
     {
-        public Tls13DataReceivedEventArgs(Dtls13ServerConnection connection, byte[] data)
+        public Tls13DataReceivedEventArgs(Tls13ServerConnection connection, byte[] data)
         {
             Connection = connection;
             Data = data;
         }
 
-        public Dtls13ServerConnection Connection { get; }
+        public Tls13ServerConnection Connection { get; }
         public byte[] Data { get; }
     }
 
@@ -34,7 +34,7 @@ namespace SharpDTLS.TLS13
     /// </summary>
     public class Tls13Server : Tls13ServerBase, IDisposable
     {
-        private readonly ConcurrentDictionary<Dtls13ServerConnection, Stream> _connections = new();
+        private readonly ConcurrentDictionary<Tls13ServerConnection, Stream> _connections = new();
         private TcpListener _listener;
 
         public Tls13Server()
@@ -52,15 +52,15 @@ namespace SharpDTLS.TLS13
         {
         }
 
-        public event EventHandler<Dtls13ServerConnection> HandshakeFinished;
+        public event EventHandler<Tls13ServerConnection> HandshakeFinished;
         public event EventHandler<Tls13DataReceivedEventArgs> ApplicationDataReceived;
         public event EventHandler<KeyUpdateDatagram> KeyUpdateReceived;
-        public event EventHandler<Dtls13ServerConnection> ConnectionClosed;
+        public event EventHandler<Tls13ServerConnection> ConnectionClosed;
 
         /// <summary>0-RTT data accepted before the handshake completes (see MaxEarlyDataSize); it may be a replay.</summary>
         public event EventHandler<Tls13DataReceivedEventArgs> EarlyDataReceived;
 
-        public IReadOnlyCollection<Dtls13ServerConnection> Connections => _connections.Keys.ToList();
+        public IReadOnlyCollection<Tls13ServerConnection> Connections => _connections.Keys.ToList();
 
         /// <summary>The address the listener is bound to, once started.</summary>
         public IPEndPoint LocalEndpoint => (IPEndPoint)_listener?.LocalEndpoint;
@@ -92,9 +92,9 @@ namespace SharpDTLS.TLS13
         }
 
         /// <summary>Serves a TLS 1.3 connection on an already connected <paramref name="stream"/>.</summary>
-        public Dtls13ServerConnection Accept(Stream stream, EndPoint remoteEndPoint = null)
+        public Tls13ServerConnection Accept(Stream stream, EndPoint remoteEndPoint = null)
         {
-            var connection = new Dtls13ServerConnection(this, remoteEndPoint ?? new IPEndPoint(IPAddress.Loopback, 0),
+            var connection = new Tls13ServerConnection(this, remoteEndPoint ?? new IPEndPoint(IPAddress.Loopback, 0),
                 record => TlsStreamPump.Write(stream, record));
             _connections[connection] = stream;
             TlsStreamPump.Start(stream, connection);
@@ -110,17 +110,17 @@ namespace SharpDTLS.TLS13
 
         // ── Callbacks from connections ───────────────────────────────────────────────────────
 
-        internal override void OnConnectionEstablished(Dtls13ServerConnection connection) => HandshakeFinished?.Invoke(this, connection);
+        internal override void OnConnectionEstablished(Tls13ServerConnection connection) => HandshakeFinished?.Invoke(this, connection);
 
-        internal override void OnApplicationData(Dtls13ServerConnection connection, byte[] data)
+        internal override void OnApplicationData(Tls13ServerConnection connection, byte[] data)
             => ApplicationDataReceived?.Invoke(this, new Tls13DataReceivedEventArgs(connection, data));
 
-        internal override void OnEarlyData(Dtls13ServerConnection connection, byte[] data)
+        internal override void OnEarlyData(Tls13ServerConnection connection, byte[] data)
             => EarlyDataReceived?.Invoke(this, new Tls13DataReceivedEventArgs(connection, data));
 
         internal override void OnKeyUpdate(KeyUpdateDatagram keyUpdate) => KeyUpdateReceived?.Invoke(this, keyUpdate);
 
-        internal override void OnConnectionClosed(Dtls13ServerConnection connection)
+        internal override void OnConnectionClosed(Tls13ServerConnection connection)
         {
             if (_connections.TryRemove(connection, out var stream))
                 stream.Dispose();

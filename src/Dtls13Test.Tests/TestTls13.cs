@@ -118,7 +118,7 @@ namespace Dtls13Test.Tests
             OpenSsl.RequireOpenSsl();
             string dir = OpenSsl.NewTempDirectory();
             using var server = new Tls13Server() { CipherSuites = new List<ushort> { suite } };
-            var received = new TaskCompletionSource<(Dtls13ServerConnection, string)>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var received = new TaskCompletionSource<(Tls13ServerConnection, string)>(TaskCreationOptions.RunContinuationsAsynchronously);
             server.ApplicationDataReceived += (_, e) => received.TrySetResult((e.Connection, Encoding.UTF8.GetString(e.Data)));
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
 

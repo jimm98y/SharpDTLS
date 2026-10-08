@@ -239,10 +239,10 @@ namespace SharpDTLS.DTLS13
 
         // ── Callbacks from connections ───────────────────────────────────────────────────────
 
-        internal abstract void OnConnectionEstablished(Dtls13ServerConnection connection);
-        internal abstract void OnApplicationData(Dtls13ServerConnection connection, byte[] data);
-        internal abstract void OnEarlyData(Dtls13ServerConnection connection, byte[] data);
+        internal abstract void OnConnectionEstablished(Tls13ServerConnection connection);
+        internal abstract void OnApplicationData(Tls13ServerConnection connection, byte[] data);
+        internal abstract void OnEarlyData(Tls13ServerConnection connection, byte[] data);
         internal abstract void OnKeyUpdate(KeyUpdateDatagram keyUpdate);
-        internal abstract void OnConnectionClosed(Dtls13ServerConnection connection);
+        internal abstract void OnConnectionClosed(Tls13ServerConnection connection);
     }
 }

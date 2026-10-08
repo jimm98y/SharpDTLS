@@ -38,15 +38,15 @@ namespace Dtls13Test.Tests
             public AsymmetricCipherKeyPair ClientKey;
         }
 
-        private sealed record Outcome(Exception ClientError, Exception ServerError, DtlsConnectionBase Client, DtlsConnectionBase Server);
+        private sealed record Outcome(Exception ClientError, Exception ServerError, TlsConnectionBase Client, TlsConnectionBase Server);
 
         private static Outcome Run(int version, Options o)
         {
             var pair = new ScriptedTransportPair();
             var done = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
             var lateFailure = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
-            DtlsConnectionBase client;
-            Func<DtlsConnectionBase> server;
+            TlsConnectionBase client;
+            Func<TlsConnectionBase> server;
             if (version == 12)
             {
                 var s = new Dtls12Server(pair.Server, o.ServerKey, o.ServerCertificate)
@@ -88,14 +88,14 @@ namespace Dtls13Test.Tests
             return new Outcome(error, null, client, server());
         }
 
-        private static byte[] ServerKeyOf(DtlsConnectionBase client)
+        private static byte[] ServerKeyOf(TlsConnectionBase client)
             => client is Dtls12Client c12 ? c12.ServerRawPublicKey : ((Dtls13Client)client).ServerRawPublicKey;
 
-        private static CertificateType ServerTypeOf(DtlsConnectionBase client)
+        private static CertificateType ServerTypeOf(TlsConnectionBase client)
             => client is Dtls12Client c12 ? c12.ServerCertificateType : ((Dtls13Client)client).ServerCertificateType;
 
-        private static byte[] ClientKeyOf(DtlsConnectionBase server)
-            => server is Dtls12ServerConnection s12 ? s12.ClientRawPublicKey : ((Dtls13ServerConnection)server).ClientRawPublicKey;
+        private static byte[] ClientKeyOf(TlsConnectionBase server)
+            => server is Tls12ServerConnection s12 ? s12.ClientRawPublicKey : ((Tls13ServerConnection)server).ClientRawPublicKey;
 
         private static AlertDescription? Alert(Exception error) => (error as DtlsException)?.Alert;
 

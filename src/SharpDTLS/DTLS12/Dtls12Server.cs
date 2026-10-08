@@ -49,13 +49,13 @@ namespace SharpDTLS.DTLS12
         {
         }
 
-        protected override void OnConnectionEstablished(Dtls12ServerConnection connection)
+        protected override void OnConnectionEstablished(Tls12ServerConnection connection)
             => HandshakeFinished?.Invoke(this, EventArgs.Empty);
 
-        protected override void OnApplicationData(Dtls12ServerConnection connection, byte[] data)
+        protected override void OnApplicationData(Tls12ServerConnection connection, byte[] data)
             => ApplicationDataReceived?.Invoke(this, new Dtls12DataReceivedEventArgs(connection.RemoteEndPoint, data));
 
-        protected override void OnAlert(Dtls12ServerConnection connection, AlertDescription description)
+        protected override void OnAlert(Tls12ServerConnection connection, AlertDescription description)
             => AlertReceived?.Invoke(this, new AlertDatagram(description == AlertDescription.CloseNotify ? (byte)1 : (byte)2, (byte)description));
 
     }

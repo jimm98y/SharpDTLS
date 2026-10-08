@@ -220,7 +220,7 @@ namespace Dtls13Test.Tests
             return (chain, OpenSsl.WritePem(dir, "key.pem", leaf.Key.Private), OpenSsl.WritePem(dir, "root.pem", Pki.Root.Cert), good, revoked, leaf.Cert);
         }
 
-        private static Exception Handshake(DtlsConnectionBase client, Action<Action> onFinished, Action begin, string context)
+        private static Exception Handshake(TlsConnectionBase client, Action<Action> onFinished, Action begin, string context)
         {
             var done = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
             onFinished(() => done.TrySetResult(null));

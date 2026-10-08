@@ -38,7 +38,7 @@ namespace Dtls13Test.Tests
             return new CertificateCredentials(key, cert, new[] { pki.Intermediate.Cert });
         }
 
-        private static Exception Handshake(DtlsConnectionBase client, Action<Action> onFinished, Action begin)
+        private static Exception Handshake(TlsConnectionBase client, Action<Action> onFinished, Action begin)
         {
             var done = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
             onFinished(() => done.TrySetResult(null));
@@ -103,7 +103,7 @@ namespace Dtls13Test.Tests
             CertificateSelectionContext seen = null;
             Func<CertificateSelectionContext, CertificateCredentials> selector = context => { seen = context; return new[] { fromA, fromB }.First(context.IsIssuedByAcceptedAuthority); };
             var validator = new CertificateValidator(new[] { B.Root.Cert }).ForClient();
-            DtlsConnectionBase client;
+            TlsConnectionBase client;
             Func<Org.BouncyCastle.X509.X509Certificate> received;
             Exception error;
             if (version == 12)

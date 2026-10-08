@@ -147,7 +147,7 @@ namespace Dtls13Test.Tests
                 server.SrpVerifierProvider = TestCredentials.ResolveSrp;
             if (suite.RequiresPsk)
                 (server.PskIdentityResolver, server.PskIdentityHint) = (TestCredentials.ResolvePsk, TestCredentials.PskHint);
-            SharpDTLS.DTLS12.Dtls12ServerConnection connection = null;
+            SharpDTLS.DTLS12.Tls12ServerConnection connection = null;
             var request = new StringBuilder();
             server.ApplicationDataReceived += (_, e) =>
             {

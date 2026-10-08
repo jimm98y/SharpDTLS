@@ -22,7 +22,7 @@ namespace Dtls13Test.Tests
             public Dtls13Server Server;
             public Dtls13Client Client;
             public Exception ClientError;
-            public Dtls13ServerConnection ServerConnection => Server.GetConnection(ScriptedTransportPair.ClientEndpoint);
+            public Tls13ServerConnection ServerConnection => Server.GetConnection(ScriptedTransportPair.ClientEndpoint);
             public List<string> ServerReceived = new();
         }
 

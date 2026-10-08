@@ -28,7 +28,7 @@ namespace Dtls13Test.Tests
             public ScriptedTransportPair Pair = new();
             public Dtls13Server Server;
             public Dtls13Client Client;
-            public Dtls13ServerConnection Connection;
+            public Tls13ServerConnection Connection;
             public readonly List<string> ServerReceived = new();
             public readonly TaskCompletionSource<Exception> ServerFailed = new(TaskCreationOptions.RunContinuationsAsynchronously);
             public readonly TaskCompletionSource<Exception> ClientFailed = new(TaskCreationOptions.RunContinuationsAsynchronously);

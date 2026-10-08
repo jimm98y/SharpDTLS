@@ -153,7 +153,7 @@ namespace Dtls13Test.Tests
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
             var server = new Dtls13Server(transport) { ShouldSendHelloRetry = helloRetry, CipherSuites = new List<ushort> { SuiteIds[cipher] } };
 
-            var handshake = new TaskCompletionSource<Dtls13ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var handshake = new TaskCompletionSource<Tls13ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
             var received = new List<string>();
             server.HandshakeFinished += (_, e) => handshake.TrySetResult(((Dtls13ConnectionEventArgs)e).Connection);
             server.ApplicationDataReceived += (_, e) => { lock (received) received.Add(Encoding.UTF8.GetString(e.Data)); };
@@ -412,7 +412,7 @@ namespace Dtls13Test.Tests
 
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
             var server = new Dtls13Server(transport) { RequireClientCertificate = true };
-            var handshake = new TaskCompletionSource<Dtls13ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var handshake = new TaskCompletionSource<Tls13ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
             server.HandshakeFinished += (_, e) => handshake.TrySetResult(((Dtls13ConnectionEventArgs)e).Connection);
 
             using var client = new OpenSslProcess($"client {transport.LocalEndpoint.Port} -cert {certPath} -key {keyPath}", dir, WolfSsl.Harness);

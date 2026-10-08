@@ -16,14 +16,14 @@ namespace SharpDTLS.TLS13
 {
     public class TlsDataReceivedEventArgs : EventArgs
     {
-        public TlsDataReceivedEventArgs(DtlsConnectionBase connection, byte[] data)
+        public TlsDataReceivedEventArgs(TlsConnectionBase connection, byte[] data)
         {
             Connection = connection;
             Data = data;
         }
 
-        /// <summary>A <see cref="Dtls12ServerConnection"/> (TLS 1.0-1.2) or <see cref="Dtls13ServerConnection"/> (TLS 1.3).</summary>
-        public DtlsConnectionBase Connection { get; }
+        /// <summary>A <see cref="Tls12ServerConnection"/> (TLS 1.0-1.2) or <see cref="Tls13ServerConnection"/> (TLS 1.3).</summary>
+        public TlsConnectionBase Connection { get; }
         public byte[] Data { get; }
     }
 
@@ -106,12 +106,12 @@ namespace SharpDTLS.TLS13
             set { Tls12.ClientCertificateValidator = value; Tls13.ClientCertificateValidator = value; }
         }
 
-        public event EventHandler<DtlsConnectionBase> HandshakeFinished;
+        public event EventHandler<TlsConnectionBase> HandshakeFinished;
         public event EventHandler<TlsDataReceivedEventArgs> ApplicationDataReceived;
-        public event EventHandler<DtlsConnectionBase> ConnectionClosed;
+        public event EventHandler<TlsConnectionBase> ConnectionClosed;
 
-        public IReadOnlyCollection<DtlsConnectionBase> Connections
-            => Tls12.Connections.Cast<DtlsConnectionBase>().Concat(Tls13.Connections).ToList();
+        public IReadOnlyCollection<TlsConnectionBase> Connections
+            => Tls12.Connections.Cast<TlsConnectionBase>().Concat(Tls13.Connections).ToList();
 
         public IPEndPoint LocalEndpoint => (IPEndPoint)_listener?.LocalEndpoint;
 
@@ -144,7 +144,7 @@ namespace SharpDTLS.TLS13
         /// Reads the ClientHello on <paramref name="stream"/> and serves the connection with the engine for the version
         /// it offers. Null when the stream ends or does not start with a ClientHello.
         /// </summary>
-        public async Task<DtlsConnectionBase> AcceptAsync(Stream stream, EndPoint remoteEndPoint = null, CancellationToken cancellationToken = default)
+        public async Task<TlsConnectionBase> AcceptAsync(Stream stream, EndPoint remoteEndPoint = null, CancellationToken cancellationToken = default)
         {
             byte[] prefix;
             byte[] clientHello;

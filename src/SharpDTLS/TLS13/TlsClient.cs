@@ -20,7 +20,7 @@ namespace SharpDTLS.TLS13
     public sealed class TlsClient
     {
         private readonly Stream _stream;
-        private DtlsConnectionBase _active;
+        private TlsConnectionBase _active;
 
         public TlsClient(Stream stream, bool leaveStreamOpen = false)
         {
@@ -32,7 +32,7 @@ namespace SharpDTLS.TLS13
                 _active = Tls12;
                 Tls12.ProcessStreamData(pending, 0, pending.Length);
             };
-            foreach (DtlsConnectionBase engine in new DtlsConnectionBase[] { Tls12, Tls13 })
+            foreach (TlsConnectionBase engine in new TlsConnectionBase[] { Tls12, Tls13 })
             {
                 engine.ApplicationDataReceived += (_, data) => ApplicationDataReceived?.Invoke(this, data);
                 engine.Failed += (sender, ex) => { if (sender == _active) Failed?.Invoke(this, ex); };
@@ -62,7 +62,7 @@ namespace SharpDTLS.TLS13
         public ushort MaximumVersion { get; set; } = TlsVersion.Tls13;
 
         /// <summary>The engine carrying the connection: a <see cref="Tls12Client"/> or a <see cref="Tls13Client"/>.</summary>
-        public DtlsConnectionBase Connection => _active;
+        public TlsConnectionBase Connection => _active;
 
         /// <summary>The negotiated version once the handshake has completed, else 0.</summary>
         public ushort NegotiatedVersion => _active?.IsHandshakeComplete != true ? (ushort)0
@@ -70,7 +70,7 @@ namespace SharpDTLS.TLS13
 
         public bool IsHandshakeComplete => _active?.IsHandshakeComplete == true;
         public string ApplicationProtocol => _active?.ApplicationProtocol;
-        public int MaxApplicationDataSize => _active?.MaxApplicationDataSize ?? DtlsConnectionBase.MaxRecordPayload;
+        public int MaxApplicationDataSize => _active?.MaxApplicationDataSize ?? TlsConnectionBase.MaxRecordPayload;
 
         // ── Settings shared by both engines ──────────────────────────────────────────────────
 
@@ -153,20 +153,20 @@ namespace SharpDTLS.TLS13
                 int read;
                 while (!_active.IsClosed && (read = await _stream.ReadAsync(buffer).ConfigureAwait(false)) > 0)
                 {
-                    if (_active is Dtls12Connection tls12)
+                    if (_active is Tls12Connection tls12)
                         tls12.ProcessStreamData(buffer, 0, read);
                     else
-                        ((Dtls13Connection)_active).ProcessStreamData(buffer, 0, read);
+                        ((Tls13Connection)_active).ProcessStreamData(buffer, 0, read);
                 }
             }
             catch (Exception ex) when (ex is IOException or ObjectDisposedException)
             {
                 Debug.WriteLine($"[TLS] Read failed: {ex.Message}");
             }
-            if (_active is Dtls12Connection c12)
+            if (_active is Tls12Connection c12)
                 c12.OnTransportClosed();
             else
-                ((Dtls13Connection)_active).OnTransportClosed();
+                ((Tls13Connection)_active).OnTransportClosed();
         });
     }
 }

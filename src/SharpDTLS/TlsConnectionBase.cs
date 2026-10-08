@@ -8,11 +8,11 @@ using System.Threading;
 namespace SharpDTLS
 {
     /// <summary>
-    /// Version-independent machinery of one DTLS association: serialized processing under a lock,
-    /// an outbox flushed outside the lock (so synchronous transports cannot deadlock and event handlers
-    /// never observe half-finished state), handshake flights with retransmission, alerts and closure.
+    /// Version-independent machinery of one (D)TLS connection: serialized processing under a lock, an outbox
+    /// flushed outside the lock (so synchronous transports cannot deadlock and event handlers never observe
+    /// half-finished state), handshake flights (retransmitted over datagrams), alerts and closure.
     /// </summary>
-    public abstract class DtlsConnectionBase
+    public abstract class TlsConnectionBase
     {
         private readonly object _sync = new object();
         private readonly object _sendOrder = new object();
@@ -25,7 +25,7 @@ namespace SharpDTLS
         // retransmitted record needs a fresh record sequence number.
         private readonly List<Func<IEnumerable<byte[]>>> _flight = new List<Func<IEnumerable<byte[]>>>();
 
-        protected DtlsConnectionBase(bool isClient, Action<byte[]> send, string protocolName)
+        protected TlsConnectionBase(bool isClient, Action<byte[]> send, string protocolName)
         {
             IsClient = isClient;
             _send = send ?? throw new ArgumentNullException(nameof(send));

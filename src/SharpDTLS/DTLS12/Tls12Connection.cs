@@ -8,25 +8,26 @@ using System.Linq;
 namespace SharpDTLS.DTLS12
 {
     /// <summary>
-    /// Per-association DTLS 1.0/1.2 machinery shared by client and server (RFC 4347, RFC 6347): the
+    /// Per-connection (D)TLS 1.0-1.2 machinery shared by client and server (RFC 5246, RFC 6347): the
     /// version-dependent cryptography (PRF, transcript hash, Finished, exporter, signatures) over a
     /// <see cref="Framing"/> that owns the record layer and handshake message transport (for DTLS:
-    /// epochs, replay windows, message_seq, fragmentation, reassembly, reordering, retransmission).
+    /// epochs, replay windows, message_seq, fragmentation, reassembly, reordering, retransmission; for TLS:
+    /// stream records with implicit sequence numbers).
     /// </summary>
-    public abstract partial class Dtls12Connection : DtlsConnectionBase
+    public abstract partial class Tls12Connection : TlsConnectionBase
     {
         private readonly Framing _framing;
 
         /// <summary>Handshake messages as hashed: in DTLS with the full 12-byte header (RFC 6347 §4.2.6).</summary>
         private readonly List<byte[]> _transcript = new();
 
-        protected Dtls12Connection(bool isClient, Action<byte[]> send)
+        protected Tls12Connection(bool isClient, Action<byte[]> send)
             : this(isClient, send, stream: false)
         {
         }
 
         /// <param name="stream">TLS over a reliable byte stream instead of DTLS over datagrams.</param>
-        protected Dtls12Connection(bool isClient, Action<byte[]> send, bool stream)
+        protected Tls12Connection(bool isClient, Action<byte[]> send, bool stream)
             : base(isClient, send, stream ? "TLS12" : "DTLS12")
         {
             _framing = stream ? new StreamFraming(this) : new DatagramFraming(this);

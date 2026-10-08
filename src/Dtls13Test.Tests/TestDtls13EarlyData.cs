@@ -23,7 +23,7 @@ namespace Dtls13Test.Tests
             public Dtls13Client Client;
             public List<string> EarlyData = new();
             public List<string> ServerReceived = new();
-            public Dtls13ServerConnection ServerConnection => Server.GetConnection(ScriptedTransportPair.ClientEndpoint);
+            public Tls13ServerConnection ServerConnection => Server.GetConnection(ScriptedTransportPair.ClientEndpoint);
         }
 
         private static Run Connect(SessionTicketKeys keys, Dtls13SessionTicket ticket, byte[] earlyData, uint maxEarlyData = 1024, bool helloRetry = false)

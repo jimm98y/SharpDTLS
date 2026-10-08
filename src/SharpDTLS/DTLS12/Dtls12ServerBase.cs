@@ -12,12 +12,12 @@ namespace SharpDTLS.DTLS12
 {
     /// <summary>
     /// DTLS 1.0/1.2 server: answers new clients statelessly with HelloVerifyRequest (RFC 6347 §4.2.1)
-    /// and keeps one <see cref="Dtls12ServerConnection"/> per remote endpoint, each with its own lock.
+    /// and keeps one <see cref="Tls12ServerConnection"/> per remote endpoint, each with its own lock.
     /// </summary>
     public abstract class Dtls12ServerBase : Tls12ServerBase
     {
-        private readonly ConcurrentDictionary<string, Dtls12ServerConnection> _connections = new();
-        private readonly ConcurrentDictionary<string, Dtls12ServerConnection> _connectionsById = new();
+        private readonly ConcurrentDictionary<string, Tls12ServerConnection> _connections = new();
+        private readonly ConcurrentDictionary<string, Tls12ServerConnection> _connectionsById = new();
         private readonly ClientHelloReassembler _clientHelloReassembler = new();
 
         protected Dtls12ServerBase(IServerTransport serverTransport, AsymmetricCipherKeyPair keyPair, X509Certificate certificate, ushort version)
@@ -37,7 +37,7 @@ namespace SharpDTLS.DTLS12
 
         /// <summary>
         /// Negotiate connection IDs (RFC 9146) with clients that offer them, routing their records by CID so a client
-        /// can change address (see <see cref="Dtls12ServerConnection.PeerAddressChanged"/>).
+        /// can change address (see <see cref="Tls12ServerConnection.PeerAddressChanged"/>).
         /// </summary>
         public bool UseConnectionIds { get => Settings.UseConnectionIds; set => Settings.UseConnectionIds = value; }
 
@@ -50,12 +50,12 @@ namespace SharpDTLS.DTLS12
         /// </summary>
         public bool AutoUpdatePeerAddress { get => Settings.AutoUpdatePeerAddress; set => Settings.AutoUpdatePeerAddress = value; }
 
-        public IReadOnlyCollection<Dtls12ServerConnection> Connections => _connections.Values.ToList();
+        public IReadOnlyCollection<Tls12ServerConnection> Connections => _connections.Values.ToList();
 
-        public Dtls12ServerConnection GetConnection(EndPoint endpoint)
+        public Tls12ServerConnection GetConnection(EndPoint endpoint)
             => _connections.TryGetValue(endpoint.ToString(), out var connection) ? connection : null;
 
-        protected Dtls12ServerConnection RequireConnection(EndPoint endpoint)
+        protected Tls12ServerConnection RequireConnection(EndPoint endpoint)
             => GetConnection(endpoint) ?? throw new InvalidOperationException($"No DTLS connection for {endpoint}.");
 
         /// <summary>Sends application data to a peer whose handshake has completed.</summary>
@@ -72,10 +72,10 @@ namespace SharpDTLS.DTLS12
 
         // ── Hooks for the version-specific facades ───────────────────────────────────────────
 
-        protected virtual void OnConnectionEstablished(Dtls12ServerConnection connection) { }
-        protected virtual void OnApplicationData(Dtls12ServerConnection connection, byte[] data) { }
-        protected virtual void OnAlert(Dtls12ServerConnection connection, AlertDescription description) { }
-        protected virtual void OnConnectionClosed(Dtls12ServerConnection connection) { }
+        protected virtual void OnConnectionEstablished(Tls12ServerConnection connection) { }
+        protected virtual void OnApplicationData(Tls12ServerConnection connection, byte[] data) { }
+        protected virtual void OnAlert(Tls12ServerConnection connection, AlertDescription description) { }
+        protected virtual void OnConnectionClosed(Tls12ServerConnection connection) { }
 
         // ── Stateless ClientHello processing ─────────────────────────────────────────────────
 
@@ -138,8 +138,8 @@ namespace SharpDTLS.DTLS12
             }
 
             // Replies go to the connection's current address, which moves with connection IDs.
-            Dtls12ServerConnection connection = null;
-            connection = new Dtls12ServerConnection(Settings, endpoint, data => ServerTransport.Send(connection.RemoteEndPoint, data));
+            Tls12ServerConnection connection = null;
+            connection = new Tls12ServerConnection(Settings, endpoint, data => ServerTransport.Send(connection.RemoteEndPoint, data));
             if (!_connections.TryAdd(endpoint.ToString(), connection))
                 return;
 
@@ -148,14 +148,14 @@ namespace SharpDTLS.DTLS12
             connection.AlertReceived += (_, alert) => OnAlert(connection, alert);
             connection.PeerAddressConfirmed += (_, change) =>
             {
-                _connections.TryRemove(new KeyValuePair<string, Dtls12ServerConnection>(change.Old.ToString(), connection));
+                _connections.TryRemove(new KeyValuePair<string, Tls12ServerConnection>(change.Old.ToString(), connection));
                 _connections[change.New.ToString()] = connection;
             };
             connection.Closed += (_, _) =>
             {
-                _connections.TryRemove(new KeyValuePair<string, Dtls12ServerConnection>(connection.RemoteEndPoint.ToString(), connection));
+                _connections.TryRemove(new KeyValuePair<string, Tls12ServerConnection>(connection.RemoteEndPoint.ToString(), connection));
                 if (connection.ConnectionId != null)
-                    _connectionsById.TryRemove(new KeyValuePair<string, Dtls12ServerConnection>(Convert.ToHexString(connection.ConnectionId), connection));
+                    _connectionsById.TryRemove(new KeyValuePair<string, Tls12ServerConnection>(Convert.ToHexString(connection.ConnectionId), connection));
                 OnConnectionClosed(connection);
             };
 

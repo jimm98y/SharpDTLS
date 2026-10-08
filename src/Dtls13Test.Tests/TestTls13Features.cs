@@ -50,7 +50,7 @@ namespace Dtls13Test.Tests
         {
             using var server = new Tls13Server();
             var received = new System.Collections.Concurrent.ConcurrentQueue<string>();
-            Dtls13ServerConnection connection = null;
+            Tls13ServerConnection connection = null;
             server.ApplicationDataReceived += (_, e) => { connection = e.Connection; received.Enqueue(Encoding.UTF8.GetString(e.Data)); };
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
             var client = TestTls13.Connect(server.LocalEndpoint);
@@ -74,7 +74,7 @@ namespace Dtls13Test.Tests
         {
             var (key, cert) = Pki.Leaf(commonName: "tls13 client", usage: KeyPurposeID.id_kp_clientAuth);
             using var server = new Tls13Server { RequireClientCertificate = true, ClientCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }).ForClient() };
-            var established = new TaskCompletionSource<Dtls13ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var established = new TaskCompletionSource<Tls13ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
             server.HandshakeFinished += (_, c) => established.TrySetResult(c);
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
             TestTls13.Connect(server.LocalEndpoint, c => { (c.ClientCertificateKeyPair, c.ClientCertificate) = (key, cert); c.ClientIntermediateCertificates = new[] { Pki.Intermediate.Cert }; });
@@ -82,7 +82,7 @@ namespace Dtls13Test.Tests
             Assert.AreEqual(cert, established.Task.Result.ClientCertificate);
 
             server.RequireClientCertificate = false;
-            var later = new TaskCompletionSource<Dtls13ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var later = new TaskCompletionSource<Tls13ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
             server.HandshakeFinished += (_, c) => later.TrySetResult(c);
             TestTls13.Connect(server.LocalEndpoint, c =>
             {
@@ -172,7 +172,7 @@ namespace Dtls13Test.Tests
             Assert.IsTrue(second.WaitForOutput("Reused, TLSv1.3", Timeout), second.Output);
 
             // s_client's "keyup:req" sends a KeyUpdate asking for ours; data keeps flowing both ways under the new keys.
-            var received = new System.Collections.Concurrent.ConcurrentQueue<(Dtls13ServerConnection, string)>();
+            var received = new System.Collections.Concurrent.ConcurrentQueue<(Tls13ServerConnection, string)>();
             server.ApplicationDataReceived += (_, e) => received.Enqueue((e.Connection, Encoding.UTF8.GetString(e.Data)));
             second.WriteLine("keyup:req");
             Assert.IsTrue(second.WaitForOutput("KEYUPDATE", Timeout), second.Output);
@@ -192,7 +192,7 @@ namespace Dtls13Test.Tests
             string clientCertPath = OpenSsl.WritePem(f.Dir, "client.pem", clientCert);
             string clientKeyPath = OpenSsl.WritePem(f.Dir, "client-key.pem", clientKey.Private);
             using var server = new Tls13Server { RequireClientCertificate = true, ClientCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }).ForClient() };
-            var established = new TaskCompletionSource<Dtls13ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var established = new TaskCompletionSource<Tls13ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
             server.HandshakeFinished += (_, c) => established.TrySetResult(c);
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
             using (var client = new OpenSslProcess($"s_client -tls1_3 -connect 127.0.0.1:{server.LocalEndpoint.Port} -cert {clientCertPath} -key {clientKeyPath} -cert_chain {Path.Combine(f.Dir, "int.pem")}", f.Dir))

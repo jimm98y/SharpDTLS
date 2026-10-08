@@ -7,11 +7,11 @@ using System.Linq;
 namespace SharpDTLS.DTLS13
 {
     /// <summary>
-    /// Per-association DTLS 1.3 machinery shared by client and server: record layer, handshake
-    /// message ordering and reassembly, ACKs (RFC 9147 §7) and KeyUpdate (§8).
-    /// Subclasses implement the handshake state machine.
+    /// Per-connection (D)TLS 1.3 machinery shared by client and server: the DTLS 1.3 record layer with ACKs
+    /// (RFC 9147 §7) or TLS 1.3 records over a stream (RFC 8446 §5), handshake message ordering and reassembly,
+    /// and KeyUpdate. Subclasses implement the handshake state machine.
     /// </summary>
-    public abstract class Dtls13Connection : DtlsConnectionBase
+    public abstract class Tls13Connection : TlsConnectionBase
     {
         // Maximum handshake body bytes per protected record; keeps datagrams under ~1200 bytes
         // (5 B header + 16 B tag + 12 B handshake header + 1 B content type + body).
@@ -144,13 +144,13 @@ namespace SharpDTLS.DTLS13
         /// <summary>A protected record authenticated and passed the replay window (for peer address updates).</summary>
         protected virtual void OnRecordAuthenticated(ulong epoch, ulong sequenceNumber, bool withConnectionId) { }
 
-        protected Dtls13Connection(bool isClient, Action<byte[]> send)
+        protected Tls13Connection(bool isClient, Action<byte[]> send)
             : this(isClient, send, stream: false)
         {
         }
 
         /// <param name="stream">TLS 1.3 over a reliable byte stream (RFC 8446) instead of DTLS 1.3 over datagrams.</param>
-        protected Dtls13Connection(bool isClient, Action<byte[]> send, bool stream)
+        protected Tls13Connection(bool isClient, Action<byte[]> send, bool stream)
             : base(isClient, send, stream ? "TLS13" : "DTLS13")
         {
             IsDatagram = !stream;

@@ -13,19 +13,19 @@ namespace SharpDTLS.DTLS13
 {
     public class Dtls13ConnectionEventArgs : EventArgs
     {
-        public Dtls13ConnectionEventArgs(EndPoint remoteEndPoint, Dtls13ServerConnection connection)
+        public Dtls13ConnectionEventArgs(EndPoint remoteEndPoint, Tls13ServerConnection connection)
         {
             RemoteEndPoint = remoteEndPoint;
             Connection = connection;
         }
 
         public EndPoint RemoteEndPoint { get; }
-        public Dtls13ServerConnection Connection { get; }
+        public Tls13ServerConnection Connection { get; }
     }
 
     public class Dtls13DataReceivedEventArgs : Dtls13ConnectionEventArgs
     {
-        public Dtls13DataReceivedEventArgs(EndPoint remoteEndPoint, Dtls13ServerConnection connection, byte[] data)
+        public Dtls13DataReceivedEventArgs(EndPoint remoteEndPoint, Tls13ServerConnection connection, byte[] data)
             : base(remoteEndPoint, connection)
         {
             Data = data;
@@ -36,11 +36,11 @@ namespace SharpDTLS.DTLS13
 
     /// <summary>
     /// DTLS 1.3 server. Answers new clients statelessly (HelloRetryRequest with cookie) and keeps
-    /// one <see cref="Dtls13ServerConnection"/> per remote endpoint once the cookie has been verified.
+    /// one <see cref="Tls13ServerConnection"/> per remote endpoint once the cookie has been verified.
     /// </summary>
     public class Dtls13Server : Tls13ServerBase
     {
-        private readonly ConcurrentDictionary<string, Dtls13ServerConnection> _connections = new();
+        private readonly ConcurrentDictionary<string, Tls13ServerConnection> _connections = new();
         private readonly ClientHelloReassembler _clientHelloReassembler = new();
 
         public IServerTransport ServerTransport { get; }
@@ -66,14 +66,14 @@ namespace SharpDTLS.DTLS13
         /// </summary>
         public bool AutoUpdatePeerAddress { get; set; }
 
-        private readonly ConcurrentDictionary<string, Dtls13ServerConnection> _connectionsById = new();
+        private readonly ConcurrentDictionary<string, Tls13ServerConnection> _connectionsById = new();
 
         public TimeSpan InitialRetransmitTimeout { get; set; } = TimeSpan.FromSeconds(1);
 
         /// <summary>0-RTT data accepted before the handshake completes; it may be a replay.</summary>
         public event EventHandler<Dtls13DataReceivedEventArgs> EarlyDataReceived;
 
-        internal override void OnEarlyData(Dtls13ServerConnection connection, byte[] data)
+        internal override void OnEarlyData(Tls13ServerConnection connection, byte[] data)
             => EarlyDataReceived?.Invoke(this, new Dtls13DataReceivedEventArgs(connection.RemoteEndPoint, connection, data));
 
         public event EventHandler<EventArgs> HandshakeFinished;
@@ -99,9 +99,9 @@ namespace SharpDTLS.DTLS13
         {
         }
 
-        public IReadOnlyCollection<Dtls13ServerConnection> Connections => _connections.Values.ToList();
+        public IReadOnlyCollection<Tls13ServerConnection> Connections => _connections.Values.ToList();
 
-        public Dtls13ServerConnection GetConnection(EndPoint endpoint)
+        public Tls13ServerConnection GetConnection(EndPoint endpoint)
             => _connections.TryGetValue(endpoint.ToString(), out var connection) ? connection : null;
 
         public void SendApplicationData(EndPoint endpoint, byte[] data)
@@ -113,7 +113,7 @@ namespace SharpDTLS.DTLS13
         public void Close(EndPoint endpoint)
             => GetConnection(endpoint)?.Close();
 
-        private Dtls13ServerConnection RequireConnection(EndPoint endpoint)
+        private Tls13ServerConnection RequireConnection(EndPoint endpoint)
             => GetConnection(endpoint) ?? throw new InvalidOperationException($"No DTLS connection for {endpoint}.");
 
         private void ServerTransport_OnDataReceived(object sender, byte[] data)
@@ -184,7 +184,7 @@ namespace SharpDTLS.DTLS13
                 return;
             }
 
-            var connection = new Dtls13ServerConnection(this, endpoint);
+            var connection = new Tls13ServerConnection(this, endpoint);
             if (!_connections.TryAdd(endpoint.ToString(), connection))
             {
                 _connections[endpoint.ToString()].ProcessDatagram(datagram);
@@ -196,12 +196,12 @@ namespace SharpDTLS.DTLS13
                 _connectionsById[Convert.ToHexString(connection.ConnectionId)] = connection;
         }
 
-        internal void RegisterConnectionId(Dtls13ServerConnection connection, byte[] connectionId)
+        internal void RegisterConnectionId(Tls13ServerConnection connection, byte[] connectionId)
             => _connectionsById[Convert.ToHexString(connectionId)] = connection;
 
-        internal void OnPeerAddressConfirmed(Dtls13ServerConnection connection, EndPoint old)
+        internal void OnPeerAddressConfirmed(Tls13ServerConnection connection, EndPoint old)
         {
-            _connections.TryRemove(new KeyValuePair<string, Dtls13ServerConnection>(old.ToString(), connection));
+            _connections.TryRemove(new KeyValuePair<string, Tls13ServerConnection>(old.ToString(), connection));
             _connections[connection.RemoteEndPoint.ToString()] = connection;
         }
 
@@ -214,18 +214,18 @@ namespace SharpDTLS.DTLS13
 
         // ── Callbacks from connections ───────────────────────────────────────────────────────
 
-        internal override void OnConnectionEstablished(Dtls13ServerConnection connection)
+        internal override void OnConnectionEstablished(Tls13ServerConnection connection)
             => HandshakeFinished?.Invoke(this, new Dtls13ConnectionEventArgs(connection.RemoteEndPoint, connection));
 
-        internal override void OnApplicationData(Dtls13ServerConnection connection, byte[] data)
+        internal override void OnApplicationData(Tls13ServerConnection connection, byte[] data)
             => ApplicationDataReceived?.Invoke(this, new Dtls13DataReceivedEventArgs(connection.RemoteEndPoint, connection, data));
 
         internal override void OnKeyUpdate(KeyUpdateDatagram keyUpdate)
             => KeyUpdateReceived?.Invoke(this, keyUpdate);
 
-        internal override void OnConnectionClosed(Dtls13ServerConnection connection)
+        internal override void OnConnectionClosed(Tls13ServerConnection connection)
         {
-            _connections.TryRemove(new KeyValuePair<string, Dtls13ServerConnection>(connection.RemoteEndPoint.ToString(), connection));
+            _connections.TryRemove(new KeyValuePair<string, Tls13ServerConnection>(connection.RemoteEndPoint.ToString(), connection));
             foreach (var entry in _connectionsById.Where(e => e.Value == connection).ToList())
                 _connectionsById.TryRemove(entry);
             ConnectionClosed?.Invoke(this, new Dtls13ConnectionEventArgs(connection.RemoteEndPoint, connection));
@@ -233,9 +233,10 @@ namespace SharpDTLS.DTLS13
     }
 
     /// <summary>
-    /// Server side of one DTLS 1.3 association.
+    /// Server side of one (D)TLS 1.3 connection: from a <see cref="Dtls13Server"/> or a
+    /// <see cref="SharpDTLS.TLS13.Tls13Server"/>.
     /// </summary>
-    public class Dtls13ServerConnection : Dtls13Connection
+    public class Tls13ServerConnection : Tls13Connection
     {
         private enum State
         {
@@ -342,7 +343,7 @@ namespace SharpDTLS.DTLS13
         /// <summary>The certificate type we authenticated with (RFC 7250).</summary>
         public CertificateType ServerCertificateType => _serverCertificateType ?? CertificateType.X509;
 
-        internal Dtls13ServerConnection(Dtls13Server server, EndPoint remoteEndPoint)
+        internal Tls13ServerConnection(Dtls13Server server, EndPoint remoteEndPoint)
             : this(server, new PeerAddressTracker(remoteEndPoint))
         {
         }
@@ -351,7 +352,7 @@ namespace SharpDTLS.DTLS13
         public event EventHandler<EventArgs> HandshakeFinished;
 
         /// <summary>A TLS 1.3 connection over a stream: the ClientHello arrives on it.</summary>
-        internal Dtls13ServerConnection(Tls13ServerBase server, EndPoint remoteEndPoint, Action<byte[]> send)
+        internal Tls13ServerConnection(Tls13ServerBase server, EndPoint remoteEndPoint, Action<byte[]> send)
             : base(isClient: false, send, stream: true)
         {
             _server = server;
@@ -364,7 +365,7 @@ namespace SharpDTLS.DTLS13
         }
 
         // Replies go to the tracked address, which moves with connection IDs.
-        private Dtls13ServerConnection(Dtls13Server server, PeerAddressTracker address)
+        private Tls13ServerConnection(Dtls13Server server, PeerAddressTracker address)
             : base(isClient: false, send: data => server.ServerTransport.Send(address.Current, data))
         {
             _server = server;
@@ -1002,7 +1003,7 @@ namespace SharpDTLS.DTLS13
                     }
                     else
                     {
-                        auth.Certificate = SharpDTLS.DTLS12.Dtls12ClientConnection.ParseCertificate(certificate.Certificate);
+                        auth.Certificate = SharpDTLS.DTLS12.Tls12ClientConnection.ParseCertificate(certificate.Certificate);
                         if (_server.ClientCertificateValidator != null && !_server.ClientCertificateValidator(auth.Certificate, certificate.CertificateChain))
                             throw new DtlsException(AlertDescription.BadCertificate, "Client certificate was rejected.");
                         auth.PublicKey = auth.Certificate.GetPublicKey();
