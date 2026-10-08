@@ -147,6 +147,84 @@ namespace Dtls13Test.Tests
             Assert.AreEqual(0, r.Pair.ClientSent.Last()[0] & 0x10);
         }
 
+        // ── CID updates (RFC 9147 §9) ────────────────────────────────────────────────────────
+
+        [TestMethod]
+        public void RequestedSpareCid_IsUsedAndRoutedByTheServer()
+        {
+            var r = Connect(autoUpdate: true);
+            byte[] original = r.Client.PeerConnectionId;
+            r.Client.RequestConnectionIds(3);
+            Assert.IsTrue(SpinWait.SpinUntil(() => r.Client.SpareConnectionIdCount == 3, Timeout), "the server answered with three spares");
+
+            Assert.IsTrue(r.Client.UseSpareConnectionId());
+            byte[] spare = r.Client.PeerConnectionId;
+            CollectionAssert.AreNotEqual(original, spare);
+            Assert.AreEqual(2, r.Client.SpareConnectionIdCount);
+
+            // A new path with the new CID: the server finds the connection by it.
+            r.Pair.ClientAddress = Rebound;
+            int before = r.Pair.ClientSent.Count;
+            ClientSends(r, "new path");
+            CollectionAssert.AreEqual(spare, r.Pair.ClientSent[before].AsSpan(1, 8).ToArray());
+            ServerReplies(r, "seen");
+            Assert.AreEqual(Rebound, r.Pair.ServerSentTo.Last());
+        }
+
+        [TestMethod]
+        public void ImmediateCid_IsUsedAtOnce()
+        {
+            var r = Connect(clientCidLength: 4);
+            byte[] old = r.Connection.PeerConnectionId;
+            r.Client.IssueConnectionIds(1, immediate: true);
+            Assert.IsTrue(SpinWait.SpinUntil(() => r.Connection.PeerConnectionId != null && !r.Connection.PeerConnectionId.AsSpan().SequenceEqual(old), Timeout));
+            byte[] fresh = r.Connection.PeerConnectionId;
+
+            int before = r.Pair.ServerSent.Count;
+            ServerReplies(r, "to the new cid");
+            CollectionAssert.AreEqual(fresh, r.Pair.ServerSent[before].AsSpan(1, 4).ToArray());
+            ClientSends(r, "still fine");
+        }
+
+        [TestMethod]
+        public void TicketAndNewCids_AreBothDelivered()
+        {
+            // The ticket is in flight right after the handshake; issuing CIDs then must wait, not cancel it.
+            var r = Connect();
+            r.Connection.IssueConnectionIds(2);
+            Assert.IsTrue(SpinWait.SpinUntil(() => r.Client.SessionTicket != null && r.Client.SpareConnectionIdCount == 2, Timeout),
+                $"ticket: {r.Client.SessionTicket != null}, spares: {r.Client.SpareConnectionIdCount}");
+            r.Client.RequestConnectionIds(1);
+            Assert.IsTrue(SpinWait.SpinUntil(() => r.Client.SpareConnectionIdCount == 3, Timeout));
+        }
+
+        [TestMethod]
+        public void CidUpdates_NeedNegotiatedCids()
+        {
+            var r = Connect(serverCids: false);
+            Assert.ThrowsExactly<InvalidOperationException>(() => r.Client.RequestConnectionIds(1));
+            Assert.ThrowsExactly<InvalidOperationException>(() => r.Connection.IssueConnectionIds(1));
+        }
+
+        [TestMethod]
+        public void CidUpdateMessages_RoundTrip()
+        {
+            var message = new SharpDTLS.DTLS13.Messages.NewConnectionIdDatagram(new[] { new byte[] { 1, 2 }, new byte[] { 3 } }, 1) { SequenceNumber = 7 };
+            var parsed = new SharpDTLS.DTLS13.Messages.NewConnectionIdDatagram();
+            parsed.FromBytes(message.ToBytes());
+            Assert.AreEqual(7, parsed.SequenceNumber);
+            Assert.AreEqual((byte)1, parsed.Usage);
+            Assert.HasCount(2, parsed.ConnectionIds);
+            CollectionAssert.AreEqual(new byte[] { 1, 2 }, parsed.ConnectionIds[0]);
+            Assert.AreEqual(10, message.ToBytes()[0], "new_connection_id(10)");
+
+            var request = new SharpDTLS.DTLS13.Messages.RequestConnectionIdDatagram(5);
+            var parsedRequest = new SharpDTLS.DTLS13.Messages.RequestConnectionIdDatagram();
+            parsedRequest.FromBytes(request.ToBytes());
+            Assert.AreEqual((byte)5, parsedRequest.Count);
+            Assert.AreEqual(9, request.ToBytes()[0], "request_connection_id(9)");
+        }
+
         [TestMethod]
         public void Dtls12_ManualPolicy_KeepsTheOldAddressUntilConfirmed()
         {

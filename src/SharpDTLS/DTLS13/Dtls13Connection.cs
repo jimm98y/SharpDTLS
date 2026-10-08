@@ -54,6 +54,93 @@ namespace SharpDTLS.DTLS13
 
         protected override int ReceiveConnectionIdLength => ReadConnectionId?.Length ?? 0;
 
+        // CID updates (RFC 9147 §9): every CID we issued stays valid for receiving; the peer's spares wait in order.
+        private readonly HashSet<string> _issuedReadConnectionIds = new();
+        private readonly Queue<byte[]> _spareWriteConnectionIds = new();
+        private bool _connectionIdRequestOutstanding;
+        private const int MaxConnectionIds = 16;
+
+        /// <summary>Spare CIDs the peer gave us for sending, e.g. when moving to a new path.</summary>
+        public int SpareConnectionIdCount => _spareWriteConnectionIds.Count;
+
+        /// <summary>A CID we issued for receiving (the server registers it for routing).</summary>
+        protected virtual void OnConnectionIdIssued(byte[] connectionId) { }
+
+        private bool IsOurConnectionId(byte[] cid)
+            => cid != null && (cid.AsSpan().SequenceEqual(ReadConnectionId) || _issuedReadConnectionIds.Contains(Convert.ToHexString(cid)));
+
+        /// <summary>
+        /// Asks the peer for <paramref name="count"/> spare CIDs to send with (RFC 9147 §9). Needs a negotiated
+        /// non-empty peer CID; only one request may be outstanding.
+        /// </summary>
+        public void RequestConnectionIds(byte count) => Locked(() =>
+        {
+            if (!IsHandshakeComplete || PeerConnectionId == null)
+                throw new InvalidOperationException("No connection ID was negotiated for sending.");
+            if (_connectionIdRequestOutstanding)
+                throw new InvalidOperationException("A RequestConnectionId is still unanswered.");
+            _connectionIdRequestOutstanding = true;
+            SendPostHandshakeFlight(() => SendHandshake(new RequestConnectionIdDatagram(count), Session.WriteKeys, addToTranscript: false));
+        });
+
+        /// <summary>
+        /// Gives the peer <paramref name="count"/> new CIDs to send to us with: spares, or with
+        /// <paramref name="immediate"/> to be used at once (RFC 9147 §9).
+        /// </summary>
+        public void IssueConnectionIds(int count, bool immediate = false) => Locked(() =>
+        {
+            if (!IsHandshakeComplete || ConnectionId == null)
+                throw new InvalidOperationException("No connection ID was negotiated for receiving.");
+            SendNewConnectionIds(count, immediate);
+        });
+
+        /// <summary>Switches to the next spare CID for sending; false when there is none.</summary>
+        public bool UseSpareConnectionId()
+        {
+            bool switched = false;
+            Locked(() =>
+            {
+                if (_spareWriteConnectionIds.Count == 0)
+                    return;
+                WriteConnectionId = _spareWriteConnectionIds.Dequeue();
+                switched = true;
+            });
+            return switched;
+        }
+
+        private void SendNewConnectionIds(int count, bool immediate)
+        {
+            count = Math.Min(count, MaxConnectionIds - _issuedReadConnectionIds.Count);
+            if (count <= 0 && immediate)
+                throw new InvalidOperationException("Too many connection IDs issued.");
+            var cids = new List<byte[]>();
+            for (int i = 0; i < Math.Max(count, 0); i++)
+            {
+                byte[] cid = Dtls13CryptoUtils.GenerateRandom(ReadConnectionId.Length);
+                _issuedReadConnectionIds.Add(Convert.ToHexString(cid));
+                OnConnectionIdIssued(cid);
+                cids.Add(cid);
+            }
+            byte usage = immediate ? NewConnectionIdDatagram.CidImmediate : NewConnectionIdDatagram.CidSpare;
+            SendPostHandshakeFlight(() => SendHandshake(new NewConnectionIdDatagram(cids, usage), Session.WriteKeys, addToTranscript: false));
+        }
+
+        // Post-handshake messages that need an ACK go out one flight at a time, so a coarse ACK of one flight
+        // cannot end the retransmission of another (RFC 9147 §5.8).
+        private readonly Queue<Action> _postHandshakeFlights = new();
+
+        protected void SendPostHandshakeFlight(Action send)
+        {
+            if (IsRetransmissionArmed)
+            {
+                _postHandshakeFlights.Enqueue(send);
+                return;
+            }
+            BeginFlight();
+            send();
+            ArmRetransmission();
+        }
+
         /// <summary>A protected record authenticated and passed the replay window (for peer address updates).</summary>
         protected virtual void OnRecordAuthenticated(ulong epoch, ulong sequenceNumber, bool withConnectionId) { }
 
@@ -155,8 +242,7 @@ namespace SharpDTLS.DTLS13
             var unprotected = Dtls13RecordProtection.Unprotect(keys, fromClient: !IsClient, record, ReceiveConnectionIdLength);
 
             // With a CID negotiated it is in every record from the handshake epoch on, and must be ours (RFC 9147 §9).
-            if (ReadConnectionId is { Length: > 0 } && keys.Epoch >= 2
-                && (unprotected.ConnectionId == null || !unprotected.ConnectionId.AsSpan().SequenceEqual(ReadConnectionId)))
+            if (ReadConnectionId is { Length: > 0 } && keys.Epoch >= 2 && !IsOurConnectionId(unprotected.ConnectionId))
                 throw new DtlsRecordDiscardedException("Record without our connection ID");
             OnRecordAuthenticated(keys.Epoch, unprotected.SequenceNumber, unprotected.ConnectionId != null);
             byte[] inner = unprotected.InnerPlaintext;
@@ -264,6 +350,8 @@ namespace SharpDTLS.DTLS13
             IHandshakeDatagram datagram = message[0] switch
             {
                 0x04 => new NewSessionTicketDatagram(),
+                RequestConnectionIdDatagram.HandshakeType => new RequestConnectionIdDatagram(),
+                NewConnectionIdDatagram.HandshakeType => new NewConnectionIdDatagram(),
                 0x08 => new EncryptedExtensionsDatagram(),
                 0x0b => new CertificateDatagram(),
                 0x0d => new CertificateRequestDatagram(),
@@ -321,6 +409,37 @@ namespace SharpDTLS.DTLS13
                         StartKeyUpdate(requestUpdate: false);
                     break;
 
+                // RFC 9147 §9: both need negotiated CIDs; a violation is unexpected_message.
+                case NewConnectionIdDatagram newIds:
+                    if (PeerConnectionId == null)
+                        throw new DtlsException(AlertDescription.UnexpectedMessage, "NewConnectionId without a negotiated connection ID.");
+                    SendAck();
+                    if (newIds.Usage == NewConnectionIdDatagram.CidImmediate)
+                    {
+                        if (newIds.ConnectionIds.Count == 0)
+                            throw new DtlsException(AlertDescription.IllegalParameter, "cid_immediate without connection IDs.");
+                        WriteConnectionId = newIds.ConnectionIds[0];
+                        _spareWriteConnectionIds.Clear();
+                        foreach (byte[] cid in newIds.ConnectionIds.Skip(1))
+                            _spareWriteConnectionIds.Enqueue(cid);
+                    }
+                    else
+                    {
+                        foreach (byte[] cid in newIds.ConnectionIds.Where(c => c.Length > 0))
+                            if (_spareWriteConnectionIds.Count < MaxConnectionIds)
+                                _spareWriteConnectionIds.Enqueue(cid);
+                    }
+                    _connectionIdRequestOutstanding = false;
+                    break;
+
+                case RequestConnectionIdDatagram request:
+                    if (ConnectionId == null)
+                        throw new DtlsException(AlertDescription.UnexpectedMessage, "RequestConnectionId without a negotiated connection ID.");
+                    SendAck();
+                    // Excessive requests get fewer CIDs, possibly none (RFC 9147 §9).
+                    SendNewConnectionIds(request.Count, immediate: false);
+                    break;
+
                 default:
                     throw new DtlsException(AlertDescription.UnexpectedMessage, $"Unexpected post-handshake message 0x{message[0]:X2}");
             }
@@ -338,7 +457,15 @@ namespace SharpDTLS.DTLS13
             // Any ACK for our last flight completes it; partial ACKs are treated as complete, as
             // flights are always retransmitted in full.
             if (HasFlight && ack.Records.Any(r => _flightRecords.Contains(r)))
+            {
                 StopRetransmission();
+                if (IsHandshakeComplete && _postHandshakeFlights.Count > 0)
+                {
+                    BeginFlight();
+                    _postHandshakeFlights.Dequeue()();
+                    ArmRetransmission();
+                }
+            }
 
             if (_pendingKeyUpdateRecords != null && ack.Records.Any(r => _pendingKeyUpdateRecords.Contains(r)))
             {

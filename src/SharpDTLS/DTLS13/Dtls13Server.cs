@@ -305,6 +305,9 @@ namespace SharpDTLS.DTLS13
                 _connectionsById[Convert.ToHexString(connection.ConnectionId)] = connection;
         }
 
+        internal void RegisterConnectionId(Dtls13ServerConnection connection, byte[] connectionId)
+            => _connectionsById[Convert.ToHexString(connectionId)] = connection;
+
         internal void OnPeerAddressConfirmed(Dtls13ServerConnection connection, EndPoint old)
         {
             _connections.TryRemove(new KeyValuePair<string, Dtls13ServerConnection>(old.ToString(), connection));
@@ -354,8 +357,8 @@ namespace SharpDTLS.DTLS13
         internal void OnConnectionClosed(Dtls13ServerConnection connection)
         {
             _connections.TryRemove(new KeyValuePair<string, Dtls13ServerConnection>(connection.RemoteEndPoint.ToString(), connection));
-            if (connection.ConnectionId != null)
-                _connectionsById.TryRemove(new KeyValuePair<string, Dtls13ServerConnection>(Convert.ToHexString(connection.ConnectionId), connection));
+            foreach (var entry in _connectionsById.Where(e => e.Value == connection).ToList())
+                _connectionsById.TryRemove(entry);
             ConnectionClosed?.Invoke(this, new Dtls13ConnectionEventArgs(connection.RemoteEndPoint, connection));
         }
 
@@ -431,6 +434,8 @@ namespace SharpDTLS.DTLS13
             if (!old.Equals(address))
                 RaiseEvent(() => _server.OnPeerAddressConfirmed(this, old));
         });
+
+        protected override void OnConnectionIdIssued(byte[] connectionId) => _server.RegisterConnectionId(this, connectionId);
 
         protected override void OnRecordAuthenticated(ulong epoch, ulong sequenceNumber, bool withConnectionId)
         {
@@ -873,10 +878,8 @@ namespace SharpDTLS.DTLS13
             };
 
             // Retransmitted until the client ACKs it (RFC 9147 §5.8).
-            BeginFlight();
-            SendHandshake(new NewSessionTicketDatagram(state.Seal(keys), nonce, lifetime, ageAdd) { MaxEarlyDataSize = state.MaxEarlyDataSize },
-                Session.WriteKeys, addToTranscript: false);
-            ArmRetransmission();
+            SendPostHandshakeFlight(() => SendHandshake(new NewSessionTicketDatagram(state.Seal(keys), nonce, lifetime, ageAdd) { MaxEarlyDataSize = state.MaxEarlyDataSize },
+                Session.WriteKeys, addToTranscript: false));
         }
     }
 }
