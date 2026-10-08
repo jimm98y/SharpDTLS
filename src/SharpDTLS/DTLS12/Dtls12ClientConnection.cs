@@ -23,6 +23,7 @@ namespace SharpDTLS.DTLS12
             WaitServerHello,
             WaitCertificate,
             WaitServerKeyExchange,
+            WaitOptionalServerKeyExchange,
             WaitCertificateRequestOrDone,
             WaitServerHelloDone,
             WaitFinished,
@@ -65,6 +66,21 @@ namespace SharpDTLS.DTLS12
         /// <summary>The negotiated (EC)DHE group, or 0 (RSA key exchange, or custom DH parameters).</summary>
         public ushort NamedGroup => _keyExchange?.Group ?? 0;
 
+        /// <summary>PSK identity for the PSK cipher suites (RFC 4279); setting it enables those suites.</summary>
+        public byte[] PskIdentity { get; set; }
+
+        /// <summary>The pre-shared key that goes with <see cref="PskIdentity"/>.</summary>
+        public byte[] PskKey { get; set; }
+
+        /// <summary>
+        /// Alternative to <see cref="PskIdentity"/>/<see cref="PskKey"/>: maps the server's identity hint
+        /// (empty when none was sent) to an identity and key.
+        /// </summary>
+        public Func<byte[], (byte[] Identity, byte[] Key)> PskProvider { get; set; }
+
+        private Func<byte[], (byte[] Identity, byte[] Key)> EffectivePskProvider
+            => PskProvider ?? (PskIdentity != null && PskKey != null ? _ => (PskIdentity, PskKey) : null);
+
         /// <summary>Smallest finite-field Diffie-Hellman prime accepted from a server.</summary>
         public int MinimumDhPrimeBits { get; set; } = 1024;
 
@@ -84,8 +100,10 @@ namespace SharpDTLS.DTLS12
 
         private void SendClientHello(byte[] cookie)
         {
-            var offered = (CipherSuites ?? SharpDTLS.CipherSuites.DefaultFor(MinimumVersion, MaximumVersion))
-                .Where(id => SharpDTLS.CipherSuites.TryGet(id, out var s) && (s.IsUsableWith(MaximumVersion) || s.IsUsableWith(MinimumVersion)))
+            bool havePsk = EffectivePskProvider != null;
+            var offered = (CipherSuites ?? SharpDTLS.CipherSuites.DefaultFor(MinimumVersion, MaximumVersion, includePsk: havePsk))
+                .Where(id => SharpDTLS.CipherSuites.TryGet(id, out var s) && (s.IsUsableWith(MaximumVersion) || s.IsUsableWith(MinimumVersion))
+                             && (havePsk || !s.RequiresPsk))
                 .ToList();
             var offeredSuites = offered.Select(id => SharpDTLS.CipherSuites.Get(id)).ToList();
             if (offered.Count == 0)
@@ -101,7 +119,8 @@ namespace SharpDTLS.DTLS12
 
             // Supported groups: elliptic curves, plus the RFC 7919 FFDHE groups when DHE suites are offered.
             var groups = EcdheGroups.Supported.ToList();
-            if (offeredSuites.Any(s => s.KeyExchange is KeyExchangeAlgorithm.DHE_RSA or KeyExchangeAlgorithm.DHE_DSS))
+            if (offeredSuites.Any(s => s.KeyExchange is KeyExchangeAlgorithm.DHE_RSA or KeyExchangeAlgorithm.DHE_DSS
+                                      or KeyExchangeAlgorithm.DHE_PSK or KeyExchangeAlgorithm.PSK_DHE))
                 groups.AddRange(FfdheGroups.Supported);
             ch.Extensions.Add(new SupportedGroupsExtension(groups.ToArray()));
             ch.Extensions.Add(new EcPointFormatsExtension(new byte[] { 0 })); // uncompressed
@@ -148,16 +167,19 @@ namespace SharpDTLS.DTLS12
                     break;
 
                 case State.WaitServerKeyExchange when type == HandshakeType.ServerKeyExchange:
+                case State.WaitOptionalServerKeyExchange when type == HandshakeType.ServerKeyExchange:
                     OnServerKeyExchange(body, message);
                     break;
 
                 case State.WaitCertificateRequestOrDone when type == HandshakeType.CertificateRequest:
+                case State.WaitOptionalServerKeyExchange when type == HandshakeType.CertificateRequest:
                     _certificateRequest = CertificateRequestMessage.Decode(body, NegotiatedVersion);
                     AddToTranscript(message);
                     _state = State.WaitServerHelloDone;
                     break;
 
                 case State.WaitCertificateRequestOrDone when type == HandshakeType.ServerHelloDone:
+                case State.WaitOptionalServerKeyExchange when type == HandshakeType.ServerHelloDone:
                 case State.WaitServerHelloDone when type == HandshakeType.ServerHelloDone:
                     if (body.Length != 0)
                         throw new DtlsException(AlertDescription.DecodeError, "ServerHelloDone must be empty.");
@@ -233,8 +255,13 @@ namespace SharpDTLS.DTLS12
             CipherSuite = suite;
             ServerRandom = sh.Random;
             AddToTranscript(message);
-            _state = State.WaitCertificate;
             Debug.WriteLine($"{LogPrefix} ServerHello: {DtlsVersion.Name(NegotiatedVersion)}, {suite}");
+
+            // Suites authenticated by a pre-shared key alone send no Certificate.
+            if (suite.ServerCertificateType == CertificateKeyType.None)
+                CreateKeyExchange();
+            else
+                _state = State.WaitCertificate;
         }
 
         private void OnCertificate(byte[] body, byte[] message)
@@ -249,15 +276,26 @@ namespace SharpDTLS.DTLS12
             if (ServerCertificateValidator != null && !ServerCertificateValidator(_serverCertificate, certificate.Chain))
                 throw new DtlsException(AlertDescription.BadCertificate, "Server certificate was rejected.");
 
+            AddToTranscript(message);
+            CreateKeyExchange();
+        }
+
+        private void CreateKeyExchange()
+        {
             _keyExchange = KeyExchanges.CreateClient(CipherSuite, new ClientKeyExchangeContext
             {
                 ClientHelloVersion = _clientHello.ClientVersion,
-                ServerPublicKey = _serverCertificate.GetPublicKey(),
+                ServerPublicKey = _serverCertificate?.GetPublicKey(),
                 MinimumDhPrimeBits = MinimumDhPrimeBits,
+                PskProvider = EffectivePskProvider,
             });
 
-            AddToTranscript(message);
-            _state = _keyExchange.ExpectsServerKeyExchange ? State.WaitServerKeyExchange : State.WaitCertificateRequestOrDone;
+            _state = _keyExchange.ServerKeyExchange switch
+            {
+                ServerKeyExchangeRequirement.Required => State.WaitServerKeyExchange,
+                ServerKeyExchangeRequirement.Optional => State.WaitOptionalServerKeyExchange,
+                _ => State.WaitCertificateRequestOrDone,
+            };
         }
 
         private void OnServerKeyExchange(byte[] body, byte[] message)

@@ -31,6 +31,12 @@ namespace SharpDTLS.DTLS12
 
         public TimeSpan InitialRetransmitTimeout { get; set; } = TimeSpan.FromSeconds(1);
         public Action<string> KeyLogWriter { get; set; }
+
+        /// <summary>Optional psk_identity_hint sent to PSK clients (RFC 4279 §5.2).</summary>
+        public byte[] PskIdentityHint { get; set; }
+
+        /// <summary>Maps a client's PSK identity to its key (null for unknown identities); enables the PSK suites.</summary>
+        public Func<byte[], byte[]> PskIdentityResolver { get; set; }
     }
 
     /// <summary>
@@ -119,15 +125,23 @@ namespace SharpDTLS.DTLS12
             if (!ch.CompressionMethods.Contains((byte)0))
                 throw new DtlsException(AlertDescription.IllegalParameter, "Client does not offer null compression.");
 
-            var serverKey = _settings.KeyPair.Private;
+            var serverKey = _settings.KeyPair?.Private;
             var preference = _settings.CipherSuites ?? SharpDTLS.CipherSuites.All.Select(s => s.Id).ToList();
             CipherSuite = preference
                 .Where(id => ch.CipherSuites.Contains(id))
                 .Select(id => SharpDTLS.CipherSuites.TryGet(id, out var s) ? s : null)
-                .FirstOrDefault(s => s != null && s.IsUsableWith(version) && Dtls12ClientConnection.KeyMatches(s.ServerCertificateType, serverKey))
+                .FirstOrDefault(s => s != null && s.IsUsableWith(version)
+                    && (s.ServerCertificateType == CertificateKeyType.None || (serverKey != null && Dtls12ClientConnection.KeyMatches(s.ServerCertificateType, serverKey)))
+                    && (!s.RequiresPsk || _settings.PskIdentityResolver != null))
                 ?? throw new DtlsException(AlertDescription.HandshakeFailure, "No cipher suite in common.");
 
-            _keyExchange = KeyExchanges.CreateServer(CipherSuite, new ServerKeyExchangeContext { ClientHello = ch, ServerPrivateKey = serverKey });
+            _keyExchange = KeyExchanges.CreateServer(CipherSuite, new ServerKeyExchangeContext
+            {
+                ClientHello = ch,
+                ServerPrivateKey = serverKey,
+                PskIdentityHint = _settings.PskIdentityHint,
+                PskResolver = _settings.PskIdentityResolver,
+            });
 
             // RFC 5746: secure renegotiation is signalled by the extension or the SCSV.
             var renegotiationInfo = ch.Extension<RenegotiationInfoExtension>();
@@ -165,9 +179,13 @@ namespace SharpDTLS.DTLS12
                 sh.Extensions.Add(new ServerUseSrtpExtension(SelectedSrtpProtectionProfile.Value, ch.Extension<UseSrtpExtension>().MasterKeyIdentifier));
             SendHandshake(HandshakeType.ServerHello, sh.Encode());
 
-            var certificate = new CertificateMessage();
-            certificate.Chain.Add(_settings.Certificate.GetEncoded());
-            SendHandshake(HandshakeType.Certificate, certificate.Encode());
+            bool certificateBased = CipherSuite.ServerCertificateType != CertificateKeyType.None;
+            if (certificateBased)
+            {
+                var certificate = new CertificateMessage();
+                certificate.Chain.Add(_settings.Certificate.GetEncoded());
+                SendHandshake(HandshakeType.Certificate, certificate.Encode());
+            }
 
             byte[] serverParams = _keyExchange.CreateServerParams();
             if (serverParams != null)
@@ -184,7 +202,7 @@ namespace SharpDTLS.DTLS12
                 SendHandshake(HandshakeType.ServerKeyExchange, ske.ToArray());
             }
 
-            if (_settings.RequireClientCertificate)
+            if (_settings.RequireClientCertificate && certificateBased)
             {
                 _certificateRequest = new CertificateRequestMessage();
                 SendHandshake(HandshakeType.CertificateRequest, _certificateRequest.Encode(NegotiatedVersion));

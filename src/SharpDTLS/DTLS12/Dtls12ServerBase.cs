@@ -21,10 +21,13 @@ namespace SharpDTLS.DTLS12
 
         protected Dtls12ServerBase(IServerTransport serverTransport, AsymmetricCipherKeyPair keyPair, X509Certificate certificate, ushort version)
         {
+            if ((keyPair == null) != (certificate == null))
+                throw new ArgumentException("Pass both a key pair and a certificate, or neither (PSK-only server).");
+
             Settings = new Dtls12ServerSettings
             {
-                KeyPair = keyPair ?? throw new ArgumentNullException(nameof(keyPair)),
-                Certificate = certificate ?? throw new ArgumentNullException(nameof(certificate)),
+                KeyPair = keyPair,
+                Certificate = certificate,
                 MinimumVersion = version,
                 MaximumVersion = version,
             };
@@ -54,6 +57,12 @@ namespace SharpDTLS.DTLS12
             get => Settings.ClientCertificateValidator;
             set => Settings.ClientCertificateValidator = value;
         }
+
+        /// <summary>Optional psk_identity_hint sent to PSK clients (RFC 4279 §5.2).</summary>
+        public byte[] PskIdentityHint { get => Settings.PskIdentityHint; set => Settings.PskIdentityHint = value; }
+
+        /// <summary>Maps a client's PSK identity to its key (null for unknown identities); enables the PSK suites.</summary>
+        public Func<byte[], byte[]> PskIdentityResolver { get => Settings.PskIdentityResolver; set => Settings.PskIdentityResolver = value; }
 
         public IReadOnlyCollection<Dtls12ServerConnection> Connections => _connections.Values.ToList();
 

@@ -67,9 +67,12 @@ namespace Dtls13Test.Tests
             string certPath = OpenSsl.WritePem(dir, "cert.pem", certificate);
             string keyPath = OpenSsl.WritePem(dir, "key.pem", keyPair.Private);
             int port = OpenSsl.FreeUdpPort();
+            string credentials = suite.ServerCertificateType == CertificateKeyType.None ? "-nocert" : $"-cert {certPath} -key {keyPath}";
+            if (suite.RequiresPsk)
+                credentials += $" -psk {Convert.ToHexString(TestCredentials.PskKey)} -psk_identity {Encoding.ASCII.GetString(TestCredentials.PskIdentity)} -psk_hint {Encoding.ASCII.GetString(TestCredentials.PskHint)}";
 
             using var server = new OpenSslProcess(
-                $"s_server {versionFlag} {_openSsl.Value.Providers} -accept 127.0.0.1:{port} -cert {certPath} -key {keyPath} -cipher {openSslName}@SECLEVEL=0", dir);
+                $"s_server {versionFlag} {_openSsl.Value.Providers} -accept 127.0.0.1:{port} {credentials} -cipher {openSslName}@SECLEVEL=0", dir);
             Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), "s_server did not start:\n" + server.Output);
 
             using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
@@ -79,6 +82,11 @@ namespace Dtls13Test.Tests
                 MaximumVersion = version,
                 CipherSuites = new List<ushort> { id },
             };
+            if (suite.RequiresPsk)
+            {
+                client.PskIdentity = TestCredentials.PskIdentity;
+                client.PskKey = TestCredentials.PskKey;
+            }
             var handshake = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
@@ -109,11 +117,18 @@ namespace Dtls13Test.Tests
                 MinimumVersion = DtlsVersion.Dtls10,
                 CipherSuites = new List<ushort> { id },
             };
+            string psk = "";
+            if (suite.RequiresPsk)
+            {
+                server.PskIdentityResolver = TestCredentials.ResolvePsk;
+                server.PskIdentityHint = TestCredentials.PskHint;
+                psk = $" -psk {Convert.ToHexString(TestCredentials.PskKey)} -psk_identity {Encoding.ASCII.GetString(TestCredentials.PskIdentity)}";
+            }
             var received = new TaskCompletionSource<(EndPoint, string)>(TaskCreationOptions.RunContinuationsAsynchronously);
             server.ApplicationDataReceived += (_, e) => received.TrySetResult((e.RemoteEndPoint, Encoding.UTF8.GetString(e.Data)));
 
             using var client = new OpenSslProcess(
-                $"s_client {versionFlag} {_openSsl.Value.Providers} -connect 127.0.0.1:{transport.LocalEndpoint.Port} -cipher {openSslName}@SECLEVEL=0 -quiet", dir);
+                $"s_client {versionFlag} {_openSsl.Value.Providers} -connect 127.0.0.1:{transport.LocalEndpoint.Port} -cipher {openSslName}@SECLEVEL=0{psk} -quiet", dir);
             client.WriteLine("from-openssl");
             Assert.IsTrue(received.Task.Wait(Timeout), $"{name}: server did not receive data:\n" + client.Output);
             Assert.AreEqual(id, server.Connections.Single().CipherSuite.Id);

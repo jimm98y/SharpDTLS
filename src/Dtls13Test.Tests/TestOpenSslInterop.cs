@@ -88,11 +88,27 @@ namespace Dtls13Test.Tests
                 Assert.Inconclusive("openssl is not installed");
         }
 
+        // Ports for external processes come from a range below the OS ephemeral range (49152+ on macOS,
+        // 32768+ on Linux), so sockets bound to port 0 elsewhere in the test run cannot take them between
+        // the check and the external process binding.
+        private static int _nextPort = 20000 + Environment.ProcessId % 5000;
+
         public static int FreeUdpPort()
         {
-            using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-            socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
-            return ((IPEndPoint)socket.LocalEndPoint).Port;
+            while (true)
+            {
+                int port = 20000 + (Interlocked.Increment(ref _nextPort) - 20000) % 12000;
+                try
+                {
+                    using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+                    socket.Bind(new IPEndPoint(IPAddress.Loopback, port));
+                    return port;
+                }
+                catch (SocketException)
+                {
+                    // in use, try the next one
+                }
+            }
         }
 
         public static string WritePem(string directory, string name, object value)

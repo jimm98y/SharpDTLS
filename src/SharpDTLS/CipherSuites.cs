@@ -139,7 +139,12 @@ namespace SharpDTLS
 
         public bool HasForwardSecrecy => KeyExchange is KeyExchangeAlgorithm.DHE_DSS or KeyExchangeAlgorithm.DHE_RSA
             or KeyExchangeAlgorithm.ECDHE_ECDSA or KeyExchangeAlgorithm.ECDHE_RSA or KeyExchangeAlgorithm.DHE_PSK
-            or KeyExchangeAlgorithm.ECDHE_PSK or KeyExchangeAlgorithm.DHE_DSS_EXPORT or KeyExchangeAlgorithm.DHE_RSA_EXPORT;
+            or KeyExchangeAlgorithm.PSK_DHE or KeyExchangeAlgorithm.ECDHE_PSK
+            or KeyExchangeAlgorithm.DHE_DSS_EXPORT or KeyExchangeAlgorithm.DHE_RSA_EXPORT;
+
+        /// <summary>The key exchange authenticates with a pre-shared key (RFC 4279, RFC 5489).</summary>
+        public bool RequiresPsk => KeyExchange is KeyExchangeAlgorithm.PSK or KeyExchangeAlgorithm.DHE_PSK
+            or KeyExchangeAlgorithm.PSK_DHE or KeyExchangeAlgorithm.ECDHE_PSK or KeyExchangeAlgorithm.RSA_PSK;
 
         /// <summary>Whether this implementation supports the suite.</summary>
         public bool IsImplemented => DtlsOk && CipherSuites.IsKeyExchangeImplemented(KeyExchange) && CipherSuites.IsCipherImplemented(Cipher)
@@ -271,6 +276,8 @@ namespace SharpDTLS
             KeyExchangeAlgorithm.RSA,
             KeyExchangeAlgorithm.DHE_RSA, KeyExchangeAlgorithm.DHE_DSS,
             KeyExchangeAlgorithm.ECDHE_RSA, KeyExchangeAlgorithm.ECDHE_ECDSA,
+            KeyExchangeAlgorithm.PSK, KeyExchangeAlgorithm.DHE_PSK, KeyExchangeAlgorithm.PSK_DHE,
+            KeyExchangeAlgorithm.ECDHE_PSK, KeyExchangeAlgorithm.RSA_PSK,
         };
 
         private static readonly HashSet<BulkCipherAlgorithm> ImplementedCiphers = new()
@@ -317,11 +324,12 @@ namespace SharpDTLS
 
         /// <summary>
         /// Suites offered when none are configured: implemented, not weak, usable within the version range,
-        /// in preference order.
+        /// in preference order. PSK suites are included only when a pre-shared key is configured.
         /// </summary>
-        public static List<ushort> DefaultFor(ushort minimumVersion, ushort maximumVersion)
+        public static List<ushort> DefaultFor(ushort minimumVersion, ushort maximumVersion, bool includePsk = false)
             => _implemented
                 .Where(s => s.Security != CipherSuiteSecurity.Weak)
+                .Where(s => includePsk || !s.RequiresPsk)
                 .Where(s => s.IsUsableWith(maximumVersion) || s.IsUsableWith(minimumVersion))
                 .Select(s => s.Id)
                 .ToList();
@@ -347,8 +355,12 @@ namespace SharpDTLS
             KeyExchangeAlgorithm.ECDHE_RSA => 1,
             KeyExchangeAlgorithm.DHE_RSA => 2,
             KeyExchangeAlgorithm.DHE_DSS => 3,
-            KeyExchangeAlgorithm.RSA => 4,
-            _ => 5,
+            KeyExchangeAlgorithm.ECDHE_PSK => 4,
+            KeyExchangeAlgorithm.DHE_PSK or KeyExchangeAlgorithm.PSK_DHE => 5,
+            KeyExchangeAlgorithm.RSA => 6,
+            KeyExchangeAlgorithm.RSA_PSK => 7,
+            KeyExchangeAlgorithm.PSK => 8,
+            _ => 9,
         };
     }
 }

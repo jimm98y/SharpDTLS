@@ -19,6 +19,13 @@ namespace Dtls13Test.Tests
     /// <summary>Test credentials for every server certificate type, generated once.</summary>
     internal static class TestCredentials
     {
+        // Fresh copies on every access: BouncyCastle zeroizes PSK buffers after use, and tests run in parallel.
+        public static byte[] PskIdentity => Encoding.ASCII.GetBytes("Client_identity");
+        public static byte[] PskKey => Convert.FromHexString("0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20");
+        public static byte[] PskHint => Encoding.ASCII.GetBytes("sharpdtls-hint");
+
+        public static byte[] ResolvePsk(byte[] identity) => identity.AsSpan().SequenceEqual(PskIdentity) ? PskKey : null;
+
         private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _rsa = new(() => Dtls12CryptoUtils.GenerateSelfSignedCertificate());
         private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _ecdsa = new(() => SharpDTLS.DTLS13.Dtls13CryptoUtils.GenerateSelfSignedEcCertificate());
         private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _dsa = new(GenerateDsa);
@@ -67,6 +74,13 @@ namespace Dtls13Test.Tests
             var pair = new ScriptedTransportPair();
             var server = new Dtls12Server(pair.Server, keyPair, certificate) { MinimumVersion = DtlsVersion.Dtls10, CipherSuites = new List<ushort> { id } };
             var client = new Dtls12Client(pair.Client) { MinimumVersion = version, MaximumVersion = version, CipherSuites = new List<ushort> { id } };
+            byte[] seenHint = null;
+            if (suite.RequiresPsk)
+            {
+                server.PskIdentityResolver = TestCredentials.ResolvePsk;
+                server.PskIdentityHint = TestCredentials.PskHint;
+                client.PskProvider = hint => { seenHint = hint; return (TestCredentials.PskIdentity, TestCredentials.PskKey); };
+            }
 
             var received = new List<string>();
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -78,6 +92,8 @@ namespace Dtls13Test.Tests
             Assert.IsTrue(done.Task.Wait(TimeSpan.FromSeconds(10)), $"{name}: handshake did not complete");
             Assert.AreEqual(id, client.CipherSuite.Id);
             Assert.AreEqual(version, client.NegotiatedVersion);
+            if (suite.RequiresPsk)
+                CollectionAssert.AreEqual(TestCredentials.PskHint, seenHint, "the server's identity hint reaches the client");
 
             for (int i = 0; i < 20; i++)
                 client.SendApplicationData(Encoding.UTF8.GetBytes($"{name}-{i}"));

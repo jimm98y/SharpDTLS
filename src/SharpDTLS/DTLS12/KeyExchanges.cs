@@ -30,10 +30,18 @@ namespace SharpDTLS.DTLS12
         ushort Group { get; }
     }
 
+    internal enum ServerKeyExchangeRequirement
+    {
+        None,
+        /// <summary>PSK and RSA_PSK: sent only when the server has an identity hint (RFC 4279 §2).</summary>
+        Optional,
+        Required,
+    }
+
     /// <summary>Client half of a key exchange.</summary>
     internal interface IClientKeyExchange
     {
-        bool ExpectsServerKeyExchange { get; }
+        ServerKeyExchangeRequirement ServerKeyExchange { get; }
         bool ServerParamsSigned { get; }
 
         /// <summary>Reads the parameters from the start of the ServerKeyExchange body.</summary>
@@ -49,6 +57,8 @@ namespace SharpDTLS.DTLS12
     {
         public ClientHelloMessage ClientHello { get; init; }
         public AsymmetricKeyParameter ServerPrivateKey { get; init; }
+        public byte[] PskIdentityHint { get; init; }
+        public Func<byte[], byte[]> PskResolver { get; init; }
     }
 
     internal sealed class ClientKeyExchangeContext
@@ -56,6 +66,9 @@ namespace SharpDTLS.DTLS12
         public ushort ClientHelloVersion { get; init; }
         public AsymmetricKeyParameter ServerPublicKey { get; init; }
         public int MinimumDhPrimeBits { get; init; }
+
+        /// <summary>Maps the server's identity hint (possibly empty) to the PSK identity and key.</summary>
+        public Func<byte[], (byte[] Identity, byte[] Key)> PskProvider { get; init; }
     }
 
     internal static class KeyExchanges
@@ -65,6 +78,10 @@ namespace SharpDTLS.DTLS12
             KeyExchangeAlgorithm.ECDHE_ECDSA or KeyExchangeAlgorithm.ECDHE_RSA => new EcdheServerKeyExchange(context),
             KeyExchangeAlgorithm.DHE_RSA or KeyExchangeAlgorithm.DHE_DSS => new DheServerKeyExchange(context),
             KeyExchangeAlgorithm.RSA => new RsaServerKeyExchange(context),
+            KeyExchangeAlgorithm.PSK => new PskServerKeyExchange(context, null),
+            KeyExchangeAlgorithm.DHE_PSK or KeyExchangeAlgorithm.PSK_DHE => new PskServerKeyExchange(context, new DheServerKeyExchange(context)),
+            KeyExchangeAlgorithm.ECDHE_PSK => new PskServerKeyExchange(context, new EcdheServerKeyExchange(context)),
+            KeyExchangeAlgorithm.RSA_PSK => new PskServerKeyExchange(context, new RsaServerKeyExchange(context)),
             _ => throw new DtlsException(AlertDescription.InternalError, $"Key exchange {suite.KeyExchange} is not implemented."),
         };
 
@@ -73,6 +90,10 @@ namespace SharpDTLS.DTLS12
             KeyExchangeAlgorithm.ECDHE_ECDSA or KeyExchangeAlgorithm.ECDHE_RSA => new EcdheClientKeyExchange(),
             KeyExchangeAlgorithm.DHE_RSA or KeyExchangeAlgorithm.DHE_DSS => new DheClientKeyExchange(context),
             KeyExchangeAlgorithm.RSA => new RsaClientKeyExchange(context),
+            KeyExchangeAlgorithm.PSK => new PskClientKeyExchange(context, null),
+            KeyExchangeAlgorithm.DHE_PSK or KeyExchangeAlgorithm.PSK_DHE => new PskClientKeyExchange(context, new DheClientKeyExchange(context)),
+            KeyExchangeAlgorithm.ECDHE_PSK => new PskClientKeyExchange(context, new EcdheClientKeyExchange()),
+            KeyExchangeAlgorithm.RSA_PSK => new PskClientKeyExchange(context, new RsaClientKeyExchange(context)),
             _ => throw new DtlsException(AlertDescription.InternalError, $"Key exchange {suite.KeyExchange} is not implemented."),
         };
     }
@@ -115,7 +136,7 @@ namespace SharpDTLS.DTLS12
     {
         private byte[] _serverPublicKey;
 
-        public bool ExpectsServerKeyExchange => true;
+        public ServerKeyExchangeRequirement ServerKeyExchange => ServerKeyExchangeRequirement.Required;
         public bool ServerParamsSigned => true;
         public ushort Group { get; private set; }
 
@@ -240,7 +261,7 @@ namespace SharpDTLS.DTLS12
             _minimumPrimeBits = context.MinimumDhPrimeBits;
         }
 
-        public bool ExpectsServerKeyExchange => true;
+        public ServerKeyExchangeRequirement ServerKeyExchange => ServerKeyExchangeRequirement.Required;
         public bool ServerParamsSigned => true;
         public ushort Group { get; private set; }
 
@@ -334,7 +355,7 @@ namespace SharpDTLS.DTLS12
             _context = context;
         }
 
-        public bool ExpectsServerKeyExchange => false;
+        public ServerKeyExchangeRequirement ServerKeyExchange => ServerKeyExchangeRequirement.None;
         public bool ServerParamsSigned => false;
         public ushort Group => 0;
 
@@ -355,6 +376,119 @@ namespace SharpDTLS.DTLS12
             var rsa = new Pkcs1Encoding(new RsaBlindedEngine());
             rsa.Init(true, new ParametersWithRandom(key, new SecureRandom()));
             return new TlsWriter().WriteOpaque16(rsa.ProcessBlock(preMasterSecret, 0, preMasterSecret.Length)).ToArray();
+        }
+    }
+
+    // ── Pre-shared keys (RFC 4279, RFC 5489) ─────────────────────────────────────────────────
+
+    internal static class Psk
+    {
+        /// <summary>premaster_secret = other_secret&lt;0..2^16-1&gt; || psk&lt;0..2^16-1&gt; (RFC 4279 §2).</summary>
+        public static byte[] PreMasterSecret(byte[] otherSecret, byte[] psk)
+            => new TlsWriter().WriteOpaque16(otherSecret).WriteOpaque16(psk).ToArray();
+    }
+
+    /// <summary>
+    /// PSK key exchanges. <c>inner</c> is the (EC)DHE or RSA exchange that supplies other_secret, or null for
+    /// plain PSK, where other_secret is psk.Length zero bytes.
+    /// </summary>
+    internal sealed class PskServerKeyExchange : IServerKeyExchange
+    {
+        private readonly ServerKeyExchangeContext _context;
+        private readonly IServerKeyExchange _inner;
+
+        public PskServerKeyExchange(ServerKeyExchangeContext context, IServerKeyExchange inner)
+        {
+            if (context.PskResolver == null)
+                throw new DtlsException(AlertDescription.InternalError, "No PSK resolver configured.");
+            _context = context;
+            _inner = inner;
+        }
+
+        public ushort Group => _inner?.Group ?? 0;
+        public bool SignsParams => false;
+
+        // psk_identity_hint<0..2^16-1> [|| ServerDHParams / ServerECDHParams]
+        public byte[] CreateServerParams()
+        {
+            byte[] hint = _context.PskIdentityHint ?? Array.Empty<byte>();
+            byte[] innerParams = _inner?.CreateServerParams();
+
+            // RFC 4279 §2: plain PSK and RSA_PSK send ServerKeyExchange only when there is a hint.
+            if (innerParams == null && hint.Length == 0)
+                return null;
+
+            var w = new TlsWriter().WriteOpaque16(hint);
+            if (innerParams != null)
+                w.WriteBytes(innerParams);
+            return w.ToArray();
+        }
+
+        public byte[] ProcessClientKeyExchange(byte[] body)
+        {
+            var r = new TlsReader(body);
+            byte[] identity = r.ReadOpaque16();
+            byte[] psk = _context.PskResolver(identity)
+                ?? throw new DtlsException(AlertDescription.UnknownPskIdentity, "Unknown PSK identity.");
+
+            byte[] otherSecret = _inner == null
+                ? new byte[psk.Length]
+                : _inner.ProcessClientKeyExchange(r.ReadBytes(r.Remaining));
+            if (_inner == null)
+                r.EnsureEnd();
+
+            return Psk.PreMasterSecret(otherSecret, psk);
+        }
+    }
+
+    internal sealed class PskClientKeyExchange : IClientKeyExchange
+    {
+        private readonly ClientKeyExchangeContext _context;
+        private readonly IClientKeyExchange _inner;
+        private byte[] _identityHint = Array.Empty<byte>();
+
+        public PskClientKeyExchange(ClientKeyExchangeContext context, IClientKeyExchange inner)
+        {
+            if (context.PskProvider == null)
+                throw new DtlsException(AlertDescription.InternalError, "No pre-shared key configured.");
+            _context = context;
+            _inner = inner;
+        }
+
+        public ServerKeyExchangeRequirement ServerKeyExchange
+            => _inner?.ServerKeyExchange == ServerKeyExchangeRequirement.Required
+                ? ServerKeyExchangeRequirement.Required
+                : ServerKeyExchangeRequirement.Optional;
+
+        public bool ServerParamsSigned => false;
+        public ushort Group => _inner?.Group ?? 0;
+
+        public void ReadServerParams(TlsReader reader)
+        {
+            _identityHint = reader.ReadOpaque16();
+            if (_inner?.ServerKeyExchange == ServerKeyExchangeRequirement.Required)
+                _inner.ReadServerParams(reader);
+        }
+
+        public byte[] CreateClientKeyExchange(out byte[] preMasterSecret)
+        {
+            var (identity, psk) = _context.PskProvider(_identityHint);
+            if (identity == null || psk == null)
+                throw new DtlsException(AlertDescription.InternalError, "No pre-shared key for this server.");
+
+            var w = new TlsWriter().WriteOpaque16(identity);
+            byte[] otherSecret;
+            if (_inner == null)
+            {
+                otherSecret = new byte[psk.Length];
+            }
+            else
+            {
+                w.WriteBytes(_inner.CreateClientKeyExchange(out otherSecret));
+            }
+
+            preMasterSecret = Psk.PreMasterSecret(otherSecret, psk);
+            return w.ToArray();
         }
     }
 }

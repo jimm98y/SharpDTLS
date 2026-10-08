@@ -8,6 +8,7 @@ using SharpDTLS.DTLS12;
 using SharpSRTP.UDP;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -24,8 +25,16 @@ namespace Dtls13Test.Tests
     internal sealed class BcUdpTransport : DatagramTransport
     {
         private readonly Socket _socket;
+        private readonly System.Collections.Concurrent.ConcurrentQueue<string> _log;
+        private readonly Stopwatch _clock = Stopwatch.StartNew();
 
-        public BcUdpTransport(Socket socket) => _socket = socket;
+        public BcUdpTransport(Socket socket, System.Collections.Concurrent.ConcurrentQueue<string> log = null)
+        {
+            _socket = socket;
+            _log = log;
+        }
+
+        private void Log(string what) => _log?.Enqueue($"{_clock.ElapsedMilliseconds,6} ms BC {what}");
 
         public int GetReceiveLimit() => 1500;
         public int GetSendLimit() => 1200;
@@ -38,13 +47,18 @@ namespace Dtls13Test.Tests
             {
                 _socket.ReceiveTimeout = Math.Max(1, waitMillis);
                 if (_socket.Connected)
-                    return _socket.Receive(buffer);
+                {
+                    int received = _socket.Receive(buffer);
+                    Log($"recv {received} bytes type 0x{buffer[0]:X2}");
+                    return received;
+                }
 
                 EndPoint from = new IPEndPoint(IPAddress.Any, 0);
                 byte[] tmp = new byte[buffer.Length];
                 int n = _socket.ReceiveFrom(tmp, ref from);
                 _socket.Connect(from);
                 tmp.AsSpan(0, n).CopyTo(buffer);
+                Log($"recv first {n} bytes type 0x{buffer[0]:X2} from {from}");
                 return n;
             }
             catch (SocketException)
@@ -58,7 +72,11 @@ namespace Dtls13Test.Tests
         }
 
         public void Send(byte[] buf, int off, int len) => Send(buf.AsSpan(off, len));
-        public void Send(ReadOnlySpan<byte> buffer) => _socket.Send(buffer);
+        public void Send(ReadOnlySpan<byte> buffer)
+        {
+            Log($"send {buffer.Length} bytes type 0x{buffer[0]:X2}");
+            _socket.Send(buffer);
+        }
         public void Close() => _socket.Close();
     }
 
@@ -93,6 +111,57 @@ namespace Dtls13Test.Tests
         protected override TlsCredentialedSigner GetDsaSignerCredentials() => Signer(SignatureAlgorithm.dsa);
         protected override TlsCredentialedSigner GetECDsaSignerCredentials() => Signer(SignatureAlgorithm.ecdsa);
         protected override TlsCredentialedDecryptor GetRsaEncryptionCredentials() => new BcDefaultTlsCredentialedDecryptor((BcTlsCrypto)Crypto, Chain(), _privateKey);
+    }
+
+    internal sealed class BcPskIdentityManager : TlsPskIdentityManager
+    {
+        public byte[] GetHint() => TestCredentials.PskHint;
+        public byte[] GetPsk(byte[] identity) => TestCredentials.ResolvePsk(identity);
+    }
+
+    internal sealed class BcPskTestServer : PskTlsServer
+    {
+        private readonly int[] _suites;
+        private readonly ProtocolVersion[] _versions;
+        private readonly AsymmetricKeyParameter _privateKey;
+        private readonly byte[] _certificate;
+
+        public BcPskTestServer(BcTlsCrypto crypto, int suite, ProtocolVersion version, AsymmetricKeyParameter privateKey, byte[] certificate)
+            : base(crypto, new BcPskIdentityManager())
+        {
+            _suites = new[] { suite };
+            _versions = version.Only();
+            _privateKey = privateKey;
+            _certificate = certificate;
+        }
+
+        protected override ProtocolVersion[] GetSupportedVersions() => _versions;
+        protected override int[] GetSupportedCipherSuites() => _suites;
+
+        protected override TlsCredentialedDecryptor GetRsaEncryptionCredentials()
+            => new BcDefaultTlsCredentialedDecryptor((BcTlsCrypto)Crypto, new Certificate(new[] { Crypto.CreateCertificate(_certificate) }), _privateKey);
+    }
+
+    internal sealed class BcPskTestClient : PskTlsClient
+    {
+        private readonly int[] _suites;
+        private readonly ProtocolVersion[] _versions;
+
+        public BcPskTestClient(BcTlsCrypto crypto, int suite, ProtocolVersion version)
+            : base(crypto, TestCredentials.PskIdentity, TestCredentials.PskKey)
+        {
+            _suites = new[] { suite };
+            _versions = version.Only();
+        }
+
+        protected override ProtocolVersion[] GetSupportedVersions() => _versions;
+        protected override int[] GetSupportedCipherSuites() => _suites;
+        public override TlsAuthentication GetAuthentication() => new AcceptAnyServer();
+
+        private sealed class AcceptAnyServer : ServerOnlyTlsAuthentication
+        {
+            public override void NotifyServerCertificate(TlsServerCertificate serverCertificate) { }
+        }
     }
 
     internal sealed class BcTestClient : DefaultTlsClient
@@ -158,9 +227,13 @@ namespace Dtls13Test.Tests
 
             using var serverSocket = LoopbackSocket();
             int port = ((IPEndPoint)serverSocket.LocalEndPoint).Port;
+            var log = new System.Collections.Concurrent.ConcurrentQueue<string>();
             var bcServer = RunBlocking(() =>
             {
-                var dtls = new DtlsServerProtocol().Accept(new BcTestServer(crypto, id, bcVersion, keyPair.Private, certificate.GetEncoded()), new BcUdpTransport(serverSocket));
+                TlsServer bcServerPeer = suite.RequiresPsk
+                    ? new BcPskTestServer(crypto, id, bcVersion, keyPair.Private, certificate.GetEncoded())
+                    : new BcTestServer(crypto, id, bcVersion, keyPair.Private, certificate.GetEncoded());
+                var dtls = new DtlsServerProtocol().Accept(bcServerPeer, new BcUdpTransport(serverSocket, log));
                 byte[] buffer = new byte[2048];
                 int n = dtls.Receive(buffer, 0, buffer.Length, (int)Timeout.TotalMilliseconds);
                 string text = n > 0 ? Encoding.UTF8.GetString(buffer, 0, n) : null;
@@ -171,14 +244,26 @@ namespace Dtls13Test.Tests
 
             using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
             var client = new Dtls12Client(transport) { MinimumVersion = version, MaximumVersion = version, CipherSuites = new List<ushort> { id } };
+            if (suite.RequiresPsk)
+            {
+                client.PskIdentity = TestCredentials.PskIdentity;
+                client.PskKey = TestCredentials.PskKey;
+            }
             var handshake = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
             client.Failed += (_, ex) => handshake.TrySetException(ex);
             client.ApplicationDataReceived += (_, data) => received.TrySetResult(Encoding.UTF8.GetString(data));
+            var clock = Stopwatch.StartNew();
+            transport.OnDataReceived += (_, d) => log.Enqueue($"{clock.ElapsedMilliseconds,6} ms client recv {d.Length} bytes type 0x{d[0]:X2}");
 
             client.BeginHandshake();
-            Assert.IsTrue(handshake.Task.Wait(Timeout), $"{name}: handshake did not complete ({bcServer.Exception?.GetBaseException().Message})");
+            if (!handshake.Task.Wait(Timeout))
+            {
+                serverSocket.Close(); // unblock the BouncyCastle thread
+                try { bcServer.Wait(TimeSpan.FromSeconds(2)); } catch (AggregateException) { }
+                Assert.Fail($"{name}: handshake did not complete; BouncyCastle server: {(bcServer.IsFaulted ? bcServer.Exception.GetBaseException().Message : bcServer.Status.ToString())}\n" + string.Join("\n", log));
+            }
             client.SendApplicationData(Encoding.UTF8.GetBytes("ping"));
 
             Assert.IsTrue(bcServer.Wait(Timeout), $"{name}: BouncyCastle server did not finish");
@@ -196,13 +281,19 @@ namespace Dtls13Test.Tests
 
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
             var server = new Dtls12Server(transport, keyPair, certificate) { MinimumVersion = DtlsVersion.Dtls10, CipherSuites = new List<ushort> { id } };
+            if (suite.RequiresPsk)
+            {
+                server.PskIdentityResolver = TestCredentials.ResolvePsk;
+                server.PskIdentityHint = TestCredentials.PskHint;
+            }
             server.ApplicationDataReceived += (_, e) => server.SendApplicationData(e.RemoteEndPoint, Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.Data)));
 
             using var clientSocket = LoopbackSocket();
             clientSocket.Connect(new IPEndPoint(IPAddress.Loopback, transport.LocalEndpoint.Port));
             var bcClient = RunBlocking(() =>
             {
-                var dtls = new DtlsClientProtocol().Connect(new BcTestClient(crypto, id, bcVersion), new BcUdpTransport(clientSocket));
+                TlsClient bcClientPeer = suite.RequiresPsk ? new BcPskTestClient(crypto, id, bcVersion) : new BcTestClient(crypto, id, bcVersion);
+                var dtls = new DtlsClientProtocol().Connect(bcClientPeer, new BcUdpTransport(clientSocket));
                 byte[] ping = Encoding.UTF8.GetBytes("ping");
                 dtls.Send(ping, 0, ping.Length);
                 byte[] buffer = new byte[2048];
