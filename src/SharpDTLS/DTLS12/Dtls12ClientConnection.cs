@@ -34,6 +34,8 @@ namespace SharpDTLS.DTLS12
         private ClientHelloMessage _clientHello;
         private int _helloVerifyRequests;
         private X509Certificate _serverCertificate;
+        private AsymmetricKeyParameter _serverPublicKey;
+        private CertificateType _clientCertificateType;
         private IReadOnlyList<byte[]> _serverChain;
         private bool _statusExpected;
         private bool _statusChecked;
@@ -74,6 +76,31 @@ namespace SharpDTLS.DTLS12
 
         /// <summary>The server's end-entity certificate once received.</summary>
         public X509Certificate ServerCertificate => _serverCertificate;
+
+        /// <summary>
+        /// Certificate types we accept from the server, in preference order (RFC 7250); null for X.509 only. With
+        /// <see cref="CertificateType.RawPublicKey"/> the server may authenticate with a bare public key, which
+        /// <see cref="ServerRawPublicKeyValidator"/> must then vouch for.
+        /// </summary>
+        public IList<CertificateType> ServerCertificateTypes { get; set; }
+
+        /// <summary>
+        /// Certificate types we can authenticate with, in preference order (RFC 7250); null for X.509 only. A raw public key
+        /// needs only <see cref="ClientCertificateKeyPair"/>.
+        /// </summary>
+        public IList<CertificateType> ClientCertificateTypes { get; set; }
+
+        /// <summary>
+        /// Checks the server's raw public key (DER SubjectPublicKeyInfo), e.g. against a pinned key; false aborts with
+        /// bad_certificate. When null, any key is accepted (only proof of possession is checked).
+        /// </summary>
+        public Func<byte[], bool> ServerRawPublicKeyValidator { get; set; }
+
+        /// <summary>The server's raw public key (DER SubjectPublicKeyInfo), when it authenticated with one.</summary>
+        public byte[] ServerRawPublicKey { get; private set; }
+
+        /// <summary>The certificate type the server authenticated with.</summary>
+        public CertificateType ServerCertificateType { get; private set; }
 
         /// <summary>The negotiated (EC)DHE group, or 0 (RSA key exchange, or custom DH parameters).</summary>
         public ushort NamedGroup => _keyExchange?.Group ?? 0;
@@ -262,6 +289,10 @@ namespace SharpDTLS.DTLS12
             ch.Extensions.AddRange(RecordSizeNegotiation.Offer(RecordSizeLimit, MaxFragmentLength, dtls13: false));
             if (RequestOcspStapling)
                 ch.Extensions.Add(new StatusRequestExtension(request: true));
+            if (RawPublicKeys.Offer(CertificateTypeExtension.ServerType, ServerCertificateTypes) is { } serverTypes)
+                ch.Extensions.Add(serverTypes);
+            if (RawPublicKeys.Offer(CertificateTypeExtension.ClientType, ClientCertificateTypes) is { } clientTypes)
+                ch.Extensions.Add(clientTypes);
             if (UseConnectionId)
             {
                 _offeredConnectionId ??= Dtls12CryptoUtils.GenerateRandom(ConnectionIdLength);
@@ -420,6 +451,11 @@ namespace SharpDTLS.DTLS12
                 ReadConnectionId = _offeredConnectionId;
             }
 
+            // Certificate types (RFC 7250): no answer means X.509.
+            // Checked against our list when a Certificate arrives: resumption and PSK suites have none.
+            ServerCertificateType = RawPublicKeys.Accept(ServerCertificateTypes, RawPublicKeys.Find(sh.Extensions, CertificateTypeExtension.ServerType), requireSupport: false);
+            _clientCertificateType = RawPublicKeys.Accept(ClientCertificateTypes, RawPublicKeys.Find(sh.Extensions, CertificateTypeExtension.ClientType), requireSupport: false);
+
             // An empty status_request announces a CertificateStatus after the Certificate (RFC 6066 §8).
             _statusExpected = sh.Extension<StatusRequestExtension>() != null;
             (_serverChain, _statusChecked, OcspResponse) = (null, false, null);
@@ -458,7 +494,10 @@ namespace SharpDTLS.DTLS12
                 IsResumed = true;
                 SessionState = session;
                 if (session.PeerCertificate != null)
+                {
                     _serverCertificate = ParseCertificate(session.PeerCertificate);
+                    _serverPublicKey = _serverCertificate.GetPublicKey();
+                }
                 DeriveKeysFromMasterSecret(session.MasterSecret);
                 _state = State.WaitFinished;
                 return;
@@ -476,16 +515,40 @@ namespace SharpDTLS.DTLS12
 
         private void OnCertificate(byte[] body, byte[] message)
         {
+            if (ServerCertificateType == CertificateType.RawPublicKey)
+            {
+                OnServerRawPublicKey(body, message);
+                return;
+            }
+
+            if (ServerCertificateTypes != null && !ServerCertificateTypes.Contains(CertificateType.X509))
+                throw new DtlsException(AlertDescription.UnsupportedCertificate, "The server did not agree to a raw public key.");
             var certificate = CertificateMessage.Decode(body);
             if (certificate.Chain.Count == 0)
                 throw new DtlsException(AlertDescription.DecodeError, "Server sent an empty Certificate.");
 
             _serverCertificate = ParseCertificate(certificate.Chain[0]);
-            if (!KeyMatches(CipherSuite.ServerCertificateType, _serverCertificate.GetPublicKey()))
+            _serverPublicKey = _serverCertificate.GetPublicKey();
+            if (!KeyMatches(CipherSuite.ServerCertificateType, _serverPublicKey))
                 throw new DtlsException(AlertDescription.UnsupportedCertificate, "Server certificate key does not match the cipher suite.");
             if (ServerCertificateValidator != null && !ServerCertificateValidator(_serverCertificate, certificate.Chain))
                 throw new DtlsException(AlertDescription.BadCertificate, "Server certificate was rejected.");
             _serverChain = certificate.Chain;
+
+            AddToTranscript(message);
+            CreateKeyExchange();
+        }
+
+        private void OnServerRawPublicKey(byte[] body, byte[] message)
+        {
+            byte[] spki = RawPublicKeys.DecodeCertificate(body)
+                ?? throw new DtlsException(AlertDescription.DecodeError, "Server sent an empty raw public key.");
+            _serverPublicKey = RawPublicKeys.Decode(spki);
+            if (!KeyMatches(CipherSuite.ServerCertificateType, _serverPublicKey) || CipherSuite.IsStaticKeyAgreement)
+                throw new DtlsException(AlertDescription.UnsupportedCertificate, "Server key does not match the cipher suite.");
+            if (ServerRawPublicKeyValidator != null && !ServerRawPublicKeyValidator(spki))
+                throw new DtlsException(AlertDescription.BadCertificate, "Server raw public key was rejected.");
+            ServerRawPublicKey = spki;
 
             AddToTranscript(message);
             CreateKeyExchange();
@@ -503,7 +566,7 @@ namespace SharpDTLS.DTLS12
             _keyExchange = KeyExchanges.CreateClient(CipherSuite, new ClientKeyExchangeContext
             {
                 ClientHelloVersion = _clientHello.ClientVersion,
-                ServerPublicKey = _serverCertificate?.GetPublicKey(),
+                ServerPublicKey = _serverPublicKey,
                 MinimumDhPrimeBits = MinimumDhPrimeBits,
                 PskProvider = EffectivePskProvider,
                 SrpIdentity = SrpIdentity,
@@ -533,7 +596,7 @@ namespace SharpDTLS.DTLS12
                 ushort? scheme = IsDtls12 ? r.ReadUInt16() : null;
                 byte[] signature = r.ReadOpaque16();
                 byte[] signed = Concat(Concat(ClientRandom, ServerRandom), serverParams);
-                if (!Verify(_serverCertificate.GetPublicKey(), signed, scheme, signature, Dtls12Signatures.Supported))
+                if (!Verify(_serverPublicKey, signed, scheme, signature, Dtls12Signatures.Supported))
                     throw new DtlsException(AlertDescription.DecryptError, "ServerKeyExchange signature is invalid.");
             }
             r.EnsureEnd();
@@ -550,7 +613,14 @@ namespace SharpDTLS.DTLS12
             // or, with static (EC)DH, if it holds a key agreement key on the server's parameters (fixed (EC)DH).
             bool authenticate = false;
             bool fixedKeyAgreement = false;
-            if (_certificateRequest != null && ClientCertificate != null && ClientCertificateKeyPair != null)
+            bool rawPublicKey = _clientCertificateType == CertificateType.RawPublicKey;
+            if (_certificateRequest != null && rawPublicKey && ClientCertificateKeyPair != null)
+            {
+                var key = ClientCertificateKeyPair.Private;
+                authenticate = CertificateTypeAccepted(_certificateRequest, key)
+                    && (!IsDtls12 || Dtls12Signatures.SelectScheme(key, _certificateRequest.SignatureAlgorithms) != null);
+            }
+            else if (_certificateRequest != null && !rawPublicKey && ClientCertificate != null && ClientCertificateKeyPair != null)
             {
                 var key = ClientCertificateKeyPair.Private;
                 fixedKeyAgreement = CipherSuite.IsStaticKeyAgreement && _keyExchange.SupportsFixedClientKey(key)
@@ -559,7 +629,11 @@ namespace SharpDTLS.DTLS12
                     && (!IsDtls12 || Dtls12Signatures.SelectScheme(key, _certificateRequest.SignatureAlgorithms) != null);
             }
 
-            if (_certificateRequest != null)
+            if (_certificateRequest != null && rawPublicKey)
+            {
+                SendHandshake(HandshakeType.Certificate, RawPublicKeys.EncodeCertificate(authenticate ? RawPublicKeys.Encode(ClientCertificateKeyPair.Public) : null));
+            }
+            else if (_certificateRequest != null)
             {
                 var certificate = new CertificateMessage();
                 if (authenticate || fixedKeyAgreement)

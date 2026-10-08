@@ -22,6 +22,9 @@
  *   -psk_only           with -psk: psk_ke, no (EC)DHE
  *   -ocsp               client: request an OCSP staple and verify it (with -verify); a bad staple fails the handshake
  *   -ocsp_resp <der>    server: staple this OCSP response for clients that ask
+ *   -rpk                offer and accept raw public keys (RFC 7250) in both directions; a ".der" certificate file
+ *                       is our SubjectPublicKeyInfo; prints "CERTTYPE:<server> <client>" after the handshake
+ *   -rpk_pin <der>      authenticate the peer by this pinned SubjectPublicKeyInfo
  *   -resume             two connections: the client resumes the first one's session ticket, the server
  *                       accepts the second connection with the same context; both print "RESUMED" or
  *                       "NOT RESUMED" after the second handshake
@@ -107,7 +110,8 @@ int main(int argc, char **argv)
     int port = atoi(argv[2]);
     const char *cert = NULL, *key = NULL, *cipher = NULL, *verify = NULL, *group = NULL, *srtp = NULL, *exportLabel = NULL;
     int exportLength = 0;
-    int hrr = 0, resume = 0, pskOnly = 0, mfl = 0, ocsp = 0, argi = 3;
+    int hrr = 0, resume = 0, pskOnly = 0, mfl = 0, ocsp = 0, rpk = 0, argi = 3;
+    const char *rpkPin = NULL;
     const char *pskHex = NULL, *host = NULL, *sni = NULL, *alpn = NULL, *cidHex = NULL;
 
     if (server) {
@@ -133,6 +137,8 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[argi], "-group") && argi + 1 < argc) group = argv[++argi];
         else if (!strcmp(argv[argi], "-mfl") && argi + 1 < argc) mfl = atoi(argv[++argi]);
         else if (!strcmp(argv[argi], "-ocsp")) ocsp = 1;
+        else if (!strcmp(argv[argi], "-rpk")) rpk = 1;
+        else if (!strcmp(argv[argi], "-rpk_pin") && argi + 1 < argc) rpkPin = argv[++argi];
         else if (!strcmp(argv[argi], "-ocsp_resp") && argi + 1 < argc) ocspRespFile = argv[++argi];
         else if (!strcmp(argv[argi], "-srtp") && argi + 1 < argc) srtp = argv[++argi];
         else if (!strcmp(argv[argi], "-export") && argi + 2 < argc) { exportLabel = argv[++argi]; exportLength = atoi(argv[++argi]); }
@@ -142,8 +148,12 @@ int main(int argc, char **argv)
     WOLFSSL_CTX *ctx = wolfSSL_CTX_new(server ? wolfDTLSv1_3_server_method() : wolfDTLSv1_3_client_method());
     if (!ctx) fail("CTX_new", NULL, 0);
 
-    if (cert && wolfSSL_CTX_use_certificate_chain_file(ctx, cert) != WOLFSSL_SUCCESS)
+    if (cert && strstr(cert, ".der")) {
+        if (wolfSSL_CTX_use_certificate_file(ctx, cert, WOLFSSL_FILETYPE_ASN1) != WOLFSSL_SUCCESS)
+            fail("load raw public key", NULL, 0);
+    } else if (cert && wolfSSL_CTX_use_certificate_chain_file(ctx, cert) != WOLFSSL_SUCCESS) {
         fail("load cert", NULL, 0);
+    }
     if (key && wolfSSL_CTX_use_PrivateKey_file(ctx, key, WOLFSSL_FILETYPE_PEM) != WOLFSSL_SUCCESS)
         fail("load key", NULL, 0);
     if (cipher && wolfSSL_CTX_set_cipher_list(ctx, cipher) != WOLFSSL_SUCCESS)
@@ -242,6 +252,20 @@ int main(int argc, char **argv)
     if (wolfSSL_set_dtls_fd_connected(ssl, fd) != WOLFSSL_SUCCESS)
         fail("set fd", NULL, 0);
 
+    if (rpk) {
+        const char types[] = { WOLFSSL_CERT_TYPE_RPK, WOLFSSL_CERT_TYPE_X509 };
+        if (wolfSSL_set_server_cert_type(ssl, types, 2) != WOLFSSL_SUCCESS || wolfSSL_set_client_cert_type(ssl, types, 2) != WOLFSSL_SUCCESS)
+            fail("set cert types", NULL, 0);
+    }
+    if (rpkPin) {
+        unsigned char spki[1024];
+        FILE *f = fopen(rpkPin, "rb");
+        size_t len = f ? fread(spki, 1, sizeof(spki), f) : 0;
+        if (f) fclose(f);
+        if (len == 0 || wolfSSL_set_expected_rpk(ssl, spki, (unsigned int)len) != WOLFSSL_SUCCESS)
+            fail("set_expected_rpk", NULL, 0);
+        wolfSSL_set_verify(ssl, server ? WOLFSSL_VERIFY_PEER | WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT : WOLFSSL_VERIFY_PEER, NULL);
+    }
     if (ocsp && !server && wolfSSL_UseOCSPStapling(ssl, WOLFSSL_CSR_OCSP, 0) != WOLFSSL_SUCCESS)
         fail("UseOCSPStapling", NULL, 0);
     /* max_fragment_length code 1-4 (2^9 to 2^12); the client asks, the server always accepts */
@@ -271,6 +295,12 @@ int main(int argc, char **argv)
     if (round > 0)
         printf("%s\n", wolfSSL_session_reused(ssl) ? "RESUMED" : "NOT RESUMED");
     printf("CONNECTED %s\n", wolfSSL_get_cipher_name(ssl));
+    if (rpk) {
+        int serverType = -1, clientType = -1;
+        wolfSSL_get_negotiated_server_cert_type(ssl, &serverType);
+        wolfSSL_get_negotiated_client_cert_type(ssl, &clientType);
+        printf("CERTTYPE:%d %d\n", serverType, clientType);
+    }
     if (alpn) {
         char *protocol = NULL;
         unsigned short protocolLen = 0;

@@ -60,6 +60,8 @@ namespace SharpDTLS.DTLS13.Messages
                     AlpnExtension.Type => new AlpnExtension(),
                     RecordSizeLimitExtension.Type => new RecordSizeLimitExtension(),
                     MaxFragmentLengthExtension.Type => new MaxFragmentLengthExtension(),
+                    CertificateTypeExtension.ClientType => new CertificateTypeExtension(CertificateTypeExtension.ClientType),
+                    CertificateTypeExtension.ServerType => new CertificateTypeExtension(CertificateTypeExtension.ServerType),
                     0x000a => new SupportedGroups(),
                     0x000e => new UseSrtpExtension(),
                     EarlyDataExtension.Type => new EarlyDataExtension(),

@@ -110,6 +110,19 @@ namespace SharpDTLS.DTLS13
         /// <summary>Optional client certificate validation. Return false to abort with bad_certificate.</summary>
         public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ClientCertificateValidator { get; set; }
 
+        /// <summary>
+        /// Certificate types we authenticate with, in preference order (RFC 7250); null for X.509 only. With
+        /// <see cref="CertificateType.RawPublicKey"/> clients that support it get the key pair's SubjectPublicKeyInfo, so a
+        /// server can do without a certificate.
+        /// </summary>
+        public IList<CertificateType> ServerCertificateTypes { get; set; }
+
+        /// <summary>Certificate types accepted from clients, in preference order (RFC 7250); null for X.509 only.</summary>
+        public IList<CertificateType> ClientCertificateTypes { get; set; }
+
+        /// <summary>Checks a client's raw public key (DER SubjectPublicKeyInfo); false aborts with bad_certificate.</summary>
+        public Func<byte[], bool> ClientRawPublicKeyValidator { get; set; }
+
         public TimeSpan InitialRetransmitTimeout { get; set; } = TimeSpan.FromSeconds(1);
 
         /// <summary>Optional NSS key log sink (SSLKEYLOGFILE format).</summary>
@@ -178,8 +191,8 @@ namespace SharpDTLS.DTLS13
         /// <param name="keyPair">The certificate key, or null with <paramref name="certificate"/> for a PSK-only server.</param>
         public Dtls13Server(IServerTransport serverTransport, AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
         {
-            if ((keyPair == null) != (certificate == null))
-                throw new ArgumentException("Pass both a key pair and a certificate, or neither (PSK-only server).");
+            if (certificate != null && keyPair == null)
+                throw new ArgumentException("A certificate needs its key pair.");
             ServerKeyPair = keyPair;
             ServerCertificate = certificate;
 
@@ -426,6 +439,9 @@ namespace SharpDTLS.DTLS13
         private ClientHelloDatagram _clientHello;
         private CertificateRequestDatagram _certificateRequest;
         private X509Certificate _clientCertificate;
+        private AsymmetricKeyParameter _clientPublicKey;
+        private CertificateType? _serverCertificateType;
+        private CertificateType? _clientCertificateType;
         private byte[] _psk;
         private int _pskIdentity;
         private ushort _group;
@@ -502,6 +518,12 @@ namespace SharpDTLS.DTLS13
         /// <summary>The client's certificate, when one was sent.</summary>
         public X509Certificate ClientCertificate => _clientCertificate;
 
+        /// <summary>The client's raw public key (DER SubjectPublicKeyInfo, RFC 7250), when it authenticated with one.</summary>
+        public byte[] ClientRawPublicKey { get; private set; }
+
+        /// <summary>The certificate type we authenticated with (RFC 7250).</summary>
+        public CertificateType ServerCertificateType => _serverCertificateType ?? CertificateType.X509;
+
         internal Dtls13ServerConnection(Dtls13Server server, EndPoint remoteEndPoint)
             : this(server, new PeerAddressTracker(remoteEndPoint))
         {
@@ -547,6 +569,15 @@ namespace SharpDTLS.DTLS13
                 if (_clientHello.Extensions.OfType<StatusRequestExtension>().FirstOrDefault()?.StatusType != StatusRequestExtension.Ocsp)
                     _ocspResponse = null;
 
+                // Certificate types (RFC 7250); without one in common we cannot authenticate with a certificate.
+                _serverCertificateType = RawPublicKeys.Choose(_server.ServerCertificateTypes,
+                    RawPublicKeys.Find(_clientHello.Extensions, CertificateTypeExtension.ServerType),
+                    t => t == CertificateType.RawPublicKey ? _keyPair != null : _certificate != null);
+                _clientCertificateType = RawPublicKeys.Choose(_server.ClientCertificateTypes,
+                    RawPublicKeys.Find(_clientHello.Extensions, CertificateTypeExtension.ClientType), _ => true);
+                if (_serverCertificateType == CertificateType.RawPublicKey)
+                    _ocspResponse = null;
+
                 ApplicationProtocol = AlpnExtension.Select(_server.ApplicationProtocols, _clientHello.Extensions.OfType<AlpnExtension>().FirstOrDefault());
 
                 // Record size limits apply to everything we send from the ServerHello on (0-RTT data is exempt).
@@ -563,9 +594,10 @@ namespace SharpDTLS.DTLS13
                 }
 
                 SelectPsk(record);
-                if (_psk == null && (_group == 0 || _certificate == null))
-                    throw new DtlsException(AlertDescription.HandshakeFailure,
-                        _certificate == null ? "PSK-only server and no acceptable PSK." : "No key share and no acceptable PSK.");
+                if (_psk == null && (_group == 0 || _serverCertificateType == null))
+                    throw new DtlsException(_serverCertificateType == null && _keyPair != null ? AlertDescription.UnsupportedCertificate : AlertDescription.HandshakeFailure,
+                        _keyPair == null ? "PSK-only server and no acceptable PSK."
+                        : _serverCertificateType == null ? "No certificate type in common and no acceptable PSK." : "No key share and no acceptable PSK.");
                 Session.Transcript.AddPlaintextRecord(record);
 
                 // 0-RTT keys come from the ClientHello alone (RFC 8446 §7.1).
@@ -726,13 +758,23 @@ namespace SharpDTLS.DTLS13
             {
                 if (_server.RequireClientCertificate)
                 {
+                    if (_clientCertificateType == null)
+                        throw new DtlsException(AlertDescription.UnsupportedCertificate, "No client certificate type in common.");
                     _certificateRequest = new CertificateRequestDatagram();
                     SendHandshake(_certificateRequest, handshakeKeys);
                     Session.RequiresClientAuth = true;
                 }
 
-                var chain = new List<byte[]> { _certificate.GetEncoded() };
-                chain.AddRange((_intermediates ?? Array.Empty<X509Certificate>()).Select(c => c.GetEncoded()));
+                var chain = new List<byte[]>();
+                if (_serverCertificateType == CertificateType.RawPublicKey)
+                {
+                    chain.Add(RawPublicKeys.Encode(_keyPair.Public));
+                }
+                else
+                {
+                    chain.Add(_certificate.GetEncoded());
+                    chain.AddRange((_intermediates ?? Array.Empty<X509Certificate>()).Select(c => c.GetEncoded()));
+                }
                 SendHandshake(new CertificateDatagram(chain) { OcspResponse = _ocspResponse }, handshakeKeys);
 
                 var clientSchemes = _clientHello.Extensions.OfType<ClientSignatureAlgorithms>().FirstOrDefault()?.SignatureAlgorithms;
@@ -773,6 +815,12 @@ namespace SharpDTLS.DTLS13
                 extensions.Extensions.Add(new AlpnExtension(new[] { ApplicationProtocol }));
             if (_recordSizeResponse != null)
                 extensions.Extensions.Add(_recordSizeResponse);
+            // The chosen certificate types (RFC 7250 §4.2); client_certificate_type only with a CertificateRequest.
+            if (_psk == null && RawPublicKeys.Find(_clientHello.Extensions, CertificateTypeExtension.ServerType) != null)
+                extensions.Extensions.Add(new CertificateTypeExtension(CertificateTypeExtension.ServerType, _serverCertificateType.Value));
+            if (_psk == null && _server.RequireClientCertificate && _clientCertificateType != null
+                && RawPublicKeys.Find(_clientHello.Extensions, CertificateTypeExtension.ClientType) != null)
+                extensions.Extensions.Add(new CertificateTypeExtension(CertificateTypeExtension.ClientType, _clientCertificateType.Value));
 
             return extensions;
         }
@@ -806,6 +854,22 @@ namespace SharpDTLS.DTLS13
                         break;
                     }
 
+                    if (_clientCertificateType == CertificateType.RawPublicKey)
+                    {
+                        if (certificate.CertificateChain.Count != 1)
+                            throw new DtlsException(AlertDescription.DecodeError, "A raw public key Certificate has one entry.");
+                        byte[] spki = certificate.Certificate;
+                        _clientPublicKey = RawPublicKeys.Decode(spki);
+                        if (_server.ClientRawPublicKeyValidator != null && !_server.ClientRawPublicKeyValidator(spki))
+                            throw new DtlsException(AlertDescription.BadCertificate, "Client raw public key was rejected.");
+                        ClientRawPublicKey = spki;
+                        // Nothing to resume with: a later resumption that requires a certificate does a full handshake.
+                        Session.ReceivedClientCertificate = true;
+                        Session.Transcript.AddHandshake(message);
+                        _state = State.WaitClientCertificateVerify;
+                        break;
+                    }
+
                     try
                     {
                         _clientCertificate = new X509CertificateParser().ReadCertificate(certificate.Certificate);
@@ -818,6 +882,7 @@ namespace SharpDTLS.DTLS13
                         throw new DtlsException(AlertDescription.BadCertificate, "Client certificate could not be parsed.");
                     if (_server.ClientCertificateValidator != null && !_server.ClientCertificateValidator(_clientCertificate, certificate.CertificateChain))
                         throw new DtlsException(AlertDescription.BadCertificate, "Client certificate was rejected.");
+                    _clientPublicKey = _clientCertificate.GetPublicKey();
 
                     Session.ClientCertificateBytes = certificate.Certificate;
                     Session.PeerCertificate = certificate.Certificate;
@@ -833,7 +898,7 @@ namespace SharpDTLS.DTLS13
                         throw new DtlsException(AlertDescription.IllegalParameter, $"Client used signature scheme 0x{scheme:X4}, which was not requested.");
 
                     byte[] content = Dtls13Signatures.BuildSignedContent(server: false, Session.Transcript.Hash(suite));
-                    if (!Dtls13Signatures.Verify(scheme, _clientCertificate.GetPublicKey(), content, certificateVerify.Signature))
+                    if (!Dtls13Signatures.Verify(scheme, _clientPublicKey, content, certificateVerify.Signature))
                         throw new DtlsException(AlertDescription.DecryptError, "Client CertificateVerify signature is invalid.");
 
                     Session.ReceivedClientCertificateVerify = true;

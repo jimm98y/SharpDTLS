@@ -22,8 +22,8 @@ namespace SharpDTLS.DTLS12
 
         protected Dtls12ServerBase(IServerTransport serverTransport, AsymmetricCipherKeyPair keyPair, X509Certificate certificate, ushort version)
         {
-            if ((keyPair == null) != (certificate == null))
-                throw new ArgumentException("Pass both a key pair and a certificate, or neither (PSK-only server).");
+            if (certificate != null && keyPair == null)
+                throw new ArgumentException("A certificate needs its key pair.");
 
             Settings = new Dtls12ServerSettings
             {
@@ -82,6 +82,19 @@ namespace SharpDTLS.DTLS12
 
         /// <summary>The most payload per record we accept, advertised with record_size_limit (RFC 8449); null for 16384.</summary>
         public int? RecordSizeLimit { get => Settings.RecordSizeLimit; set => Settings.RecordSizeLimit = value; }
+
+        /// <summary>
+        /// Certificate types we authenticate with, in preference order (RFC 7250); null for X.509 only. With
+        /// <see cref="CertificateType.RawPublicKey"/> clients that support it get the key pair's SubjectPublicKeyInfo, so a
+        /// server can do without a certificate.
+        /// </summary>
+        public IList<CertificateType> ServerCertificateTypes { get => Settings.ServerCertificateTypes; set => Settings.ServerCertificateTypes = value; }
+
+        /// <summary>Certificate types accepted from clients, in preference order (RFC 7250); null for X.509 only.</summary>
+        public IList<CertificateType> ClientCertificateTypes { get => Settings.ClientCertificateTypes; set => Settings.ClientCertificateTypes = value; }
+
+        /// <summary>Checks a client's raw public key (DER SubjectPublicKeyInfo); false aborts with bad_certificate.</summary>
+        public Func<byte[], bool> ClientRawPublicKeyValidator { get => Settings.ClientRawPublicKeyValidator; set => Settings.ClientRawPublicKeyValidator = value; }
 
         /// <summary>A DER OCSP response for the certificate, stapled for clients that ask (RFC 6066 §8); null for none.</summary>
         public byte[] OcspResponse { get => Settings.OcspResponse; set => Settings.OcspResponse = value; }
