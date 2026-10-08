@@ -347,6 +347,19 @@ namespace SharpDTLS.DTLS13
         {
         }
 
+        /// <summary>A TLS 1.3 connection over a stream: the ClientHello arrives on it.</summary>
+        internal Dtls13ServerConnection(Tls13ServerBase server, EndPoint remoteEndPoint, Action<byte[]> send)
+            : base(isClient: false, send, stream: true)
+        {
+            _server = server;
+            _address = new PeerAddressTracker(remoteEndPoint);
+            KeyLogWriter = server.KeyLogWriter;
+
+            ApplicationDataReceived += (_, data) => _server.OnApplicationData(this, data);
+            KeyUpdateReceived += (_, keyUpdate) => _server.OnKeyUpdate(keyUpdate);
+            Closed += (_, _) => _server.OnConnectionClosed(this);
+        }
+
         // Replies go to the tracked address, which moves with connection IDs.
         private Dtls13ServerConnection(Dtls13Server server, PeerAddressTracker address)
             : base(isClient: false, send: data => server.ServerTransport.Send(address.Current, data))
@@ -373,7 +386,8 @@ namespace SharpDTLS.DTLS13
                 {
                     // Rebuild the transcript the client has: message_hash(ClientHello1) || HelloRetryRequest || ClientHello2.
                     // The HelloRetryRequest is deterministic given the cookie, so it can be recreated byte for byte.
-                    var hrr = new HelloRetryRequest(suite.Id, retry.Cookie, retry.RequestedGroup != 0 ? retry.RequestedGroup : null, Array.Empty<byte>());
+                    var hrr = new HelloRetryRequest(suite.Id, retry.Cookie, retry.RequestedGroup != 0 ? retry.RequestedGroup : null,
+                        IsDatagram ? Array.Empty<byte>() : clientHello.LegacySessionId, IsDatagram);
                     Session.Transcript.AddMessageHash(retry.ClientHello1Hash);
                     Session.Transcript.AddPlaintextRecord(hrr.ToBytes());
                 }
@@ -409,7 +423,7 @@ namespace SharpDTLS.DTLS13
                     _clientHello.Extensions.OfType<MaxFragmentLengthExtension>().FirstOrDefault(), _server.RecordSizeLimit, dtls13: true);
 
                 var offeredCid = _clientHello.Extensions.OfType<ConnectionIdExtension>().FirstOrDefault();
-                if (DatagramServer.UseConnectionIds && offeredCid != null)
+                if (IsDatagram && DatagramServer.UseConnectionIds && offeredCid != null)
                 {
                     WriteConnectionId = offeredCid.ConnectionId;
                     ReadConnectionId = Dtls13CryptoUtils.GenerateRandom(DatagramServer.ConnectionIdLength);
@@ -517,6 +531,13 @@ namespace SharpDTLS.DTLS13
         /// </summary>
         private bool AcceptEarlyData()
         {
+            // TLS 0-RTT (with EndOfEarlyData) is not implemented: decline, and skip the client's early records.
+            if (!IsDatagram)
+            {
+                if (_clientHello.Extensions.OfType<EarlyDataExtension>().Any())
+                    SkipUndecryptableBytes = 64 * 1024;
+                return false;
+            }
             var offered = _clientHello.Extensions.OfType<ClientPreSharedKeyExtension>().FirstOrDefault();
             if (!_clientHello.Extensions.OfType<EarlyDataExtension>().Any() || offered == null)
                 return false;
@@ -558,8 +579,14 @@ namespace SharpDTLS.DTLS13
             BeginFlight();
 
             // RFC 9147 §5: legacy_session_id_echo stays empty, whatever the client sent (no compatibility mode).
-            var serverHello = new ServerHelloDatagram(Array.Empty<byte>(), suite.Id, Dtls13CryptoUtils.GenerateRandom(32));
+            var serverHello = new ServerHelloDatagram(Array.Empty<byte>(), suite.Id, Dtls13CryptoUtils.GenerateRandom(32)) { Datagram = IsDatagram };
             serverHello.Extensions.RemoveAll(e => e is ServerKeyShareExtension);
+            if (!IsDatagram)
+            {
+                serverHello.Extensions.RemoveAll(e => e is ServerSupportedVersions);
+                serverHello.Extensions.Add(new ServerSupportedVersions(ClientSupportedVersions.Tls13));
+                serverHello.LegacySessionIdEcho = _clientHello.LegacySessionId; // RFC 8446 §4.1.3
+            }
             if (!_pskOnly)
                 serverHello.Extensions.Insert(0, new ServerKeyShareExtension(_group, share));
             if (_psk != null)
@@ -631,7 +658,7 @@ namespace SharpDTLS.DTLS13
             var extensions = new EncryptedExtensionsDatagram();
 
             var offered = _clientHello.Extensions.OfType<UseSrtpExtension>().FirstOrDefault();
-            ushort? profile = DtlsSrtp.Select(DatagramServer.SrtpProtectionProfiles, offered?.SrtpProtectionProfiles);
+            ushort? profile = IsDatagram ? DtlsSrtp.Select(DatagramServer.SrtpProtectionProfiles, offered?.SrtpProtectionProfiles) : null;
             if (profile.HasValue)
             {
                 SelectedSrtpProtectionProfile = profile;
@@ -659,12 +686,42 @@ namespace SharpDTLS.DTLS13
 
         protected override void OnPlaintextHandshake(byte[] record)
         {
+            if (!IsDatagram)
+            {
+                OnTlsClientHello(record);
+                return;
+            }
             if (record[13] != 0x01)
                 throw new DtlsException(AlertDescription.UnexpectedMessage, $"Unexpected plaintext handshake message 0x{record[13]:X2}");
 
             int messageSeq = (record[17] << 8) | record[18];
             if (messageSeq < NextReceiveMessageSeq && !IsHandshakeComplete)
                 OnDuplicatePlaintextHandshake(record); // our flight was lost: retransmit it
+        }
+
+        private bool _awaitingClientHello2;
+
+        // TLS: the ClientHello (or, after a HelloRetryRequest, ClientHello2) arrives on the connection's own stream.
+        private void OnTlsClientHello(byte[] record)
+        {
+            if (record[5] != 0x01 || _clientHello != null)
+                throw new DtlsException(AlertDescription.UnexpectedMessage, $"Unexpected plaintext handshake message 0x{record[5]:X2}");
+
+            var clientHello = new ClientHelloDatagram { Datagram = false };
+            clientHello.FromBytes(record);
+            var decision = _server.DecideClientHello(clientHello, record, RemoteEndPoint, alwaysRetry: false);
+            if (decision.HelloRetryRequest != null)
+            {
+                // RFC 8446 §4.1.4: a second HelloRetryRequest is an error.
+                if (_awaitingClientHello2)
+                    throw new DtlsException(AlertDescription.IllegalParameter, "ClientHello2 still needs a HelloRetryRequest.");
+                _awaitingClientHello2 = true;
+                SendPlaintextHandshake(decision.HelloRetryRequest);
+                return;
+            }
+            if (_awaitingClientHello2 && decision.Retry == null)
+                throw new DtlsException(AlertDescription.IllegalParameter, "ClientHello2 without the HelloRetryRequest cookie.");
+            Start(record, clientHello, SuiteFor(decision.SuiteId), decision.Retry, decision.ShareGroup);
         }
 
         protected override void OnHandshakeMessage(byte[] message, IHandshakeDatagram parsed)

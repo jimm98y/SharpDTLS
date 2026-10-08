@@ -227,6 +227,12 @@ namespace SharpDTLS.DTLS13
             ClientTransport.OnDataReceived += (_, data) => ProcessDatagram(data);
         }
 
+        /// <param name="stream">TLS 1.3 over a reliable byte stream instead of DTLS 1.3 over datagrams.</param>
+        protected Dtls13Client(Action<byte[]> send, bool stream)
+            : base(isClient: true, send, stream)
+        {
+        }
+
         public void BeginHandshake()
         {
             Run(() =>
@@ -262,7 +268,12 @@ namespace SharpDTLS.DTLS13
 
         private ClientHelloDatagram BuildClientHello(byte[] random, byte[] cookie)
         {
-            var clientHello = new ClientHelloDatagram(Array.Empty<byte>()) { ClientRandom = random };
+            var clientHello = new ClientHelloDatagram(Array.Empty<byte>()) { ClientRandom = random, Datagram = IsDatagram };
+            if (!IsDatagram)
+            {
+                clientHello.Extensions.RemoveAll(e => e is ClientSupportedVersions);
+                clientHello.Extensions.Add(new ClientSupportedVersions(ClientSupportedVersions.Tls13));
+            }
             clientHello.CipherSuites = new List<ushort>(CipherSuites);
 
             // Advertise only what is implemented, and the configured groups with a share for each key share group.
@@ -290,12 +301,12 @@ namespace SharpDTLS.DTLS13
                 clientHello.Extensions.Add(serverTypes);
             if (RawPublicKeys.Offer(CertificateTypeExtension.ClientType, ClientCertificateTypes) is { } clientTypes)
                 clientHello.Extensions.Add(clientTypes);
-            if (UseConnectionId)
+            if (UseConnectionId && IsDatagram)
             {
                 _offeredConnectionId ??= Dtls13CryptoUtils.GenerateRandom(ConnectionIdLength);
                 clientHello.Extensions.Add(new ConnectionIdExtension(_offeredConnectionId));
             }
-            if (SrtpProtectionProfiles != null && SrtpProtectionProfiles.Length > 0)
+            if (IsDatagram && SrtpProtectionProfiles != null && SrtpProtectionProfiles.Length > 0)
                 clientHello.Extensions.Add(new UseSrtpExtension(SrtpProtectionProfiles));
             if (cookie != null)
                 clientHello.Extensions.Add(new CookieExtension(cookie));
@@ -334,17 +345,17 @@ namespace SharpDTLS.DTLS13
 
             // A PSK's hash must match the suite: after a HelloRetryRequest that is the selected one.
             bool Compatible(Dtls13CipherSuite hashSuite) => _receivedHelloRetryRequest
-                ? Dtls13CipherSuite.Get(_hrrCipherSuite).HashAlgorithm == hashSuite.HashAlgorithm
-                : CipherSuites.Any(id => Dtls13CipherSuite.Get(id).HashAlgorithm == hashSuite.HashAlgorithm);
+                ? SuiteFor(_hrrCipherSuite).HashAlgorithm == hashSuite.HashAlgorithm
+                : CipherSuites.Any(id => SuiteFor(id).HashAlgorithm == hashSuite.HashAlgorithm);
 
             var ticket = ResumptionTicket;
             if (UseSessionTickets && ticket != null && !ticket.IsExpired && string.Equals(ticket.ServerName, ServerName, StringComparison.OrdinalIgnoreCase) && Dtls13CipherSuite.IsSupported(ticket.CipherSuite)
-                && Compatible(Dtls13CipherSuite.Get(ticket.CipherSuite)))
-                _offeredPsks.Add(new OfferedPsk(ticket.Ticket, ticket.ObfuscatedAge, ticket.Psk, Dtls13CipherSuite.Get(ticket.CipherSuite), ticket));
+                && Compatible(SuiteFor(ticket.CipherSuite)))
+                _offeredPsks.Add(new OfferedPsk(ticket.Ticket, ticket.ObfuscatedAge, ticket.Psk, SuiteFor(ticket.CipherSuite), ticket));
 
             // External PSKs have no age: obfuscated_ticket_age is 0 (RFC 8446 §4.2.11).
-            if (ExternalPsk != null && Compatible(Dtls13CipherSuite.Get(ExternalPsk.CipherSuite)))
-                _offeredPsks.Add(new OfferedPsk(ExternalPsk.Identity, 0, ExternalPsk.Key, Dtls13CipherSuite.Get(ExternalPsk.CipherSuite), null));
+            if (ExternalPsk != null && Compatible(SuiteFor(ExternalPsk.CipherSuite)))
+                _offeredPsks.Add(new OfferedPsk(ExternalPsk.Identity, 0, ExternalPsk.Key, SuiteFor(ExternalPsk.CipherSuite), null));
 
             if (_offeredPsks.Count == 0)
                 return;
@@ -352,7 +363,8 @@ namespace SharpDTLS.DTLS13
             // 0-RTT only with the ticket as the first identity, within its limit and with its suite offered
             // (the server must select it), and never after a HelloRetryRequest (RFC 8446 §4.2.10).
             var first = _offeredPsks[0];
-            _earlyDataOffered = EarlyData != null && first.Ticket != null && !_receivedHelloRetryRequest
+            // TLS 0-RTT (with EndOfEarlyData) is not implemented: early data is DTLS only.
+            _earlyDataOffered = IsDatagram && EarlyData != null && first.Ticket != null && !_receivedHelloRetryRequest
                                 && first.Ticket.MaxEarlyDataSize >= EarlyData.Length && CipherSuites.Contains(first.Ticket.CipherSuite)
                                 && (first.Ticket.ApplicationProtocol == null || (ApplicationProtocols?.Contains(first.Ticket.ApplicationProtocol) ?? false));
             if (_earlyDataOffered)
@@ -378,7 +390,7 @@ namespace SharpDTLS.DTLS13
         // Epoch 1, under client_early_traffic_secret of the ticket's suite; not part of any flight.
         private void SendEarlyData()
         {
-            var ticketSuite = Dtls13CipherSuite.Get(_offeredPsks[0].Ticket.CipherSuite);
+            var ticketSuite = SuiteFor(_offeredPsks[0].Ticket.CipherSuite);
             var earlyKeys = Dtls13CryptoUtils.CalculateEarlyKeys(_clientHello.ClientRandom, Session.Transcript.Hash(ticketSuite), _offeredPsks[0].Key, ticketSuite);
             SendProtected(earlyKeys, new ApplicationDataDatagram(EarlyData).ToBytes());
         }
@@ -387,15 +399,20 @@ namespace SharpDTLS.DTLS13
 
         protected override void OnPlaintextHandshake(byte[] record)
         {
-            if (record[13] != 0x02)
-                throw new DtlsException(AlertDescription.UnexpectedMessage, $"Unexpected plaintext handshake message 0x{record[13]:X2}");
+            byte type = record[IsDatagram ? 13 : 5];
+            if (type != 0x02)
+                throw new DtlsException(AlertDescription.UnexpectedMessage, $"Unexpected plaintext handshake message 0x{type:X2}");
 
             // Retransmitted ServerHello/HelloRetryRequest (e.g. answering a retransmitted ClientHello): ignore.
-            int messageSeq = (record[17] << 8) | record[18];
+            int messageSeq = IsDatagram ? (record[17] << 8) | record[18] : NextReceiveMessageSeq;
             if (_state != State.WaitServerHello || messageSeq < NextReceiveMessageSeq)
+            {
+                if (!IsDatagram)
+                    throw new DtlsException(AlertDescription.UnexpectedMessage, "Unexpected ServerHello.");
                 return;
+            }
 
-            var serverHello = new ServerHelloDatagram();
+            var serverHello = new ServerHelloDatagram { Datagram = IsDatagram };
             serverHello.FromBytes(record);
             ValidateServerHello(serverHello);
 
@@ -407,19 +424,20 @@ namespace SharpDTLS.DTLS13
 
         private void ValidateServerHello(ServerHelloDatagram serverHello)
         {
-            if (serverHello.Bytes[25] != 0xFE || serverHello.Bytes[26] != 0xFD)
-                throw new DtlsException(AlertDescription.ProtocolVersion, "ServerHello legacy_version must be DTLS 1.2.");
+            int h = IsDatagram ? 25 : 9;
+            if (serverHello.Bytes[h] != (IsDatagram ? 0xFE : 0x03) || serverHello.Bytes[h + 1] != (IsDatagram ? 0xFD : 0x03))
+                throw new DtlsException(AlertDescription.ProtocolVersion, IsDatagram ? "ServerHello legacy_version must be DTLS 1.2." : "ServerHello legacy_version must be TLS 1.2.");
 
             var versions = serverHello.Extensions.OfType<ServerSupportedVersions>().FirstOrDefault();
-            if (versions == null)
-                throw new DtlsException(AlertDescription.ProtocolVersion, "Server did not negotiate DTLS 1.3.");
+            if (versions == null || versions.Version != (IsDatagram ? ClientSupportedVersions.Dtls13 : ClientSupportedVersions.Tls13))
+                throw new DtlsException(AlertDescription.ProtocolVersion, IsDatagram ? "Server did not negotiate DTLS 1.3." : "Server did not negotiate TLS 1.3.");
 
             if (!CipherSuites.Contains(serverHello.SelectedCipherSuite))
                 throw new DtlsException(AlertDescription.IllegalParameter, $"Server selected a cipher suite that was not offered (0x{serverHello.SelectedCipherSuite:X4}).");
 
-            // RFC 9147 §5: DTLS 1.3 servers must not echo legacy_session_id.
-            if (serverHello.LegacySessionIdEcho.Length != 0)
-                throw new DtlsException(AlertDescription.IllegalParameter, "DTLS 1.3 ServerHello echoes a legacy_session_id.");
+            // RFC 9147 §5: DTLS 1.3 servers must not echo legacy_session_id; TLS 1.3 servers echo ours (RFC 8446 §4.1.3).
+            if (!serverHello.LegacySessionIdEcho.AsSpan().SequenceEqual(_clientHello.LegacySessionId))
+                throw new DtlsException(AlertDescription.IllegalParameter, "ServerHello legacy_session_id_echo does not match.");
         }
 
         private void OnHelloRetryRequest(byte[] record, ServerHelloDatagram hrr)
@@ -429,7 +447,7 @@ namespace SharpDTLS.DTLS13
 
             _receivedHelloRetryRequest = true;
             _hrrCipherSuite = hrr.SelectedCipherSuite;
-            var suite = Dtls13CipherSuite.Get(hrr.SelectedCipherSuite);
+            var suite = SuiteFor(hrr.SelectedCipherSuite);
 
             var keyShare = hrr.Extensions.OfType<ServerKeyShareExtension>().FirstOrDefault();
             var cookie = hrr.Extensions.OfType<CookieExtension>().FirstOrDefault();
@@ -479,7 +497,7 @@ namespace SharpDTLS.DTLS13
 
             StopRetransmission();
 
-            var suite = Dtls13CipherSuite.Get(serverHello.SelectedCipherSuite);
+            var suite = SuiteFor(serverHello.SelectedCipherSuite);
             Session.CipherSuite = suite;
 
             // RFC 8446 §4.2.11: the server may only select an identity we offered, with a suite of the same hash.
@@ -572,7 +590,7 @@ namespace SharpDTLS.DTLS13
                     if (srtp != null)
                     {
                         // RFC 5764 §4.1.1: exactly one profile, and one we offered
-                        if (srtp.SrtpProtectionProfiles.Length != 1 || SrtpProtectionProfiles == null || !SrtpProtectionProfiles.Contains(srtp.SrtpProtectionProfiles[0]))
+                        if (!IsDatagram || srtp.SrtpProtectionProfiles.Length != 1 || SrtpProtectionProfiles == null || !SrtpProtectionProfiles.Contains(srtp.SrtpProtectionProfiles[0]))
                             throw new DtlsException(AlertDescription.IllegalParameter, "Server selected an SRTP profile that was not offered.");
                         SelectedSrtpProtectionProfile = srtp.SrtpProtectionProfiles[0];
                     }

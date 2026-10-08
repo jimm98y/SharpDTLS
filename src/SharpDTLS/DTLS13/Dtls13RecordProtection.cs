@@ -189,6 +189,41 @@ namespace SharpDTLS.DTLS13
 
         // RFC 8446 §5.3: nonce = iv XOR (64-bit sequence number, left-padded to iv length).
         // RFC 9147 §4: the epoch is not part of the AEAD sequence number in DTLS 1.3.
+        /// <summary>
+        /// A TLS 1.3 record (RFC 8446 §5.2): header opaque_type 23, legacy version 0x0303 and length, which is also the
+        /// AAD; the nonce is the IV XOR the implicit 64-bit sequence number.
+        /// </summary>
+        internal static byte[] ProtectTls(Dtls13CryptoContext ctx, bool fromClient, ulong sequenceNumber, byte[] innerPlaintext)
+        {
+            var suite = ctx.Suite;
+            int length = innerPlaintext.Length + suite.TagLength;
+            if (length > 16384 + 256)
+                throw new DtlsException(AlertDescription.RecordOverflow, "Record too large");
+            byte[] header = { 0x17, 0x03, 0x03, (byte)(length >> 8), (byte)length };
+            byte[] sealedData = suite.Cipher.Seal(fromClient ? ctx.ClientKey : ctx.ServerKey,
+                BuildNonce(fromClient ? ctx.ClientIv : ctx.ServerIv, sequenceNumber), header, innerPlaintext);
+            byte[] record = new byte[5 + sealedData.Length];
+            header.CopyTo(record, 0);
+            sealedData.CopyTo(record, 5);
+            return record;
+        }
+
+        /// <summary>Opens a TLS 1.3 record; returns TLSInnerPlaintext without its zero padding, or null when authentication fails.</summary>
+        internal static byte[] UnprotectTls(Dtls13CryptoContext ctx, bool fromClient, ulong sequenceNumber, byte[] record)
+        {
+            var suite = ctx.Suite;
+            byte[] plaintext = suite.Cipher.Open(fromClient ? ctx.ClientKey : ctx.ServerKey,
+                BuildNonce(fromClient ? ctx.ClientIv : ctx.ServerIv, sequenceNumber), record.AsSpan(0, 5).ToArray(), record.AsSpan(5).ToArray());
+            if (plaintext == null)
+                return null;
+            int end = plaintext.Length;
+            while (end > 0 && plaintext[end - 1] == 0)
+                end--;
+            if (end == 0)
+                throw new DtlsException(AlertDescription.UnexpectedMessage, "Record without a content type.");
+            return plaintext.AsSpan(0, end).ToArray();
+        }
+
         internal static byte[] BuildNonce(byte[] iv, ulong sequenceNumber)
         {
             byte[] nonce = (byte[])iv.Clone();

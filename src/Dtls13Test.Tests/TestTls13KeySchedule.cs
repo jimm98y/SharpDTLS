@@ -32,6 +32,16 @@ namespace Dtls13Test.Tests
         }
 
         [TestMethod]
+        public void TlsSuite_CarriesOverToKeyUpdates()
+        {
+            var suite = Dtls13CipherSuite.Get(0x1301).ForTls();
+            var application = Dtls13CryptoUtils.CalculateApplicationKeys(new byte[32], new byte[32], new byte[32], suite);
+            Assert.IsTrue(application.Suite.IsTls);
+            Assert.IsTrue(Dtls13CryptoUtils.UpdateClientTrafficSecret(application).Suite.IsTls);
+            Assert.IsTrue(Dtls13CryptoUtils.UpdateServerTrafficSecret(application).Suite.IsTls);
+        }
+
+        [TestMethod]
         public void DtlsSuites_KeepTheDtls13Prefix()
         {
             var dtls = Dtls13CipherSuite.Get(0x1301);

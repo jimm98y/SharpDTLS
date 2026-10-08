@@ -9,20 +9,26 @@ namespace SharpDTLS.TLS12
     /// <summary>Feeds bytes read from a stream into a TLS connection until the stream ends.</summary>
     internal static class TlsStreamPump
     {
-        public static Task Start(Stream stream, Dtls12Connection connection) => Task.Run(async () =>
+        public static Task Start(Stream stream, Dtls12Connection connection)
+            => Start(stream, connection, connection.ProcessStreamData, connection.OnTransportClosed);
+
+        public static Task Start(Stream stream, SharpDTLS.DTLS13.Dtls13Connection connection)
+            => Start(stream, connection, connection.ProcessStreamData, connection.OnTransportClosed);
+
+        private static Task Start(Stream stream, DtlsConnectionBase connection, Action<byte[], int, int> process, Action closed) => Task.Run(async () =>
         {
             byte[] buffer = new byte[16384 + 2048 + 5];
             try
             {
                 int read;
                 while (!connection.IsClosed && (read = await stream.ReadAsync(buffer).ConfigureAwait(false)) > 0)
-                    connection.ProcessStreamData(buffer, 0, read);
+                    process(buffer, 0, read);
             }
             catch (Exception ex) when (ex is IOException or ObjectDisposedException)
             {
-                Debug.WriteLine($"[TLS12] Read failed: {ex.Message}");
+                Debug.WriteLine($"[TLS] Read failed: {ex.Message}");
             }
-            connection.OnTransportClosed();
+            closed();
         });
 
         /// <summary>Writes a record; failures surface as a closed stream on the read side.</summary>

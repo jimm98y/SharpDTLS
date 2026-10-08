@@ -145,9 +145,24 @@ namespace SharpDTLS.DTLS13
         protected virtual void OnRecordAuthenticated(ulong epoch, ulong sequenceNumber, bool withConnectionId) { }
 
         protected Dtls13Connection(bool isClient, Action<byte[]> send)
-            : base(isClient, send, "DTLS13")
+            : this(isClient, send, stream: false)
         {
         }
+
+        /// <param name="stream">TLS 1.3 over a reliable byte stream (RFC 8446) instead of DTLS 1.3 over datagrams.</param>
+        protected Dtls13Connection(bool isClient, Action<byte[]> send, bool stream)
+            : base(isClient, send, stream ? "TLS13" : "DTLS13")
+        {
+            IsDatagram = !stream;
+        }
+
+        /// <summary>DTLS 1.3 over datagrams, or TLS 1.3 over a stream.</summary>
+        protected bool IsDatagram { get; }
+
+        protected override bool IsReliableTransport => !IsDatagram;
+
+        /// <summary>The cipher suite with this protocol's key schedule labels ("dtls13" or "tls13 ").</summary>
+        protected Dtls13CipherSuite SuiteFor(ushort id) => IsDatagram ? Dtls13CipherSuite.Get(id) : Dtls13CipherSuite.Get(id).ForTls();
 
         /// <summary>
         /// Sends a KeyUpdate. The new write keys take effect once the peer ACKs it (RFC 9147 §8).
@@ -185,6 +200,183 @@ namespace SharpDTLS.DTLS13
 
         /// <summary>Called for a retransmitted epoch-0 handshake record while the handshake is in progress.</summary>
         protected virtual void OnDuplicatePlaintextHandshake(byte[] record) => RetransmitFlight();
+
+        // ── TLS 1.3 stream record layer (RFC 8446 §5) ─────────────────────────────────────────
+
+        private const int MaxTlsCiphertextLength = 16384 + 256;
+        private readonly List<byte> _tlsInput = new();
+        private readonly List<byte> _tlsHandshake = new();
+        private readonly Dictionary<Dtls13CryptoContext, ulong> _tlsReadSequence = new();
+
+        /// <summary>
+        /// Bytes of records that fail to decrypt to skip while the server waits for the client's handshake records: the
+        /// client sent 0-RTT data the server did not accept (RFC 8446 §4.2.10).
+        /// </summary>
+        protected int SkipUndecryptableBytes { get; set; }
+
+        /// <summary>Processes bytes received from a TLS stream (any amount: partial or several records).</summary>
+        public void ProcessStreamData(byte[] data, int offset, int count) => Run(() =>
+        {
+            if (IsClosed)
+                return;
+            for (int i = 0; i < count; i++)
+                _tlsInput.Add(data[offset + i]);
+            while (_tlsInput.Count >= 5 && !IsClosed)
+            {
+                int length = (_tlsInput[3] << 8) | _tlsInput[4];
+                if (length > MaxTlsCiphertextLength)
+                    throw new DtlsException(AlertDescription.RecordOverflow, $"Record of {length} bytes.");
+                if (_tlsInput.Count < 5 + length)
+                    return;
+                byte[] record = _tlsInput.GetRange(0, 5 + length).ToArray();
+                _tlsInput.RemoveRange(0, 5 + length);
+                ProcessTlsRecord(record);
+            }
+        });
+
+        /// <summary>The TLS stream ended: after the handshake that closes the connection; during it the handshake fails.</summary>
+        internal void OnTransportClosed() => Run(() =>
+        {
+            if (IsClosed)
+                return;
+            if (!IsHandshakeComplete)
+                throw new System.IO.IOException("The connection closed during the handshake.");
+            CloseInternal();
+        });
+
+        private void ProcessTlsRecord(byte[] record)
+        {
+            if (record[1] != 0x03)
+                throw new DtlsException(AlertDescription.DecodeError, "Not a TLS record.");
+            byte contentType = record[0];
+            byte[] fragment = record.AsSpan(5).ToArray();
+
+            // RFC 8446 §5: nothing may come between the parts of a handshake message.
+            if (contentType != 0x16 && contentType != 0x17 && _tlsHandshake.Count > 0)
+                throw new DtlsException(AlertDescription.UnexpectedMessage, "Record interleaved with a fragmented handshake message.");
+
+            var keys = Session.ReadKeys.Count > 0 ? Session.ReadKeys[Session.ReadKeys.Count - 1] : null;
+            switch (contentType)
+            {
+                case 0x14:
+                    // Middlebox compatibility (RFC 8446 §5, Appendix D.4): a single 0x01 before the handshake ends, ignored.
+                    if (fragment.Length != 1 || fragment[0] != 1 || IsHandshakeComplete)
+                        throw new DtlsException(AlertDescription.UnexpectedMessage, "Unexpected change_cipher_spec.");
+                    return;
+
+                case 0x15:
+                    if (keys != null)
+                        throw new DtlsException(AlertDescription.UnexpectedMessage, "Unprotected alert after keys were established.");
+                    if (fragment.Length != 2)
+                        throw new DtlsException(AlertDescription.DecodeError, "Invalid alert.");
+                    OnAlertReceived(fragment[0], (AlertDescription)fragment[1]);
+                    return;
+
+                case 0x16:
+                    if (keys != null)
+                        throw new DtlsException(AlertDescription.UnexpectedMessage, "Unprotected handshake message after keys were established.");
+                    if (fragment.Length == 0)
+                        throw new DtlsException(AlertDescription.UnexpectedMessage, "Empty handshake record.");
+                    _tlsHandshake.AddRange(fragment);
+                    while (TakeTlsHandshakeMessage() is { } message && !IsClosed)
+                    {
+                        // Handed over as one record holding the whole message, as the DTLS reassembler does.
+                        byte[] whole = new byte[5 + message.Length];
+                        whole[0] = 0x16;
+                        whole[1] = 0x03;
+                        whole[2] = 0x03;
+                        whole[3] = (byte)(message.Length >> 8);
+                        whole[4] = (byte)message.Length;
+                        message.CopyTo(whole, 5);
+                        OnPlaintextHandshake(whole);
+                    }
+                    return;
+
+                case 0x17:
+                    ProcessTlsProtectedRecord(keys, record);
+                    return;
+
+                default:
+                    throw new DtlsException(AlertDescription.UnexpectedMessage, $"Unknown content type 0x{contentType:X2}.");
+            }
+        }
+
+        private void ProcessTlsProtectedRecord(Dtls13CryptoContext keys, byte[] record)
+        {
+            if (keys == null)
+                throw new DtlsException(AlertDescription.UnexpectedMessage, "Protected record before the keys are known.");
+            _tlsReadSequence.TryGetValue(keys, out ulong sequence);
+            byte[] inner = Dtls13RecordProtection.UnprotectTls(keys, fromClient: !IsClient, sequence, record);
+            if (inner == null)
+            {
+                if (SkipUndecryptableBytes >= record.Length)
+                {
+                    SkipUndecryptableBytes -= record.Length; // rejected 0-RTT data
+                    return;
+                }
+                throw new DtlsException(AlertDescription.BadRecordMac, "Record failed authentication.");
+            }
+            SkipUndecryptableBytes = 0;
+            _tlsReadSequence[keys] = sequence + 1;
+
+            byte contentType = inner[^1];
+            CheckReceivedRecordSize(inner.Length - 1);
+            if (contentType != 0x16 && _tlsHandshake.Count > 0)
+                throw new DtlsException(AlertDescription.UnexpectedMessage, "Record interleaved with a fragmented handshake message.");
+
+            switch (contentType)
+            {
+                case 0x16:
+                    if (inner.Length == 1)
+                        throw new DtlsException(AlertDescription.UnexpectedMessage, "Empty handshake record.");
+                    _tlsHandshake.AddRange(inner.AsSpan(0, inner.Length - 1).ToArray());
+                    while (TakeTlsHandshakeMessage() is { } message && !IsClosed)
+                    {
+                        // The message classes read the DTLS form: 12-byte header, then the content type.
+                        int length = message.Length - 4;
+                        byte[] dtlsForm = new byte[12 + length + 1];
+                        dtlsForm[0] = message[0];
+                        dtlsForm[1] = message[1]; dtlsForm[2] = message[2]; dtlsForm[3] = message[3];
+                        dtlsForm[4] = (byte)(NextReceiveMessageSeq >> 8);
+                        dtlsForm[5] = (byte)NextReceiveMessageSeq;
+                        dtlsForm[9] = message[1]; dtlsForm[10] = message[2]; dtlsForm[11] = message[3];
+                        Buffer.BlockCopy(message, 4, dtlsForm, 12, length);
+                        dtlsForm[^1] = 0x16;
+                        DeliverHandshake(dtlsForm);
+                    }
+                    break;
+
+                case 0x17:
+                    if (!IsHandshakeComplete)
+                        throw new DtlsException(AlertDescription.UnexpectedMessage, "Application data before the handshake completed.");
+                    RaiseApplicationData(inner.AsSpan(0, inner.Length - 1).ToArray());
+                    break;
+
+                case 0x15:
+                    if (inner.Length != 3)
+                        throw new DtlsException(AlertDescription.DecodeError, "Invalid alert");
+                    OnAlertReceived(inner[0], (AlertDescription)inner[1]);
+                    break;
+
+                default:
+                    throw new DtlsException(AlertDescription.UnexpectedMessage, $"Unexpected content type 0x{contentType:X2}");
+            }
+        }
+
+        /// <summary>The next complete handshake message (4-byte TLS header + body) from the buffer, or null.</summary>
+        private byte[] TakeTlsHandshakeMessage()
+        {
+            if (_tlsHandshake.Count < 4)
+                return null;
+            int length = (_tlsHandshake[1] << 16) | (_tlsHandshake[2] << 8) | _tlsHandshake[3];
+            if (length > HandshakeReassembler.MaxMessageLength)
+                throw new DtlsException(AlertDescription.HandshakeFailure, $"Handshake message of {length} bytes.");
+            if (_tlsHandshake.Count < 4 + length)
+                return null;
+            byte[] message = _tlsHandshake.GetRange(0, 4 + length).ToArray();
+            _tlsHandshake.RemoveRange(0, 4 + length);
+            return message;
+        }
 
         // ── Record layer ─────────────────────────────────────────────────────────────────────
 
@@ -457,6 +649,16 @@ namespace SharpDTLS.DTLS13
         {
             var keyUpdate = new KeyUpdateDatagram(requestUpdate ? (byte)0x01 : (byte)0x00);
             keyUpdate.SequenceNumber = NextSendMessageSeq++;
+            if (!IsDatagram)
+            {
+                // TLS: the new keys apply from the next record on (RFC 8446 §4.6.3).
+                byte[] dtlsForm = keyUpdate.ToBytes();
+                SendProtected(Session.WriteKeys, new byte[] { dtlsForm[0], dtlsForm[1], dtlsForm[2], dtlsForm[3], dtlsForm[12], 0x16 });
+                Session.WriteKeys = IsClient
+                    ? Dtls13CryptoUtils.UpdateClientTrafficSecret(Session.WriteKeys)
+                    : Dtls13CryptoUtils.UpdateServerTrafficSecret(Session.WriteKeys);
+                return;
+            }
             _pendingKeyUpdateRecords = new List<(ulong, ulong)> { SendProtected(Session.WriteKeys, keyUpdate.ToBytes()) };
         }
 
@@ -507,6 +709,12 @@ namespace SharpDTLS.DTLS13
 
         private byte[] SendPlaintextRecord(byte[] record)
         {
+            if (!IsDatagram)
+            {
+                // A TLS ClientHello/ServerHello/HelloRetryRequest already is a record; nothing is retransmitted.
+                SendInFlight(() => new[] { record });
+                return record;
+            }
             SendInFlight(() =>
             {
                 int seq = _plaintextRecordSequence;
@@ -528,6 +736,30 @@ namespace SharpDTLS.DTLS13
             if (addToTranscript)
                 Session.Transcript.AddHandshake(plaintext);
 
+            if (!IsDatagram)
+            {
+                // TLS form (4-byte header), in records of at most the peer's limit.
+                int length = (plaintext[1] << 16) | (plaintext[2] << 8) | plaintext[3];
+                byte[] tlsMessage = new byte[4 + length];
+                Buffer.BlockCopy(plaintext, 0, tlsMessage, 0, 4);
+                Buffer.BlockCopy(plaintext, 12, tlsMessage, 4, length);
+                SendInFlight(() =>
+                {
+                    var records = new List<byte[]>();
+                    int chunk = Math.Min(MaxRecordPayload, PeerRecordLimit);
+                    for (int offset = 0; offset < tlsMessage.Length; offset += chunk)
+                    {
+                        int n = Math.Min(chunk, tlsMessage.Length - offset);
+                        byte[] inner = new byte[n + 1];
+                        Buffer.BlockCopy(tlsMessage, offset, inner, 0, n);
+                        inner[^1] = 0x16;
+                        records.Add(Protect(keys, inner).Record);
+                    }
+                    return records;
+                });
+                return plaintext;
+            }
+
             SendInFlight(() =>
             {
                 var datagrams = new List<byte[]>();
@@ -548,6 +780,8 @@ namespace SharpDTLS.DTLS13
             if (seq >= (1UL << 48) - 1)
                 throw new DtlsException(AlertDescription.InternalError, "Record sequence number space exhausted; a KeyUpdate is required");
 
+            if (!IsDatagram)
+                return (Dtls13RecordProtection.ProtectTls(keys, IsClient, seq, innerPlaintext), (keys.Epoch, seq));
             byte[] cid = keys.Epoch >= 2 && WriteConnectionId is { Length: > 0 } ? WriteConnectionId : null;
             return (Dtls13RecordProtection.Protect(keys, IsClient, (int)keys.Epoch, seq, innerPlaintext, cid), (keys.Epoch, seq));
         }
@@ -563,7 +797,7 @@ namespace SharpDTLS.DTLS13
         /// <summary>ACKs the handshake records received since the last ACK.</summary>
         protected void SendAck()
         {
-            if (_receivedHandshakeRecords.Count == 0 || Session.WriteKeys == null)
+            if (_receivedHandshakeRecords.Count == 0 || Session.WriteKeys == null || !IsDatagram)
                 return;
 
             _lastAck = new AcknowledgementDatagram(_receivedHandshakeRecords);
@@ -597,6 +831,10 @@ namespace SharpDTLS.DTLS13
             if (Session.WriteKeys != null)
             {
                 SendProtected(Session.WriteKeys, new byte[] { level, (byte)description, 0x15 });
+            }
+            else if (!IsDatagram)
+            {
+                Enqueue(new byte[] { 0x15, 0x03, 0x03, 0, 2, level, (byte)description });
             }
             else
             {
