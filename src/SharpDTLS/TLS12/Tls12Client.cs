@@ -12,6 +12,14 @@ namespace SharpDTLS.TLS12
     {
         private readonly Stream _stream;
 
+        /// <summary>For <see cref="SharpDTLS.TLS13.TlsClient"/>, which reads the stream and feeds the active engine.</summary>
+        internal Tls12Client(System.Action<byte[]> send)
+            : base(send, stream: true)
+        {
+            MinimumVersion = TlsVersion.Tls12;
+            MaximumVersion = TlsVersion.Tls12;
+        }
+
         public Tls12Client(Stream stream, bool leaveStreamOpen = false)
             : base(record => TlsStreamPump.Write(stream, record), stream: true)
         {

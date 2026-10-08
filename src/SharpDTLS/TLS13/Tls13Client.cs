@@ -13,6 +13,12 @@ namespace SharpDTLS.TLS13
     {
         private readonly Stream _stream;
 
+        /// <summary>For <see cref="TlsClient"/>, which reads the stream and feeds the active engine.</summary>
+        internal Tls13Client(System.Action<byte[]> send)
+            : base(send, stream: true)
+        {
+        }
+
         public Tls13Client(Stream stream, bool leaveStreamOpen = false)
             : base(record => TlsStreamPump.Write(stream, record), stream: true)
         {

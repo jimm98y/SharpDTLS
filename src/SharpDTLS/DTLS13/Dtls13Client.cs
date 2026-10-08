@@ -17,6 +17,7 @@ namespace SharpDTLS.DTLS13
         private enum State
         {
             Start,
+            HandedOff, // a TLS 1.2-or-lower ServerHello: the legacy engine took over
             WaitServerHello,
             WaitEncryptedExtensions,
             WaitCertificateOrCertificateRequest,
@@ -233,37 +234,59 @@ namespace SharpDTLS.DTLS13
         {
         }
 
-        public void BeginHandshake()
+        public void BeginHandshake() => Run(() => StartHandshake(Dtls13CryptoUtils.GenerateRandom(32)));
+
+        /// <summary>
+        /// For a TLS client that also offers TLS 1.2 and below: one ClientHello for both engines, this one's merged with
+        /// <paramref name="legacyHello"/> (its suites, versions down to <paramref name="minimumVersion"/>, and extensions). A
+        /// ServerHello below TLS 1.3 is then handed to <see cref="LegacyServerHello"/> with every byte after it. Returns the
+        /// ClientHello sent (TLS form, 4-byte header).
+        /// </summary>
+        internal byte[] BeginMergedHandshake(SharpDTLS.DTLS12.ClientHelloMessage legacyHello, ushort minimumVersion)
         {
-            Run(() =>
-            {
+            _legacyHello = legacyHello;
+            _legacyMinimumVersion = minimumVersion;
+            byte[] record = null;
+            Locked(() => record = StartHandshake(legacyHello.Random));
+            return record.AsSpan(5).ToArray();
+        }
+
+        /// <summary>A TLS 1.2-or-lower ServerHello arrived after a merged ClientHello: the received bytes from it on.</summary>
+        internal event Action<byte[]> LegacyServerHello;
+
+        private SharpDTLS.DTLS12.ClientHelloMessage _legacyHello;
+        private ushort _legacyMinimumVersion;
+
+        private byte[] StartHandshake(byte[] random)
+        {
+            byte[] record;
                 if (_state != State.Start)
-                    throw new InvalidOperationException("The handshake has already started.");
+                throw new InvalidOperationException("The handshake has already started.");
 
-                foreach (var suite in CipherSuites)
-                    if (!Dtls13CipherSuite.IsSupported(suite))
-                        throw new InvalidOperationException($"Cipher suite 0x{suite:X4} is not supported.");
+            foreach (var suite in CipherSuites)
+                if (!Dtls13CipherSuite.IsSupported(suite))
+                    throw new InvalidOperationException($"Cipher suite 0x{suite:X4} is not supported.");
 
-                foreach (ushort group in SupportedGroups)
-                    if (!Dtls13Groups.IsSupported(group))
-                        throw new InvalidOperationException($"Group {Dtls13Groups.Name(group)} is not supported.");
-                foreach (ushort group in KeyShareGroups)
-                {
-                    if (!SupportedGroups.Contains(group))
-                        throw new InvalidOperationException($"Key share group {Dtls13Groups.Name(group)} is not in SupportedGroups.");
-                    _keyShares[group] = Dtls13Groups.Generate(group);
-                }
+            foreach (ushort group in SupportedGroups)
+                if (!Dtls13Groups.IsSupported(group))
+                    throw new InvalidOperationException($"Group {Dtls13Groups.Name(group)} is not supported.");
+            foreach (ushort group in KeyShareGroups)
+            {
+                if (!SupportedGroups.Contains(group))
+                    throw new InvalidOperationException($"Key share group {Dtls13Groups.Name(group)} is not in SupportedGroups.");
+                _keyShares[group] = Dtls13Groups.Generate(group);
+            }
 
-                _clientHello = BuildClientHello(Dtls13CryptoUtils.GenerateRandom(32), cookie: null);
+            _clientHello = BuildClientHello(random, cookie: null);
 
-                BeginFlight();
-                byte[] record = SendPlaintextHandshake(_clientHello);
-                Session.Transcript.AddPlaintextRecord(record);
-                if (_earlyDataOffered)
-                    SendEarlyData();
-                _state = State.WaitServerHello;
-                ArmRetransmission();
-            });
+            BeginFlight();
+            record = SendPlaintextHandshake(_clientHello);
+            Session.Transcript.AddPlaintextRecord(record);
+            if (_earlyDataOffered)
+                SendEarlyData();
+            _state = State.WaitServerHello;
+            ArmRetransmission();
+            return record;
         }
 
         private ClientHelloDatagram BuildClientHello(byte[] random, byte[] cookie)
@@ -317,6 +340,9 @@ namespace SharpDTLS.DTLS13
             foreach (var share in _keyShares.Values)
                 keyShare.Entries.Add((share.Group, share.Share));
             clientHello.Extensions.Add(keyShare);
+
+            if (_legacyHello != null)
+                MergeLegacyHello(clientHello);
 
             if (UseSessionTickets || ExternalPsk != null)
             {
@@ -395,6 +421,59 @@ namespace SharpDTLS.DTLS13
             SendProtected(earlyKeys, new ApplicationDataDatagram(EarlyData).ToBytes());
         }
 
+        // TLS 1.3 and the legacy engine's offer in one ClientHello: TLS 1.3 first in suites, versions, groups and schemes.
+        private void MergeLegacyHello(ClientHelloDatagram clientHello)
+        {
+            foreach (ushort suite in _legacyHello.CipherSuites)
+                if (!clientHello.CipherSuites.Contains(suite))
+                    clientHello.CipherSuites.Add(suite);
+
+            var versions = new List<ushort> { ClientSupportedVersions.Tls13 };
+            versions.AddRange(new[] { TlsVersion.Tls12, TlsVersion.Tls11, TlsVersion.Tls10 }.Where(v => ProtocolVersions.IsAtLeast(v, _legacyMinimumVersion)));
+            clientHello.Extensions.RemoveAll(e => e is ClientSupportedVersions);
+            clientHello.Extensions.Add(new ClientSupportedVersions(versions.ToArray()));
+            clientHello.LegacySessionId = _legacyHello.SessionId; // TLS 1.2 session resumption; echoed by a TLS 1.3 server
+
+            var types = clientHello.Extensions.Select(ExtensionType).ToHashSet();
+            foreach (var extension in _legacyHello.Extensions)
+            {
+                ushort type = ExtensionType(extension);
+                if (type == 0x000a) // supported_groups
+                {
+                    var groups = clientHello.Extensions.OfType<SupportedGroups>().First();
+                    var merged = groups.Groups.Concat(ListOf(extension).Where(g => !groups.Groups.Contains(g))).ToArray();
+                    clientHello.Extensions[clientHello.Extensions.IndexOf(groups)] = new SupportedGroups(merged);
+                }
+                else if (type == 0x000d) // signature_algorithms
+                {
+                    var schemes = clientHello.Extensions.OfType<ClientSignatureAlgorithms>().First();
+                    var merged = schemes.SignatureAlgorithms.Concat(ListOf(extension).Where(a => !schemes.SignatureAlgorithms.Contains(a))).ToArray();
+                    clientHello.Extensions[clientHello.Extensions.IndexOf(schemes)] = new ClientSignatureAlgorithms(merged);
+                }
+                else if (types.Add(type))
+                {
+                    // Before key_share, which stays last (but before pre_shared_key).
+                    int keyShare = clientHello.Extensions.FindIndex(e => e is ClientKeyShareExtension);
+                    clientHello.Extensions.Insert(keyShare < 0 ? clientHello.Extensions.Count : keyShare, extension);
+                }
+            }
+        }
+
+        private static ushort ExtensionType(ITlsExtension extension)
+        {
+            byte[] bytes = new byte[extension.CalculateLength()];
+            extension.Write(0, bytes);
+            return (ushort)((bytes[0] << 8) | bytes[1]);
+        }
+
+        // The uint16 list of a supported_groups or signature_algorithms extension.
+        private static ushort[] ListOf(ITlsExtension extension)
+        {
+            byte[] bytes = new byte[extension.CalculateLength()];
+            extension.Write(0, bytes);
+            return new TlsReader(bytes.AsSpan(4).ToArray()).ReadUInt16List16();
+        }
+
         // ── ServerHello / HelloRetryRequest ──────────────────────────────────────────────────
 
         protected override void OnPlaintextHandshake(byte[] record)
@@ -414,6 +493,19 @@ namespace SharpDTLS.DTLS13
 
             var serverHello = new ServerHelloDatagram { Datagram = IsDatagram };
             serverHello.FromBytes(record);
+
+            // After a merged ClientHello, a server that chose TLS 1.2 or lower is the legacy engine's (RFC 8446 §4.1.3:
+            // unless the server also speaks TLS 1.3 and marked the random, which means someone downgraded us).
+            if (_legacyHello != null && serverHello.Extensions.OfType<ServerSupportedVersions>().FirstOrDefault()?.Version != ClientSupportedVersions.Tls13)
+            {
+                if (Downgrade.IsMarked(serverHello.ServerRandom))
+                    throw new DtlsException(AlertDescription.IllegalParameter, "The ServerHello carries the TLS 1.3 downgrade sentinel.");
+                StopRetransmission();
+                byte[] pending = DetachTlsInput(record);
+                _state = State.HandedOff;
+                RaiseEvent(() => LegacyServerHello?.Invoke(pending));
+                return;
+            }
             ValidateServerHello(serverHello);
 
             if (HelloRetryRequest.IsHelloRetryRequest(serverHello))

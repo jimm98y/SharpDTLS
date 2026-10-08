@@ -246,6 +246,40 @@ namespace SharpDTLS.DTLS12
 
         private void SendClientHello(byte[] cookie)
         {
+            var ch = BuildClientHello(cookie);
+
+            // The initial ClientHello and HelloVerifyRequest are not part of the transcript (RFC 6347 §4.2.6).
+            ResetTranscript();
+            BeginFlight();
+            SendHandshake(HandshakeType.ClientHello, ch.Encode(IsDatagram));
+            ArmRetransmission();
+            _state = State.WaitServerHello;
+            Debug.WriteLine($"{LogPrefix} Sent ClientHello (cookie {cookie.Length} bytes)");
+        }
+
+        /// <summary>
+        /// For a TLS client that also offers TLS 1.3: the ClientHello this engine would send, for merging into the TLS 1.3
+        /// one. <see cref="AdoptClientHello"/> then takes the merged message as the one sent.
+        /// </summary>
+        internal ClientHelloMessage PrepareClientHello()
+        {
+            if (_state != State.Start || IsDatagram)
+                throw new InvalidOperationException("The handshake has already started.");
+            ClientRandom = Dtls12CryptoUtils.GenerateRandom(32);
+            return BuildClientHello(Array.Empty<byte>());
+        }
+
+        /// <summary>The ClientHello actually sent (TLS form, 4-byte header): it is ours from now on.</summary>
+        internal void AdoptClientHello(byte[] message) => Locked(() =>
+        {
+            _clientHello = ClientHelloMessage.Decode(message.AsSpan(4).ToArray(), datagram: false);
+            ResetTranscript();
+            AddToTranscript(message);
+            _state = State.WaitServerHello;
+        });
+
+        private ClientHelloMessage BuildClientHello(byte[] cookie)
+        {
             bool havePsk = EffectivePskProvider != null;
             var offered = (CipherSuites ?? SharpDTLS.CipherSuites.DefaultFor(MinimumVersion, MaximumVersion, includePsk: havePsk, includeSrp: HaveSrp, includePwd: HavePwd))
                 .Where(id => SharpDTLS.CipherSuites.TryGet(id, out var s) && (s.IsUsableWith(MaximumVersion) || s.IsUsableWith(MinimumVersion))
@@ -324,14 +358,7 @@ namespace SharpDTLS.DTLS12
                     : new PwdClearExtension(EccPwd.PrepareOpaqueString(PwdUsername)));
 
             _clientHello = ch;
-
-            // The initial ClientHello and HelloVerifyRequest are not part of the transcript (RFC 6347 §4.2.6).
-            ResetTranscript();
-            BeginFlight();
-            SendHandshake(HandshakeType.ClientHello, ch.Encode(IsDatagram));
-            ArmRetransmission();
-            _state = State.WaitServerHello;
-            Debug.WriteLine($"{LogPrefix} Sent ClientHello (cookie {cookie.Length} bytes)");
+            return ch;
         }
 
         protected override void OnHandshakeMessage(byte type, byte[] body, byte[] message, ushort epoch)

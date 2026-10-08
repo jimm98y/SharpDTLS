@@ -1,4 +1,6 @@
 using SharpDTLS.DTLS12;
+using SharpDTLS.DTLS13;
+using SharpDTLS.TLS13;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -10,59 +12,75 @@ namespace SharpDTLS.TLS12
     /// <summary>
     /// A TLS connection as a <see cref="Stream"/>, like <see cref="System.Net.Security.SslStream"/>: writes are split
     /// into records, reads block until data arrives, a close_notify from the peer reads as the end of the stream and a
-    /// failed connection throws <see cref="IOException"/>. Disposing sends close_notify.
+    /// failed connection throws <see cref="IOException"/>. Disposing sends close_notify. Any TLS version: clients offer
+    /// TLS 1.3 and 1.2 (see <see cref="TlsClient"/>), and a <see cref="TlsServer"/> answers with either.
     /// </summary>
     public sealed class TlsStream : Stream
     {
         private readonly object _sync = new();
         private readonly Queue<byte[]> _received = new();
+        private readonly Func<DtlsConnectionBase> _connection;
         private byte[] _current;
         private int _currentOffset;
         private bool _ended;
         private Exception _error;
         private TaskCompletionSource<bool> _dataAvailable = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        private TlsStream(Dtls12Connection connection)
-        {
-            Connection = connection;
-            connection.ApplicationDataReceived += (_, data) => Signal(() => _received.Enqueue(data));
-            connection.Closed += (_, _) => Signal(() => _ended = true);
-            connection.Failed += (_, ex) => Signal(() => _error = ex);
-        }
+        private TlsStream(Func<DtlsConnectionBase> connection) => _connection = connection;
 
-        /// <summary>The underlying connection: negotiated version, cipher suite, ALPN, certificates, exporter.</summary>
-        public Dtls12Connection Connection { get; }
+        /// <summary>
+        /// The connection carrying the stream: a TLS 1.0-1.2 (<see cref="Dtls12Connection"/>) or TLS 1.3
+        /// (<see cref="Dtls13Connection"/>) engine, with its certificates, ALPN and exporter.
+        /// </summary>
+        public DtlsConnectionBase Connection => _connection();
+
+        /// <summary>The negotiated TLS version.</summary>
+        public ushort NegotiatedVersion => Connection is Dtls12Connection tls12 ? tls12.NegotiatedVersion : TlsVersion.Tls13;
 
         /// <summary>Connects as a client over <paramref name="inner"/> (e.g. a NetworkStream) and completes the handshake.</summary>
-        public static async Task<TlsStream> ConnectAsync(Stream inner, Action<Tls12Client> configure = null, CancellationToken cancellationToken = default)
+        public static async Task<TlsStream> ConnectAsync(Stream inner, Action<TlsClient> configure = null, CancellationToken cancellationToken = default)
         {
-            var client = new Tls12Client(inner);
+            var client = new TlsClient(inner);
             configure?.Invoke(client);
-            var stream = new TlsStream(client);
-            var handshake = Handshake(client, h => client.HandshakeFinished += h);
-            client.BeginHandshake();
-            await handshake.WaitAsync(cancellationToken).ConfigureAwait(false);
-            return stream;
-        }
-
-        /// <summary>Serves a client connected on <paramref name="inner"/> with <paramref name="server"/>'s settings and completes the handshake.</summary>
-        public static async Task<TlsStream> AcceptAsync(Tls12Server server, Stream inner, CancellationToken cancellationToken = default)
-        {
-            var connection = server.Accept(inner);
-            var stream = new TlsStream(connection);
-            await Handshake(connection, h => connection.HandshakeFinished += h).WaitAsync(cancellationToken).ConfigureAwait(false);
-            return stream;
-        }
-
-        private static Task Handshake(Dtls12Connection connection, Action<EventHandler<EventArgs>> subscribe)
-        {
+            var stream = new TlsStream(() => client.Connection);
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            subscribe((_, _) => done.TrySetResult(true));
-            connection.Failed += (_, ex) => done.TrySetException(new IOException("The TLS handshake failed: " + ex.Message, ex));
-            connection.Closed += (_, _) => done.TrySetException(new IOException("The connection closed during the TLS handshake."));
+            client.HandshakeFinished += (_, _) => done.TrySetResult(true);
+            client.ApplicationDataReceived += (_, data) => stream.Signal(() => stream._received.Enqueue(data));
+            client.Closed += (_, _) => { stream.Signal(() => stream._ended = true); done.TrySetException(new IOException("The connection closed during the TLS handshake.")); };
+            client.Failed += (_, ex) => { stream.Signal(() => stream._error = ex); done.TrySetException(new IOException("The TLS handshake failed: " + ex.Message, ex)); };
+            client.BeginHandshake();
+            await done.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return stream;
+        }
+
+        /// <summary>Serves a client connected on <paramref name="inner"/> with any TLS version and completes the handshake.</summary>
+        public static async Task<TlsStream> AcceptAsync(TlsServer server, Stream inner, CancellationToken cancellationToken = default)
+        {
+            var connection = await server.AcceptAsync(inner, cancellationToken: cancellationToken).ConfigureAwait(false)
+                ?? throw new IOException("The client did not send a ClientHello.");
+            return await Accepted(connection, cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <summary>Serves a TLS 1.0-1.2 client connected on <paramref name="inner"/> and completes the handshake.</summary>
+        public static Task<TlsStream> AcceptAsync(Tls12Server server, Stream inner, CancellationToken cancellationToken = default)
+            => Accepted(server.Accept(inner), cancellationToken);
+
+        private static async Task<TlsStream> Accepted(DtlsConnectionBase connection, CancellationToken cancellationToken)
+        {
+            var stream = new TlsStream(() => connection);
+            var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            EventHandler<EventArgs> finished = (_, _) => done.TrySetResult(true);
+            if (connection is Dtls12ServerConnection tls12)
+                tls12.HandshakeFinished += finished;
+            else
+                ((Dtls13ServerConnection)connection).HandshakeFinished += finished;
+            connection.ApplicationDataReceived += (_, data) => stream.Signal(() => stream._received.Enqueue(data));
+            connection.Closed += (_, _) => { stream.Signal(() => stream._ended = true); done.TrySetException(new IOException("The connection closed during the TLS handshake.")); };
+            connection.Failed += (_, ex) => { stream.Signal(() => stream._error = ex); done.TrySetException(new IOException("The TLS handshake failed: " + ex.Message, ex)); };
             if (connection.IsHandshakeComplete)
                 done.TrySetResult(true);
-            return done.Task;
+            await done.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return stream;
         }
 
         private void Signal(Action update)
@@ -127,10 +145,11 @@ namespace SharpDTLS.TLS12
         {
             try
             {
+                var connection = Connection;
                 while (buffer.Length > 0)
                 {
-                    int n = Math.Min(buffer.Length, Connection.MaxApplicationDataSize);
-                    Connection.SendApplicationData(buffer.Slice(0, n).ToArray());
+                    int n = Math.Min(buffer.Length, connection.MaxApplicationDataSize);
+                    connection.SendApplicationData(buffer.Slice(0, n).ToArray());
                     buffer = buffer.Slice(n);
                 }
             }
@@ -159,7 +178,7 @@ namespace SharpDTLS.TLS12
         protected override void Dispose(bool disposing)
         {
             if (disposing)
-                Connection.Close();
+                Connection?.Close();
             base.Dispose(disposing);
         }
     }

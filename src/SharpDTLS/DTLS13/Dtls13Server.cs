@@ -347,6 +347,9 @@ namespace SharpDTLS.DTLS13
         {
         }
 
+        /// <summary>The handshake completed (after the server's own HandshakeFinished).</summary>
+        public event EventHandler<EventArgs> HandshakeFinished;
+
         /// <summary>A TLS 1.3 connection over a stream: the ClientHello arrives on it.</summary>
         internal Dtls13ServerConnection(Tls13ServerBase server, EndPoint remoteEndPoint, Action<byte[]> send)
             : base(isClient: false, send, stream: true)
@@ -853,6 +856,7 @@ namespace SharpDTLS.DTLS13
             WriteKeyLog(Convert.ToHexString(_clientHello.ClientRandom), handshakeKeys, applicationKeys);
             Debug.WriteLine($"[DTLS13 Server] Handshake complete with {RemoteEndPoint}");
             RaiseEvent(() => _server.OnConnectionEstablished(this));
+            RaiseEvent(() => HandshakeFinished?.Invoke(this, EventArgs.Empty));
         }
 
         /// <summary>Sends another session ticket (RFC 8446 §4.6.1); one is sent automatically after the handshake.</summary>
