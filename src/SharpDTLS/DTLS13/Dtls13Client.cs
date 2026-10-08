@@ -168,6 +168,18 @@ namespace SharpDTLS.DTLS13
         /// <summary>Intermediate CA certificates sent after <see cref="ClientCertificate"/>.</summary>
         public IList<X509Certificate> ClientIntermediateCertificates { get; set; }
 
+        /// <summary>
+        /// Chooses the client credentials for a CertificateRequest (the CAs and signature schemes the server accepts);
+        /// returning null uses <see cref="ClientCertificate"/> and <see cref="ClientCertificateKeyPair"/>.
+        /// </summary>
+        public Func<CertificateSelectionContext, CertificateCredentials> ClientCredentialsSelector { get; set; }
+
+        /// <summary>CAs we trust, named in certificate_authorities (RFC 8446 §4.2.4) so the server can pick a matching chain.</summary>
+        public IList<X509Certificate> CertificateAuthorities { get; set; }
+
+        /// <summary>Signature schemes we accept in certificates (signature_algorithms_cert, RFC 8446 §4.2.3); null to not send it.</summary>
+        public IList<ushort> SignatureAlgorithmsCert { get; set; }
+
         /// <summary>Cipher suites to offer, in preference order: the defaults in <see cref="Dtls13CipherSuite.Supported"/>, or any of <see cref="Dtls13CipherSuite.All"/>.</summary>
         public IList<ushort> CipherSuites { get; set; } = new List<ushort>(Dtls13CipherSuite.Supported);
 
@@ -267,6 +279,10 @@ namespace SharpDTLS.DTLS13
                 clientHello.Extensions.Add(new StatusRequestExtension(request: true));
             if (AllowPostHandshakeAuthentication)
                 clientHello.Extensions.Add(new PostHandshakeAuthExtension());
+            if (CertificateAuthorities is { Count: > 0 })
+                clientHello.Extensions.Add(new CertificateAuthoritiesExtension(CertificateSelectionContext.Encode(CertificateAuthorities)));
+            if (SignatureAlgorithmsCert is { Count: > 0 })
+                clientHello.Extensions.Add(new SignatureAlgorithmsCertExtension(SignatureAlgorithmsCert));
             CertificateCompression.Validate(CertificateCompressionAlgorithms);
             if (CertificateCompressionAlgorithms is { Count: > 0 })
                 clientHello.Extensions.Add(new CompressCertificateExtension(CertificateCompressionAlgorithms));
@@ -710,16 +726,21 @@ namespace SharpDTLS.DTLS13
         {
             var suite = Session.CipherSuite;
             bool inHandshake = transcript == Session.Transcript;
+            var chosen = ClientCredentialsSelector?.Invoke(new CertificateSelectionContext(null,
+                CertificateSelectionContext.ParseNames(request.CertificateAuthorities), request.SignatureAlgorithms, request.SignatureAlgorithmsCert));
+            var (keyPair, clientCertificate, intermediates) = chosen != null
+                ? (chosen.KeyPair, chosen.Certificate, chosen.IntermediateCertificates)
+                : (ClientCertificateKeyPair, ClientCertificate, ClientIntermediateCertificates);
 
             // Send our certificate only if we can sign with a scheme the server accepts.
             bool rawPublicKey = _clientCertificateType == CertificateType.RawPublicKey;
             ushort? scheme = null;
-            if ((ClientCertificate != null || rawPublicKey) && ClientCertificateKeyPair != null)
-                scheme = Dtls13Signatures.SelectScheme(ClientCertificateKeyPair.Private, request.SignatureAlgorithms);
+            if ((clientCertificate != null || rawPublicKey) && keyPair != null)
+                scheme = Dtls13Signatures.SelectScheme(keyPair.Private, request.SignatureAlgorithms);
 
             var chain = !scheme.HasValue ? Array.Empty<byte[]>()
-                : rawPublicKey ? new[] { RawPublicKeys.Encode(ClientCertificateKeyPair.Public) }
-                : new[] { ClientCertificate.GetEncoded() }.Concat((ClientIntermediateCertificates ?? Array.Empty<X509Certificate>()).Select(c => c.GetEncoded())).ToArray();
+                : rawPublicKey ? new[] { RawPublicKeys.Encode(keyPair.Public) }
+                : new[] { clientCertificate.GetEncoded() }.Concat((intermediates ?? Array.Empty<X509Certificate>()).Select(c => c.GetEncoded())).ToArray();
             var certificate = new CertificateDatagram(chain, request.RequestContext);
             ushort? compression = chain.Length > 0 ? CertificateCompression.Select(CertificateCompressionAlgorithms, request.CompressionAlgorithms) : null;
             byte[] sent = SendHandshake(compression.HasValue ? new CompressedCertificateDatagram(compression.Value, certificate) : certificate, keys, inHandshake);
@@ -729,7 +750,7 @@ namespace SharpDTLS.DTLS13
             if (scheme.HasValue)
             {
                 byte[] content = Dtls13Signatures.BuildSignedContent(server: false, transcript.Hash(suite));
-                byte[] signature = Dtls13Signatures.Sign(scheme.Value, ClientCertificateKeyPair.Private, content);
+                byte[] signature = Dtls13Signatures.Sign(scheme.Value, keyPair.Private, content);
                 sent = SendHandshake(new CertificateVerifyDatagram(signature, scheme.Value), keys, inHandshake);
                 if (!inHandshake)
                     transcript.AddHandshake(sent);

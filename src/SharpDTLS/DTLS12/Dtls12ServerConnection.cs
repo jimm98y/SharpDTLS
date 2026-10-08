@@ -28,6 +28,15 @@ namespace SharpDTLS.DTLS12
         /// <summary>Certificate types we authenticate with, in preference order (RFC 7250); null for X.509 only.</summary>
         public IList<CertificateType> ServerCertificateTypes { get; set; }
 
+        /// <summary>
+        /// Chooses credentials from what the client said (server name, signature schemes); returning null falls back to
+        /// <see cref="CertificateSelector"/> and then the default certificate.
+        /// </summary>
+        public Func<CertificateSelectionContext, ServerCredentials> CredentialsSelector { get; set; }
+
+        /// <summary>CAs whose names a CertificateRequest lists, to guide the client's choice; null lists none.</summary>
+        public IList<X509Certificate> ClientCertificateAuthorities { get; set; }
+
         /// <summary>Certificate types accepted from clients, in preference order (RFC 7250); null for X.509 only.</summary>
         public IList<CertificateType> ClientCertificateTypes { get; set; }
 
@@ -266,7 +275,10 @@ namespace SharpDTLS.DTLS12
 
             // Credentials for the requested name come first: the certificate key decides which suites are possible.
             ServerName = ch.Extension<ServerNameExtension>()?.HostName;
-            var selected = _settings.CertificateSelector?.Invoke(ServerName);
+            var selected = _settings.CredentialsSelector?.Invoke(new CertificateSelectionContext(ServerName,
+                    CertificateSelectionContext.ParseNames(ch.Extension<CertificateAuthoritiesExtension>()?.Names),
+                    ch.Extension<SignatureAlgorithmsExtension>()?.Algorithms, ch.Extension<SignatureAlgorithmsCertExtension>()?.Schemes))
+                ?? _settings.CertificateSelector?.Invoke(ServerName);
             _serverNameUsed = selected != null && ServerName != null;
             (_keyPair, _certificate, _intermediates, _ocspResponse) = selected != null
                 ? (selected.KeyPair, selected.Certificate, selected.IntermediateCertificates, selected.OcspResponse)
@@ -492,7 +504,7 @@ namespace SharpDTLS.DTLS12
 
             if (_settings.RequireClientCertificate && certificateBased)
             {
-                _certificateRequest = new CertificateRequestMessage();
+                _certificateRequest = new CertificateRequestMessage { CertificateAuthorities = CertificateSelectionContext.Encode(_settings.ClientCertificateAuthorities) };
                 if (CipherSuite.IsStaticKeyAgreement)
                     _certificateRequest.CertificateTypes = new byte[] { 1, 2, 64, 3, 4, 65, 66 }; // also the fixed (EC)DH types
                 SendHandshake(HandshakeType.CertificateRequest, _certificateRequest.Encode(NegotiatedVersion));

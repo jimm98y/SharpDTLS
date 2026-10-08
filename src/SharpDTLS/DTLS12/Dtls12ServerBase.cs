@@ -93,6 +93,15 @@ namespace SharpDTLS.DTLS12
         /// <summary>Certificate types accepted from clients, in preference order (RFC 7250); null for X.509 only.</summary>
         public IList<CertificateType> ClientCertificateTypes { get => Settings.ClientCertificateTypes; set => Settings.ClientCertificateTypes = value; }
 
+        /// <summary>
+        /// Chooses credentials from what the client said (server name, signature schemes); returning null falls back to
+        /// <see cref="CertificateSelector"/> and then the default certificate.
+        /// </summary>
+        public Func<CertificateSelectionContext, ServerCredentials> CredentialsSelector { get => Settings.CredentialsSelector; set => Settings.CredentialsSelector = value; }
+
+        /// <summary>CAs whose names a CertificateRequest lists, to guide the client's choice; null lists none.</summary>
+        public IList<X509Certificate> ClientCertificateAuthorities { get => Settings.ClientCertificateAuthorities; set => Settings.ClientCertificateAuthorities = value; }
+
         /// <summary>Checks a client's raw public key (DER SubjectPublicKeyInfo); false aborts with bad_certificate.</summary>
         public Func<byte[], bool> ClientRawPublicKeyValidator { get => Settings.ClientRawPublicKeyValidator; set => Settings.ClientRawPublicKeyValidator = value; }
 

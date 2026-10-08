@@ -21,6 +21,12 @@ namespace SharpDTLS.DTLS13.Messages
         /// <summary>The certificate compression algorithms the server can decompress (RFC 8879 §3), or null.</summary>
         public IList<ushort> CompressionAlgorithms { get; set; }
 
+        /// <summary>DER names of the CAs the server trusts (certificate_authorities, RFC 8446 §4.2.4); empty for none.</summary>
+        public List<byte[]> CertificateAuthorities { get; set; } = new();
+
+        /// <summary>Signature schemes the server accepts in certificates (signature_algorithms_cert), or null.</summary>
+        public ushort[] SignatureAlgorithmsCert { get; set; }
+
         public CertificateRequestDatagram()
         {
         }
@@ -50,6 +56,8 @@ namespace SharpDTLS.DTLS13.Messages
 
             SignatureAlgorithms = null;
             CompressionAlgorithms = null;
+            CertificateAuthorities = new List<byte[]>();
+            SignatureAlgorithmsCert = null;
             while (pos < end)
             {
                 if (pos + 4 > end) throw new DtlsException(AlertDescription.DecodeError, "Truncated extension.");
@@ -62,6 +70,18 @@ namespace SharpDTLS.DTLS13.Messages
                     var ext = new ClientSignatureAlgorithms();
                     ext.Read(pos, bytes);
                     SignatureAlgorithms = ext.SignatureAlgorithms;
+                }
+                else if (type == CertificateAuthoritiesExtension.Type)
+                {
+                    var ext = new CertificateAuthoritiesExtension();
+                    ext.Read(pos, bytes);
+                    CertificateAuthorities = ext.Names;
+                }
+                else if (type == SignatureAlgorithmsCertExtension.Type)
+                {
+                    var ext = new SignatureAlgorithmsCertExtension();
+                    ext.Read(pos, bytes);
+                    SignatureAlgorithmsCert = ext.Schemes;
                 }
                 else if (type == CompressCertificateExtension.Type)
                 {
@@ -81,7 +101,8 @@ namespace SharpDTLS.DTLS13.Messages
         {
             var sigAlgs = new ClientSignatureAlgorithms(SignatureAlgorithms);
             var compression = CompressionAlgorithms is { Count: > 0 } ? new CompressCertificateExtension(CompressionAlgorithms) : null;
-            int extensionsLength = sigAlgs.CalculateLength() + (compression?.CalculateLength() ?? 0);
+            var authorities = CertificateAuthorities is { Count: > 0 } ? new CertificateAuthoritiesExtension(CertificateAuthorities) : null;
+            int extensionsLength = sigAlgs.CalculateLength() + (compression?.CalculateLength() ?? 0) + (authorities?.CalculateLength() ?? 0);
             int bodyLength = 1 + RequestContext.Length + 2 + extensionsLength;
 
             byte[] data = new byte[12 + bodyLength + 1];
@@ -106,6 +127,8 @@ namespace SharpDTLS.DTLS13.Messages
             pos += sigAlgs.Write(pos, data);
             if (compression != null)
                 pos += compression.Write(pos, data);
+            if (authorities != null)
+                pos += authorities.Write(pos, data);
 
             data[pos] = 0x16; // inner content type (handshake)
 

@@ -118,6 +118,8 @@ namespace SharpDTLS.DTLS13.Messages
                     StatusRequestExtension.Type => new StatusRequestExtension(),
                     CompressCertificateExtension.Type => new CompressCertificateExtension(),
                     PostHandshakeAuthExtension.Type => new PostHandshakeAuthExtension(),
+                    CertificateAuthoritiesExtension.Type => new CertificateAuthoritiesExtension(),
+                    SignatureAlgorithmsCertExtension.Type => new SignatureAlgorithmsCertExtension(),
                     ConnectionIdExtension.Type => new ConnectionIdExtension(),
                     0x0033 => new ClientKeyShareExtension(),
                     0x002b => new ClientSupportedVersions(),

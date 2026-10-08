@@ -27,6 +27,8 @@
  *   -rpk_pin <der>      authenticate the peer by this pinned SubjectPublicKeyInfo
  *   -pha                client: allow post-handshake authentication; server (with -verify): ask for the client
  *                       certificate only after the handshake, when stdin says "REQCERT"; "PEER" prints "PEER:yes|no"
+ *   -ca_names <pem>     server: name these CAs in the CertificateRequest; client: in the ClientHello
+ *                       (certificate_authorities); prints "PEERCA:<n>", the number of CA names the peer sent
  *   -resume             two connections: the client resumes the first one's session ticket, the server
  *                       accepts the second connection with the same context; both print "RESUMED" or
  *                       "NOT RESUMED" after the second handshake
@@ -113,7 +115,7 @@ int main(int argc, char **argv)
     const char *cert = NULL, *key = NULL, *cipher = NULL, *verify = NULL, *group = NULL, *srtp = NULL, *exportLabel = NULL;
     int exportLength = 0;
     int hrr = 0, resume = 0, pskOnly = 0, mfl = 0, ocsp = 0, rpk = 0, pha = 0, argi = 3;
-    const char *rpkPin = NULL;
+    const char *rpkPin = NULL, *caNames = NULL;
     const char *pskHex = NULL, *host = NULL, *sni = NULL, *alpn = NULL, *cidHex = NULL;
 
     if (server) {
@@ -141,6 +143,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[argi], "-ocsp")) ocsp = 1;
         else if (!strcmp(argv[argi], "-rpk")) rpk = 1;
         else if (!strcmp(argv[argi], "-pha")) pha = 1;
+        else if (!strcmp(argv[argi], "-ca_names") && argi + 1 < argc) caNames = argv[++argi];
         else if (!strcmp(argv[argi], "-rpk_pin") && argi + 1 < argc) rpkPin = argv[++argi];
         else if (!strcmp(argv[argi], "-ocsp_resp") && argi + 1 < argc) ocspRespFile = argv[++argi];
         else if (!strcmp(argv[argi], "-srtp") && argi + 1 < argc) srtp = argv[++argi];
@@ -256,6 +259,12 @@ int main(int argc, char **argv)
     if (wolfSSL_set_dtls_fd_connected(ssl, fd) != WOLFSSL_SUCCESS)
         fail("set fd", NULL, 0);
 
+    if (caNames) {
+        WOLF_STACK_OF(WOLFSSL_X509_NAME) *names = wolfSSL_load_client_CA_file(caNames);
+        if (!names) fail("load_client_CA_file", NULL, 0);
+        if (server) wolfSSL_set_client_CA_list(ssl, names);
+        else wolfSSL_set0_CA_list(ssl, names);
+    }
     if (pha && !server && wolfSSL_allow_post_handshake_auth(ssl) != 0)
         fail("allow_post_handshake_auth", NULL, 0);
     if (rpk) {
@@ -301,6 +310,10 @@ int main(int argc, char **argv)
     if (round > 0)
         printf("%s\n", wolfSSL_session_reused(ssl) ? "RESUMED" : "NOT RESUMED");
     printf("CONNECTED %s\n", wolfSSL_get_cipher_name(ssl));
+    {
+        WOLF_STACK_OF(WOLFSSL_X509_NAME) *peerNames = wolfSSL_get0_peer_CA_list(ssl);
+        printf("PEERCA:%d\n", peerNames ? wolfSSL_sk_X509_NAME_num(peerNames) : 0);
+    }
     if (rpk) {
         int serverType = -1, clientType = -1;
         wolfSSL_get_negotiated_server_cert_type(ssl, &serverType);

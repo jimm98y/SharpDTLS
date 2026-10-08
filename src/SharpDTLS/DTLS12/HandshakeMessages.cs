@@ -35,6 +35,8 @@ namespace SharpDTLS.DTLS12
             StatusRequestExtension.Type => new StatusRequestExtension(),
             CertificateTypeExtension.ClientType => new CertificateTypeExtension(CertificateTypeExtension.ClientType),
             CertificateTypeExtension.ServerType => new CertificateTypeExtension(CertificateTypeExtension.ServerType),
+            CertificateAuthoritiesExtension.Type => new CertificateAuthoritiesExtension(),
+            SignatureAlgorithmsCertExtension.Type => new SignatureAlgorithmsCertExtension(),
             ConnectionIdExtension.Type => new ConnectionIdExtension(),
             0x000a => new SupportedGroupsExtension(),
             0x000b => new EcPointFormatsExtension(),

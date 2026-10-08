@@ -5,10 +5,10 @@ using System.Collections.Generic;
 
 namespace SharpDTLS
 {
-    /// <summary>A server certificate, its private key and its intermediate CA certificates.</summary>
-    public sealed class ServerCredentials
+    /// <summary>A certificate, its private key and its intermediate CA certificates.</summary>
+    public class CertificateCredentials
     {
-        public ServerCredentials(AsymmetricCipherKeyPair keyPair, X509Certificate certificate, IList<X509Certificate> intermediateCertificates = null)
+        public CertificateCredentials(AsymmetricCipherKeyPair keyPair, X509Certificate certificate, IList<X509Certificate> intermediateCertificates = null)
         {
             KeyPair = keyPair ?? throw new ArgumentNullException(nameof(keyPair));
             Certificate = certificate ?? throw new ArgumentNullException(nameof(certificate));
@@ -18,6 +18,15 @@ namespace SharpDTLS
         public AsymmetricCipherKeyPair KeyPair { get; }
         public X509Certificate Certificate { get; }
         public IList<X509Certificate> IntermediateCertificates { get; }
+    }
+
+    /// <summary>A server certificate, its private key, its intermediate CA certificates and an optional OCSP staple.</summary>
+    public sealed class ServerCredentials : CertificateCredentials
+    {
+        public ServerCredentials(AsymmetricCipherKeyPair keyPair, X509Certificate certificate, IList<X509Certificate> intermediateCertificates = null)
+            : base(keyPair, certificate, intermediateCertificates)
+        {
+        }
 
         /// <summary>
         /// A DER OCSP response for <see cref="Certificate"/> to staple for clients that ask (RFC 6066 §8); null for none.

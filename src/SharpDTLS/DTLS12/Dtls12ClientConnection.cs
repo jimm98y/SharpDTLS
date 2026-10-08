@@ -62,6 +62,15 @@ namespace SharpDTLS.DTLS12
         /// <summary>Intermediate CA certificates sent after <see cref="ClientCertificate"/>.</summary>
         public IList<X509Certificate> ClientIntermediateCertificates { get; set; }
 
+        /// <summary>
+        /// Chooses the client credentials for a CertificateRequest (the CAs and signature schemes the server accepts);
+        /// returning null uses <see cref="ClientCertificate"/> and <see cref="ClientCertificateKeyPair"/>.
+        /// </summary>
+        public Func<CertificateSelectionContext, CertificateCredentials> ClientCredentialsSelector { get; set; }
+
+        /// <summary>Signature schemes we accept in certificates (signature_algorithms_cert, RFC 8446 §4.2.3); null to not send it.</summary>
+        public IList<ushort> SignatureAlgorithmsCert { get; set; }
+
         /// <summary>Cipher suites to offer in preference order; null for the defaults of the version range.</summary>
         public IList<ushort> CipherSuites { get; set; }
 
@@ -291,6 +300,8 @@ namespace SharpDTLS.DTLS12
                 ch.Extensions.Add(new StatusRequestExtension(request: true));
             if (RawPublicKeys.Offer(CertificateTypeExtension.ServerType, ServerCertificateTypes) is { } serverTypes)
                 ch.Extensions.Add(serverTypes);
+            if (SignatureAlgorithmsCert is { Count: > 0 })
+                ch.Extensions.Add(new SignatureAlgorithmsCertExtension(SignatureAlgorithmsCert));
             if (RawPublicKeys.Offer(CertificateTypeExtension.ClientType, ClientCertificateTypes) is { } clientTypes)
                 ch.Extensions.Add(clientTypes);
             if (UseConnectionId)
@@ -605,6 +616,19 @@ namespace SharpDTLS.DTLS12
             _state = State.WaitCertificateRequestOrDone;
         }
 
+        // The credentials for the server's CertificateRequest: the selector's choice, or the configured ones.
+        private (AsymmetricCipherKeyPair KeyPair, X509Certificate Certificate, IList<X509Certificate> Intermediates) ResolveClientCredentials()
+        {
+            if (_certificateRequest != null && ClientCredentialsSelector != null)
+            {
+                var chosen = ClientCredentialsSelector(new CertificateSelectionContext(null,
+                    CertificateSelectionContext.ParseNames(_certificateRequest.CertificateAuthorities), _certificateRequest.SignatureAlgorithms, null));
+                if (chosen != null)
+                    return (chosen.KeyPair, chosen.Certificate, chosen.IntermediateCertificates);
+            }
+            return (ClientCertificateKeyPair, ClientCertificate, ClientIntermediateCertificates);
+        }
+
         private void SendFinalFlight()
         {
             BeginFlight();
@@ -612,34 +636,35 @@ namespace SharpDTLS.DTLS12
             // Certificate (only when requested). Send ours only if its type and a signature scheme are accepted,
             // or, with static (EC)DH, if it holds a key agreement key on the server's parameters (fixed (EC)DH).
             bool authenticate = false;
+            var (keyPair, clientCertificate, intermediates) = ResolveClientCredentials();
             bool fixedKeyAgreement = false;
             bool rawPublicKey = _clientCertificateType == CertificateType.RawPublicKey;
-            if (_certificateRequest != null && rawPublicKey && ClientCertificateKeyPair != null)
+            if (_certificateRequest != null && rawPublicKey && keyPair != null)
             {
-                var key = ClientCertificateKeyPair.Private;
+                var key = keyPair.Private;
                 authenticate = CertificateTypeAccepted(_certificateRequest, key)
                     && (!IsDtls12 || Dtls12Signatures.SelectScheme(key, _certificateRequest.SignatureAlgorithms) != null);
             }
-            else if (_certificateRequest != null && !rawPublicKey && ClientCertificate != null && ClientCertificateKeyPair != null)
+            else if (_certificateRequest != null && !rawPublicKey && clientCertificate != null && keyPair != null)
             {
-                var key = ClientCertificateKeyPair.Private;
+                var key = keyPair.Private;
                 fixedKeyAgreement = CipherSuite.IsStaticKeyAgreement && _keyExchange.SupportsFixedClientKey(key)
-                    && FixedTypeAccepted(_certificateRequest, ClientCertificate);
+                    && FixedTypeAccepted(_certificateRequest, clientCertificate);
                 authenticate = !fixedKeyAgreement && CertificateTypeAccepted(_certificateRequest, key)
                     && (!IsDtls12 || Dtls12Signatures.SelectScheme(key, _certificateRequest.SignatureAlgorithms) != null);
             }
 
             if (_certificateRequest != null && rawPublicKey)
             {
-                SendHandshake(HandshakeType.Certificate, RawPublicKeys.EncodeCertificate(authenticate ? RawPublicKeys.Encode(ClientCertificateKeyPair.Public) : null));
+                SendHandshake(HandshakeType.Certificate, RawPublicKeys.EncodeCertificate(authenticate ? RawPublicKeys.Encode(keyPair.Public) : null));
             }
             else if (_certificateRequest != null)
             {
                 var certificate = new CertificateMessage();
                 if (authenticate || fixedKeyAgreement)
                 {
-                    certificate.Chain.Add(ClientCertificate.GetEncoded());
-                    foreach (var intermediate in ClientIntermediateCertificates ?? Array.Empty<X509Certificate>())
+                    certificate.Chain.Add(clientCertificate.GetEncoded());
+                    foreach (var intermediate in intermediates ?? Array.Empty<X509Certificate>())
                         certificate.Chain.Add(intermediate.GetEncoded());
                 }
                 SendHandshake(HandshakeType.Certificate, certificate.Encode());
@@ -647,14 +672,14 @@ namespace SharpDTLS.DTLS12
 
             byte[] preMasterSecret;
             byte[] clientKeyExchange = fixedKeyAgreement
-                ? _keyExchange.CreateFixedClientKeyExchange(ClientCertificateKeyPair.Private, out preMasterSecret)
+                ? _keyExchange.CreateFixedClientKeyExchange(keyPair.Private, out preMasterSecret)
                 : _keyExchange.CreateClientKeyExchange(out preMasterSecret);
             SendHandshake(HandshakeType.ClientKeyExchange, clientKeyExchange);
             DeriveKeys(preMasterSecret);
 
             if (authenticate)
             {
-                byte[] signature = Sign(ClientCertificateKeyPair.Private, TranscriptBytes(), _certificateRequest.SignatureAlgorithms, out ushort? scheme);
+                byte[] signature = Sign(keyPair.Private, TranscriptBytes(), _certificateRequest.SignatureAlgorithms, out ushort? scheme);
                 SendHandshake(HandshakeType.CertificateVerify, new CertificateVerifyMessage { SignatureScheme = scheme, Signature = signature }.Encode(NegotiatedVersion));
             }
 

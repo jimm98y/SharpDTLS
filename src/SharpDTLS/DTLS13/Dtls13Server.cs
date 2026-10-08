@@ -129,6 +129,15 @@ namespace SharpDTLS.DTLS13
         /// <summary>Checks a client's raw public key (DER SubjectPublicKeyInfo); false aborts with bad_certificate.</summary>
         public Func<byte[], bool> ClientRawPublicKeyValidator { get; set; }
 
+        /// <summary>
+        /// Chooses credentials from what the client said (server name, trusted CAs, signature schemes); returning null
+        /// falls back to <see cref="CertificateSelector"/> and then the default certificate.
+        /// </summary>
+        public Func<CertificateSelectionContext, ServerCredentials> CredentialsSelector { get; set; }
+
+        /// <summary>CAs named in our CertificateRequests (certificate_authorities), to guide the client's choice; null names none.</summary>
+        public IList<X509Certificate> ClientCertificateAuthorities { get; set; }
+
         public TimeSpan InitialRetransmitTimeout { get; set; } = TimeSpan.FromSeconds(1);
 
         /// <summary>Optional NSS key log sink (SSLKEYLOGFILE format).</summary>
@@ -570,7 +579,11 @@ namespace SharpDTLS.DTLS13
                 }
                 _helloRetried = retry != null;
                 ServerName = _clientHello.Extensions.OfType<ServerNameExtension>().FirstOrDefault()?.HostName;
-                var selected = _server.CertificateSelector?.Invoke(ServerName);
+                var selected = _server.CredentialsSelector?.Invoke(new CertificateSelectionContext(ServerName,
+                        CertificateSelectionContext.ParseNames(_clientHello.Extensions.OfType<CertificateAuthoritiesExtension>().FirstOrDefault()?.Names),
+                        _clientHello.Extensions.OfType<ClientSignatureAlgorithms>().FirstOrDefault()?.SignatureAlgorithms,
+                        _clientHello.Extensions.OfType<SignatureAlgorithmsCertExtension>().FirstOrDefault()?.Schemes))
+                    ?? _server.CertificateSelector?.Invoke(ServerName);
                 _serverNameUsed = selected != null && ServerName != null;
                 (_keyPair, _certificate, _intermediates, _ocspResponse) = selected != null
                     ? (selected.KeyPair, selected.Certificate, selected.IntermediateCertificates, selected.OcspResponse)
@@ -770,7 +783,11 @@ namespace SharpDTLS.DTLS13
                     if (_clientCertificateType == null)
                         throw new DtlsException(AlertDescription.UnsupportedCertificate, "No client certificate type in common.");
                     CertificateCompression.Validate(_server.CertificateCompressionAlgorithms);
-                    _certificateRequest = new CertificateRequestDatagram { CompressionAlgorithms = _server.CertificateCompressionAlgorithms };
+                    _certificateRequest = new CertificateRequestDatagram
+                    {
+                        CompressionAlgorithms = _server.CertificateCompressionAlgorithms,
+                        CertificateAuthorities = CertificateSelectionContext.Encode(_server.ClientCertificateAuthorities),
+                    };
                     SendHandshake(_certificateRequest, handshakeKeys);
                     Session.RequiresClientAuth = true;
                 }
@@ -1064,6 +1081,7 @@ namespace SharpDTLS.DTLS13
             {
                 RequestContext = Dtls13CryptoUtils.GenerateRandom(8),
                 CompressionAlgorithms = _server.CertificateCompressionAlgorithms,
+                CertificateAuthorities = CertificateSelectionContext.Encode(_server.ClientCertificateAuthorities),
             };
             var authentication = new PostHandshakeAuthentication { Request = request, Transcript = Session.Transcript.Clone(), Required = required };
             _postHandshakeAuthentication = authentication;
