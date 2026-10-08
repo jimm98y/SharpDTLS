@@ -21,6 +21,12 @@ namespace SharpDTLS.DTLS12
         public const ushort RsaPssRsaeSha256 = 0x0804;
         public const ushort RsaPssRsaeSha384 = 0x0805;
         public const ushort RsaPssRsaeSha512 = 0x0806;
+        public const ushort RsaPkcs1Sha1   = 0x0201;
+        public const ushort EcdsaSha1      = 0x0203;
+        public const ushort DsaSha1        = 0x0202;
+        public const ushort DsaSha256      = 0x0402;
+        public const ushort DsaSha384      = 0x0502;
+        public const ushort DsaSha512      = 0x0602;
 
         /// <summary>Schemes this implementation can produce and verify, in preference order.</summary>
         public static readonly ushort[] Supported =
@@ -28,6 +34,9 @@ namespace SharpDTLS.DTLS12
             EcdsaSha256, EcdsaSha384, EcdsaSha512,
             RsaPssRsaeSha256, RsaPssRsaeSha384, RsaPssRsaeSha512,
             RsaPkcs1Sha256, RsaPkcs1Sha384, RsaPkcs1Sha512,
+            DsaSha256, DsaSha384, DsaSha512,
+            // SHA-1 based schemes, for older peers only
+            EcdsaSha1, RsaPkcs1Sha1, DsaSha1,
         };
 
         public static ushort Scheme(byte hashAlgorithm, byte signatureAlgorithm) => (ushort)((hashAlgorithm << 8) | signatureAlgorithm);
@@ -56,6 +65,7 @@ namespace SharpDTLS.DTLS12
             return signature switch
             {
                 0x01 => key is RsaKeyParameters,
+                0x02 => key is DsaKeyParameters,
                 0x03 => key is ECKeyParameters,
                 _ => false,
             };
@@ -82,6 +92,12 @@ namespace SharpDTLS.DTLS12
 
         private static ISigner CreateSigner(ushort scheme) => scheme switch
         {
+            RsaPkcs1Sha1     => SignerUtilities.GetSigner("SHA1WITHRSA"),
+            EcdsaSha1        => SignerUtilities.GetSigner("SHA1WITHECDSA"),
+            DsaSha1          => SignerUtilities.GetSigner("SHA1WITHDSA"),
+            DsaSha256        => SignerUtilities.GetSigner("SHA256WITHDSA"),
+            DsaSha384        => SignerUtilities.GetSigner("SHA384WITHDSA"),
+            DsaSha512        => SignerUtilities.GetSigner("SHA512WITHDSA"),
             RsaPkcs1Sha256   => SignerUtilities.GetSigner("SHA256WITHRSA"),
             RsaPkcs1Sha384   => SignerUtilities.GetSigner("SHA384WITHRSA"),
             RsaPkcs1Sha512   => SignerUtilities.GetSigner("SHA512WITHRSA"),

@@ -55,16 +55,41 @@ namespace SharpDTLS.DTLS12
             {
                 case BulkCipherAlgorithm.Aes128Gcm:
                 case BulkCipherAlgorithm.Aes256Gcm:
-                    return new GcmRecordCipher(key, iv);
+                    return new ImplicitNonceAeadRecordCipher(() => new GcmBlockCipher(new AesEngine()), key, iv, 16);
+                case BulkCipherAlgorithm.Camellia128Gcm:
+                case BulkCipherAlgorithm.Camellia256Gcm:
+                    return new ImplicitNonceAeadRecordCipher(() => new GcmBlockCipher(new CamelliaEngine()), key, iv, 16);
+                case BulkCipherAlgorithm.Aria128Gcm:
+                case BulkCipherAlgorithm.Aria256Gcm:
+                    return new ImplicitNonceAeadRecordCipher(() => new GcmBlockCipher(new AriaEngine()), key, iv, 16);
+                case BulkCipherAlgorithm.Aes128Ccm:
+                case BulkCipherAlgorithm.Aes256Ccm:
+                    return new ImplicitNonceAeadRecordCipher(() => new CcmBlockCipher(new AesEngine()), key, iv, 16);
+                case BulkCipherAlgorithm.Aes128Ccm8:
+                case BulkCipherAlgorithm.Aes256Ccm8:
+                    return new ImplicitNonceAeadRecordCipher(() => new CcmBlockCipher(new AesEngine()), key, iv, 8);
                 case BulkCipherAlgorithm.ChaCha20Poly1305:
                     return new ChaCha20Poly1305RecordCipher(key, iv);
-                case BulkCipherAlgorithm.Aes128Cbc:
-                case BulkCipherAlgorithm.Aes256Cbc:
-                    return new CbcRecordCipher(() => new AesEngine(), key, macKey, suite.Mac, encryptThenMac);
+                case BulkCipherAlgorithm.Null:
+                    return new NullRecordCipher(macKey, suite.Mac);
                 default:
-                    throw new DtlsException(AlertDescription.InternalError, $"No record cipher for {suite.Cipher}");
+                    var engine = BlockCipherFactory(suite.Cipher)
+                        ?? throw new DtlsException(AlertDescription.InternalError, $"No record cipher for {suite.Cipher}");
+                    return new CbcRecordCipher(engine, key, macKey, suite.Mac, encryptThenMac);
             }
         }
+
+        private static Func<IBlockCipher> BlockCipherFactory(BulkCipherAlgorithm cipher) => cipher switch
+        {
+            BulkCipherAlgorithm.Aes128Cbc or BulkCipherAlgorithm.Aes256Cbc => () => new AesEngine(),
+            BulkCipherAlgorithm.Camellia128Cbc or BulkCipherAlgorithm.Camellia256Cbc => () => new CamelliaEngine(),
+            BulkCipherAlgorithm.Aria128Cbc or BulkCipherAlgorithm.Aria256Cbc => () => new AriaEngine(),
+            BulkCipherAlgorithm.SeedCbc => () => new SeedEngine(),
+            BulkCipherAlgorithm.TripleDesEdeCbc => () => new DesEdeEngine(),
+            BulkCipherAlgorithm.DesCbc => () => new DesEngine(),
+            BulkCipherAlgorithm.IdeaCbc => () => new IdeaEngine(),
+            _ => null,
+        };
 
         /// <summary>seq_num(8) || type(1) || version(2) || length(2): the MAC / AEAD additional data prefix.</summary>
         internal static byte[] AdditionalData(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, int length)
@@ -79,6 +104,7 @@ namespace SharpDTLS.DTLS12
 
         internal static IMac CreateHmac(MacAlgorithm mac) => mac switch
         {
+            MacAlgorithm.HmacMd5 => new HMac(new MD5Digest()),
             MacAlgorithm.HmacSha1 => new HMac(new Sha1Digest()),
             MacAlgorithm.HmacSha256 => new HMac(new Sha256Digest()),
             MacAlgorithm.HmacSha384 => new HMac(new Sha384Digest()),
@@ -86,48 +112,54 @@ namespace SharpDTLS.DTLS12
         };
     }
 
-    /// <summary>AES-GCM with a 4-byte implicit and 8-byte explicit nonce (RFC 5288).</summary>
-    internal sealed class GcmRecordCipher : IRecordCipher
+    /// <summary>
+    /// AEAD with a 4-byte implicit and 8-byte explicit nonce: GCM (RFC 5288, RFC 6367, RFC 6209) and
+    /// CCM / CCM_8 (RFC 6655).
+    /// </summary>
+    internal sealed class ImplicitNonceAeadRecordCipher : IRecordCipher
     {
         private const int ExplicitNonceLength = 8;
-        private const int TagLength = 16;
+        private readonly Func<IAeadBlockCipher> _create;
         private readonly byte[] _key;
         private readonly byte[] _fixedIv;
+        private readonly int _tagLength;
 
-        public GcmRecordCipher(byte[] key, byte[] fixedIv)
+        public ImplicitNonceAeadRecordCipher(Func<IAeadBlockCipher> create, byte[] key, byte[] fixedIv, int tagLength)
         {
+            _create = create;
             _key = key;
             _fixedIv = fixedIv;
+            _tagLength = tagLength;
         }
 
         public byte[] Encrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] plaintext)
         {
-            byte[] output = new byte[ExplicitNonceLength + plaintext.Length + TagLength];
+            byte[] output = new byte[ExplicitNonceLength + plaintext.Length + _tagLength];
             // The explicit nonce is the 64-bit record sequence number, which never repeats under one key.
             BinaryPrimitives.WriteUInt64BigEndian(output, ((ulong)epoch << 48) | sequenceNumber);
 
-            var gcm = new GcmBlockCipher(new AesEngine());
-            gcm.Init(true, new AeadParameters(new KeyParameter(_key), TagLength * 8, Nonce(output),
+            var aead = _create();
+            aead.Init(true, new AeadParameters(new KeyParameter(_key), _tagLength * 8, Nonce(output),
                 RecordCiphers.AdditionalData(contentType, version, epoch, sequenceNumber, plaintext.Length)));
-            int written = gcm.ProcessBytes(plaintext, 0, plaintext.Length, output, ExplicitNonceLength);
-            gcm.DoFinal(output, ExplicitNonceLength + written);
+            int written = aead.ProcessBytes(plaintext, 0, plaintext.Length, output, ExplicitNonceLength);
+            aead.DoFinal(output, ExplicitNonceLength + written);
             return output;
         }
 
         public byte[] Decrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment)
         {
-            int plaintextLength = fragment.Length - ExplicitNonceLength - TagLength;
+            int plaintextLength = fragment.Length - ExplicitNonceLength - _tagLength;
             if (plaintextLength < 0)
                 throw new DtlsRecordDiscardedException("Record too short");
 
             byte[] plaintext = new byte[plaintextLength];
             try
             {
-                var gcm = new GcmBlockCipher(new AesEngine());
-                gcm.Init(false, new AeadParameters(new KeyParameter(_key), TagLength * 8, Nonce(fragment),
+                var aead = _create();
+                aead.Init(false, new AeadParameters(new KeyParameter(_key), _tagLength * 8, Nonce(fragment),
                     RecordCiphers.AdditionalData(contentType, version, epoch, sequenceNumber, plaintextLength)));
-                int written = gcm.ProcessBytes(fragment, ExplicitNonceLength, fragment.Length - ExplicitNonceLength, plaintext, 0);
-                gcm.DoFinal(plaintext, written);
+                int written = aead.ProcessBytes(fragment, ExplicitNonceLength, fragment.Length - ExplicitNonceLength, plaintext, 0);
+                aead.DoFinal(plaintext, written);
             }
             catch (InvalidCipherTextException ex)
             {
@@ -142,6 +174,52 @@ namespace SharpDTLS.DTLS12
             Buffer.BlockCopy(_fixedIv, 0, nonce, 0, 4);
             Buffer.BlockCopy(record, 0, nonce, 4, ExplicitNonceLength);
             return nonce;
+        }
+    }
+
+    /// <summary>NULL encryption with an HMAC (RFC 5246 §6.2.3.1): integrity only.</summary>
+    internal sealed class NullRecordCipher : IRecordCipher
+    {
+        private readonly byte[] _macKey;
+        private readonly MacAlgorithm _mac;
+
+        public NullRecordCipher(byte[] macKey, MacAlgorithm mac)
+        {
+            _macKey = macKey;
+            _mac = mac;
+        }
+
+        public byte[] Encrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] plaintext)
+        {
+            byte[] mac = ComputeMac(contentType, version, epoch, sequenceNumber, plaintext, plaintext.Length);
+            byte[] output = new byte[plaintext.Length + mac.Length];
+            Buffer.BlockCopy(plaintext, 0, output, 0, plaintext.Length);
+            Buffer.BlockCopy(mac, 0, output, plaintext.Length, mac.Length);
+            return output;
+        }
+
+        public byte[] Decrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment)
+        {
+            int macLength = RecordCiphers.CreateHmac(_mac).GetMacSize();
+            int length = fragment.Length - macLength;
+            if (length < 0)
+                throw new DtlsRecordDiscardedException("Record too short");
+            byte[] expected = ComputeMac(contentType, version, epoch, sequenceNumber, fragment, length);
+            if (!CryptographicOperations.FixedTimeEquals(expected, fragment.AsSpan(length, macLength)))
+                throw new DtlsRecordDiscardedException("Record failed authentication");
+            return fragment.AsSpan(0, length).ToArray();
+        }
+
+        private byte[] ComputeMac(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] data, int length)
+        {
+            var hmac = RecordCiphers.CreateHmac(_mac);
+            hmac.Init(new KeyParameter(_macKey));
+            byte[] header = RecordCiphers.AdditionalData(contentType, version, epoch, sequenceNumber, length);
+            hmac.BlockUpdate(header, 0, header.Length);
+            hmac.BlockUpdate(data, 0, length);
+            byte[] mac = new byte[hmac.GetMacSize()];
+            hmac.DoFinal(mac, 0);
+            return mac;
         }
     }
 

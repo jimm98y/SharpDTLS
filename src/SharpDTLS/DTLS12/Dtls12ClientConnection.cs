@@ -33,10 +33,8 @@ namespace SharpDTLS.DTLS12
         private ClientHelloMessage _clientHello;
         private int _helloVerifyRequests;
         private X509Certificate _serverCertificate;
-        private EcdheServerKeyExchange _serverKeyExchange;
+        private IClientKeyExchange _keyExchange;
         private CertificateRequestMessage _certificateRequest;
-        private byte[] _ecdhePrivateKey;
-        private byte[] _ecdhePublicKey;
 
         public event EventHandler<EventArgs> HandshakeFinished;
         public event EventHandler<NewSessionTicketMessage> NewSessionTicketMessageReceived;
@@ -64,8 +62,11 @@ namespace SharpDTLS.DTLS12
         /// <summary>The server's end-entity certificate once received.</summary>
         public X509Certificate ServerCertificate => _serverCertificate;
 
-        /// <summary>The negotiated ECDHE group.</summary>
-        public ushort NamedGroup => _serverKeyExchange?.NamedCurve ?? 0;
+        /// <summary>The negotiated (EC)DHE group, or 0 (RSA key exchange, or custom DH parameters).</summary>
+        public ushort NamedGroup => _keyExchange?.Group ?? 0;
+
+        /// <summary>Smallest finite-field Diffie-Hellman prime accepted from a server.</summary>
+        public int MinimumDhPrimeBits { get; set; } = 1024;
 
         public bool ExtendedMasterSecretNegotiated => UseExtendedMasterSecret;
         public bool EncryptThenMacNegotiated => UseEncryptThenMac;
@@ -84,8 +85,9 @@ namespace SharpDTLS.DTLS12
         private void SendClientHello(byte[] cookie)
         {
             var offered = (CipherSuites ?? SharpDTLS.CipherSuites.DefaultFor(MinimumVersion, MaximumVersion))
-                .Where(id => SharpDTLS.CipherSuites.TryGet(id, out var s) && s.IsUsableWith(MaximumVersion))
+                .Where(id => SharpDTLS.CipherSuites.TryGet(id, out var s) && (s.IsUsableWith(MaximumVersion) || s.IsUsableWith(MinimumVersion)))
                 .ToList();
+            var offeredSuites = offered.Select(id => SharpDTLS.CipherSuites.Get(id)).ToList();
             if (offered.Count == 0)
                 throw new InvalidOperationException("No configured cipher suite is usable with the configured versions.");
 
@@ -97,11 +99,15 @@ namespace SharpDTLS.DTLS12
                 CipherSuites = offered,
             };
 
-            ch.Extensions.Add(new SupportedGroupsExtension(EcdheGroups.Supported));
+            // Supported groups: elliptic curves, plus the RFC 7919 FFDHE groups when DHE suites are offered.
+            var groups = EcdheGroups.Supported.ToList();
+            if (offeredSuites.Any(s => s.KeyExchange is KeyExchangeAlgorithm.DHE_RSA or KeyExchangeAlgorithm.DHE_DSS))
+                groups.AddRange(FfdheGroups.Supported);
+            ch.Extensions.Add(new SupportedGroupsExtension(groups.ToArray()));
             ch.Extensions.Add(new EcPointFormatsExtension(new byte[] { 0 })); // uncompressed
             if (MaximumVersion == DtlsVersion.Dtls12)
                 ch.Extensions.Add(new SignatureAlgorithmsExtension(Dtls12Signatures.Supported));
-            if (offered.Any(id => SharpDTLS.CipherSuites.Get(id).IsCbc))
+            if (offeredSuites.Any(s => s.IsCbc))
                 ch.Extensions.Add(new EncryptThenMacExtension());
             ch.Extensions.Add(new ExtendedMasterSecretExtension());
             ch.Extensions.Add(new RenegotiationInfoExtension());
@@ -243,22 +249,34 @@ namespace SharpDTLS.DTLS12
             if (ServerCertificateValidator != null && !ServerCertificateValidator(_serverCertificate, certificate.Chain))
                 throw new DtlsException(AlertDescription.BadCertificate, "Server certificate was rejected.");
 
+            _keyExchange = KeyExchanges.CreateClient(CipherSuite, new ClientKeyExchangeContext
+            {
+                ClientHelloVersion = _clientHello.ClientVersion,
+                ServerPublicKey = _serverCertificate.GetPublicKey(),
+                MinimumDhPrimeBits = MinimumDhPrimeBits,
+            });
+
             AddToTranscript(message);
-            _state = State.WaitServerKeyExchange;
+            _state = _keyExchange.ExpectsServerKeyExchange ? State.WaitServerKeyExchange : State.WaitCertificateRequestOrDone;
         }
 
         private void OnServerKeyExchange(byte[] body, byte[] message)
         {
-            var ske = EcdheServerKeyExchange.Decode(body, NegotiatedVersion);
-            if (!EcdheGroups.IsSupported(ske.NamedCurve))
-                throw new DtlsException(AlertDescription.IllegalParameter, $"Server selected curve 0x{ske.NamedCurve:X4}, which was not offered.");
+            var r = new TlsReader(body);
+            _keyExchange.ReadServerParams(r);
+            byte[] serverParams = body.AsSpan(0, r.Position).ToArray();
 
-            byte[] signed = Concat(Concat(ClientRandom, ServerRandom), ske.EncodeParams());
-            if (!Verify(_serverCertificate.GetPublicKey(), signed, ske.SignatureScheme, ske.Signature, Dtls12Signatures.Supported))
-                throw new DtlsException(AlertDescription.DecryptError, "ServerKeyExchange signature is invalid.");
+            if (_keyExchange.ServerParamsSigned)
+            {
+                // digitally-signed struct: [SignatureAndHashAlgorithm (DTLS 1.2)] signature<0..2^16-1>
+                ushort? scheme = IsDtls12 ? r.ReadUInt16() : null;
+                byte[] signature = r.ReadOpaque16();
+                byte[] signed = Concat(Concat(ClientRandom, ServerRandom), serverParams);
+                if (!Verify(_serverCertificate.GetPublicKey(), signed, scheme, signature, Dtls12Signatures.Supported))
+                    throw new DtlsException(AlertDescription.DecryptError, "ServerKeyExchange signature is invalid.");
+            }
+            r.EnsureEnd();
 
-            _serverKeyExchange = ske;
-            (_ecdhePrivateKey, _ecdhePublicKey) = EcdheGroups.GenerateKeyPair(ske.NamedCurve);
             AddToTranscript(message);
             _state = State.WaitCertificateRequestOrDone;
         }
@@ -281,8 +299,8 @@ namespace SharpDTLS.DTLS12
                 SendHandshake(HandshakeType.Certificate, certificate.Encode());
             }
 
-            SendHandshake(HandshakeType.ClientKeyExchange, new TlsWriter().WriteOpaque8(_ecdhePublicKey).ToArray());
-            DeriveKeys(EcdheGroups.Agree(_serverKeyExchange.NamedCurve, _ecdhePrivateKey, _serverKeyExchange.PublicKey));
+            SendHandshake(HandshakeType.ClientKeyExchange, _keyExchange.CreateClientKeyExchange(out byte[] preMasterSecret));
+            DeriveKeys(preMasterSecret);
 
             if (authenticate)
             {
@@ -353,12 +371,14 @@ namespace SharpDTLS.DTLS12
         {
             CertificateKeyType.Rsa => key is RsaKeyParameters,
             CertificateKeyType.Ecdsa => key is ECKeyParameters,
+            CertificateKeyType.Dsa => key is DsaKeyParameters,
             _ => true,
         };
 
-        // RFC 5246 §7.4.4 ClientCertificateType: rsa_sign(1), ecdsa_sign(64)
+        // RFC 5246 §7.4.4 ClientCertificateType: rsa_sign(1), dss_sign(2), ecdsa_sign(64)
         internal static bool CertificateTypeAccepted(CertificateRequestMessage request, AsymmetricKeyParameter key)
             => key is RsaKeyParameters ? request.CertificateTypes.Contains((byte)1)
+             : key is DsaKeyParameters ? request.CertificateTypes.Contains((byte)2)
              : key is ECKeyParameters ? request.CertificateTypes.Contains((byte)64)
              : false;
     }

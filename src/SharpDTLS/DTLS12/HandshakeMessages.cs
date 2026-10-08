@@ -172,42 +172,9 @@ namespace SharpDTLS.DTLS12
         }
     }
 
-    /// <summary>ECDHE ServerKeyExchange (RFC 8422 §5.4). DTLS 1.2 adds the SignatureAndHashAlgorithm.</summary>
-    public sealed class EcdheServerKeyExchange
-    {
-        public ushort NamedCurve { get; set; }
-        public byte[] PublicKey { get; set; }
-        public ushort? SignatureScheme { get; set; }
-        public byte[] Signature { get; set; }
-
-        /// <summary>ServerECDHParams: curve_type(1) || named_curve(2) || point&lt;1..255&gt; — the signed parameters.</summary>
-        public byte[] EncodeParams() => new TlsWriter().WriteUInt8(3).WriteUInt16(NamedCurve).WriteOpaque8(PublicKey).ToArray();
-
-        public byte[] Encode(ushort version)
-        {
-            var w = new TlsWriter().WriteBytes(EncodeParams());
-            if (version == DtlsVersion.Dtls12)
-                w.WriteUInt16(SignatureScheme.Value);
-            return w.WriteOpaque16(Signature).ToArray();
-        }
-
-        public static EcdheServerKeyExchange Decode(byte[] body, ushort version)
-        {
-            var r = new TlsReader(body);
-            if (r.ReadUInt8() != 3)
-                throw new DtlsException(AlertDescription.IllegalParameter, "Only named curves are supported.");
-            var m = new EcdheServerKeyExchange { NamedCurve = r.ReadUInt16(), PublicKey = r.ReadOpaque8() };
-            if (version == DtlsVersion.Dtls12)
-                m.SignatureScheme = r.ReadUInt16();
-            m.Signature = r.ReadOpaque16();
-            r.EnsureEnd();
-            return m;
-        }
-    }
-
     public sealed class CertificateRequestMessage
     {
-        public byte[] CertificateTypes { get; set; } = { 1, 64 }; // rsa_sign, ecdsa_sign
+        public byte[] CertificateTypes { get; set; } = { 1, 2, 64 }; // rsa_sign, dss_sign, ecdsa_sign
         public ushort[] SignatureAlgorithms { get; set; } = Dtls12Signatures.Supported;
         public List<byte[]> CertificateAuthorities { get; set; } = new List<byte[]>();
 

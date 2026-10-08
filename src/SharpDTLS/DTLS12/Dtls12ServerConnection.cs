@@ -53,8 +53,7 @@ namespace SharpDTLS.DTLS12
         private State _state = State.Start;
         private ClientHelloMessage _clientHello;
         private CertificateRequestMessage _certificateRequest;
-        private ushort _namedGroup;
-        private byte[] _ecdhePrivateKey;
+        private IServerKeyExchange _keyExchange;
         private X509Certificate _clientCertificate;
 
         public event EventHandler<EventArgs> HandshakeFinished;
@@ -75,7 +74,8 @@ namespace SharpDTLS.DTLS12
         /// <summary>The client's certificate, when one was sent.</summary>
         public X509Certificate ClientCertificate => _clientCertificate;
 
-        public ushort NamedGroup => _namedGroup;
+        /// <summary>The negotiated (EC)DHE group, or 0 (RSA key exchange).</summary>
+        public ushort NamedGroup => _keyExchange?.Group ?? 0;
         public bool ExtendedMasterSecretNegotiated => UseExtendedMasterSecret;
         public bool EncryptThenMacNegotiated => UseEncryptThenMac;
         public byte[] ClientRandomBytes => ClientRandom;
@@ -127,11 +127,7 @@ namespace SharpDTLS.DTLS12
                 .FirstOrDefault(s => s != null && s.IsUsableWith(version) && Dtls12ClientConnection.KeyMatches(s.ServerCertificateType, serverKey))
                 ?? throw new DtlsException(AlertDescription.HandshakeFailure, "No cipher suite in common.");
 
-            // RFC 8422 §5.1.1: without supported_groups the client is assumed to support any curve.
-            var groups = ch.Extension<SupportedGroupsExtension>();
-            _namedGroup = groups == null ? EcdheGroups.X25519 : EcdheGroups.Supported.FirstOrDefault(g => groups.Groups.Contains(g));
-            if (_namedGroup == 0)
-                throw new DtlsException(AlertDescription.HandshakeFailure, "No key exchange group in common.");
+            _keyExchange = KeyExchanges.CreateServer(CipherSuite, new ServerKeyExchangeContext { ClientHello = ch, ServerPrivateKey = serverKey });
 
             // RFC 5746: secure renegotiation is signalled by the extension or the SCSV.
             var renegotiationInfo = ch.Extension<RenegotiationInfoExtension>();
@@ -173,13 +169,20 @@ namespace SharpDTLS.DTLS12
             certificate.Chain.Add(_settings.Certificate.GetEncoded());
             SendHandshake(HandshakeType.Certificate, certificate.Encode());
 
-            byte[] publicKey;
-            (_ecdhePrivateKey, publicKey) = EcdheGroups.GenerateKeyPair(_namedGroup);
-            var ske = new EcdheServerKeyExchange { NamedCurve = _namedGroup, PublicKey = publicKey };
-            byte[] signed = Concat(Concat(ClientRandom, ServerRandom), ske.EncodeParams());
-            ske.Signature = Sign(_settings.KeyPair.Private, signed, ch.Extension<SignatureAlgorithmsExtension>()?.Algorithms, out ushort? scheme);
-            ske.SignatureScheme = scheme;
-            SendHandshake(HandshakeType.ServerKeyExchange, ske.Encode(NegotiatedVersion));
+            byte[] serverParams = _keyExchange.CreateServerParams();
+            if (serverParams != null)
+            {
+                var ske = new TlsWriter().WriteBytes(serverParams);
+                if (_keyExchange.SignsParams)
+                {
+                    byte[] signed = Concat(Concat(ClientRandom, ServerRandom), serverParams);
+                    byte[] signature = Sign(_settings.KeyPair.Private, signed, ch.Extension<SignatureAlgorithmsExtension>()?.Algorithms, out ushort? scheme);
+                    if (scheme.HasValue)
+                        ske.WriteUInt16(scheme.Value);
+                    ske.WriteOpaque16(signature);
+                }
+                SendHandshake(HandshakeType.ServerKeyExchange, ske.ToArray());
+            }
 
             if (_settings.RequireClientCertificate)
             {
@@ -214,11 +217,8 @@ namespace SharpDTLS.DTLS12
 
                 case State.WaitClientKeyExchange when type == HandshakeType.ClientKeyExchange:
                     StopRetransmission();
-                    var r = new TlsReader(body);
-                    byte[] clientPublicKey = r.ReadOpaque8();
-                    r.EnsureEnd();
                     AddToTranscript(message);
-                    DeriveKeys(EcdheGroups.Agree(_namedGroup, _ecdhePrivateKey, clientPublicKey));
+                    DeriveKeys(_keyExchange.ProcessClientKeyExchange(body));
                     _state = _clientCertificate != null ? State.WaitCertificateVerify : State.WaitFinished;
                     break;
 

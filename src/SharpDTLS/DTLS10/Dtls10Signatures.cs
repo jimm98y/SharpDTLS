@@ -10,7 +10,7 @@ namespace SharpDTLS.DTLS10
 {
     /// <summary>
     /// TLS 1.0/1.1 digital signatures, as used by DTLS 1.0 (RFC 4346 §4.7, RFC 4492 §5.4):
-    /// RSA signs MD5(data) || SHA1(data) with PKCS#1 v1.5 padding and no DigestInfo; ECDSA uses SHA-1.
+    /// RSA signs MD5(data) || SHA1(data) with PKCS#1 v1.5 padding and no DigestInfo; DSA and ECDSA use SHA-1.
     /// There is no SignatureAndHashAlgorithm field on the wire.
     /// </summary>
     public static class Dtls10Signatures
@@ -35,6 +35,7 @@ namespace SharpDTLS.DTLS10
         {
             RsaKeyParameters => new GenericSigner(new Pkcs1Encoding(new RsaBlindedEngine()), new CombinedHash()),
             ECKeyParameters => SignerUtilities.GetSigner("SHA1WITHECDSA"),
+            DsaKeyParameters => SignerUtilities.GetSigner("SHA1WITHDSA"),
             _ => throw new DtlsException(AlertDescription.UnsupportedCertificate, "Unsupported key type for DTLS 1.0 signatures."),
         };
 
