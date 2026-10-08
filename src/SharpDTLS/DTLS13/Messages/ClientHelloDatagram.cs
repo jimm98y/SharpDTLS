@@ -26,6 +26,12 @@ namespace SharpDTLS.DTLS13.Messages
         /// </summary>
         public bool Datagram { get; set; } = true;
 
+        /// <summary>
+        /// A ClientHello answering a HelloRetryRequest: in TLS its record version is 0x0303, as for every record but the
+        /// initial ClientHello, which may say 0x0301 (RFC 8446 §5.1).
+        /// </summary>
+        public bool AfterHelloRetryRequest { get; set; }
+
         // Bytes before the ClientHello body: record header + handshake header.
         private int HeaderLength => Datagram ? 25 : 9;
 
@@ -285,7 +291,7 @@ namespace SharpDTLS.DTLS13.Messages
                 offset += extension.Write(offset, buffer);
             body.WriteOpaque16(buffer.AsSpan(0, extensionsLength).ToArray());
             byte[] message = body.ToArray();
-            Bytes = new TlsWriter().WriteUInt8(0x16).WriteUInt16(0x0301).WriteUInt16(4 + message.Length)
+            Bytes = new TlsWriter().WriteUInt8(0x16).WriteUInt16(AfterHelloRetryRequest ? 0x0303 : 0x0301).WriteUInt16(4 + message.Length)
                 .WriteUInt8(0x01).WriteUInt24(message.Length).WriteBytes(message).ToArray();
             return Bytes;
         }

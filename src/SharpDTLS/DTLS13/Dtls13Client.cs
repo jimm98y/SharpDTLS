@@ -299,7 +299,7 @@ namespace SharpDTLS.DTLS13
 
         private ClientHelloDatagram BuildClientHello(byte[] random, byte[] cookie)
         {
-            var clientHello = new ClientHelloDatagram(Array.Empty<byte>()) { ClientRandom = random, Datagram = IsDatagram };
+            var clientHello = new ClientHelloDatagram(Array.Empty<byte>()) { ClientRandom = random, Datagram = IsDatagram, AfterHelloRetryRequest = _receivedHelloRetryRequest };
             if (!IsDatagram)
             {
                 clientHello.Extensions.RemoveAll(e => e is ClientSupportedVersions);
