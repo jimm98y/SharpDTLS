@@ -29,7 +29,8 @@ namespace SharpDTLS.TLS13
     /// <summary>
     /// TLS 1.3 server: <see cref="Start"/> listens on TCP, or <see cref="Accept"/> serves any connected stream. Each
     /// connection runs the DTLS 1.3 server handshake over TLS records with the shared settings; a HelloRetryRequest is
-    /// sent only when the client has no key share the server accepts.
+    /// sent only when the client has no key share the server accepts. 0-RTT is accepted under the same rules as for DTLS
+    /// once MaxEarlyDataSize is set.
     /// </summary>
     public class Tls13Server : Tls13ServerBase, IDisposable
     {
@@ -55,6 +56,9 @@ namespace SharpDTLS.TLS13
         public event EventHandler<Tls13DataReceivedEventArgs> ApplicationDataReceived;
         public event EventHandler<KeyUpdateDatagram> KeyUpdateReceived;
         public event EventHandler<Dtls13ServerConnection> ConnectionClosed;
+
+        /// <summary>0-RTT data accepted before the handshake completes (see MaxEarlyDataSize); it may be a replay.</summary>
+        public event EventHandler<Tls13DataReceivedEventArgs> EarlyDataReceived;
 
         public IReadOnlyCollection<Dtls13ServerConnection> Connections => _connections.Keys.ToList();
 
@@ -111,7 +115,8 @@ namespace SharpDTLS.TLS13
         internal override void OnApplicationData(Dtls13ServerConnection connection, byte[] data)
             => ApplicationDataReceived?.Invoke(this, new Tls13DataReceivedEventArgs(connection, data));
 
-        internal override void OnEarlyData(Dtls13ServerConnection connection, byte[] data) { } // 0-RTT is not accepted over TLS
+        internal override void OnEarlyData(Dtls13ServerConnection connection, byte[] data)
+            => EarlyDataReceived?.Invoke(this, new Tls13DataReceivedEventArgs(connection, data));
 
         internal override void OnKeyUpdate(KeyUpdateDatagram keyUpdate) => KeyUpdateReceived?.Invoke(this, keyUpdate);
 

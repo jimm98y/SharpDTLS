@@ -111,9 +111,16 @@ namespace SharpDTLS.DTLS13
 
         /// <summary>
         /// Groups to send key shares for in the first ClientHello, in preference order (each must be in
-        /// <see cref="SupportedGroups"/>). More shares avoid a HelloRetryRequest but enlarge the ClientHello.
+        /// <see cref="SupportedGroups"/>). More shares avoid a HelloRetryRequest but enlarge the ClientHello. Null (the
+        /// default) sends <see cref="DefaultKeyShareGroups"/> that are supported, else the first supported group.
         /// </summary>
-        public IList<ushort> KeyShareGroups { get; set; } = new List<ushort> { Dtls13Groups.X25519 };
+        public IList<ushort> KeyShareGroups { get; set; }
+
+        /// <summary>
+        /// The automatic key shares: x25519 over DTLS, where a ClientHello should fit one datagram (a post-quantum share
+        /// is a kilobyte); TLS clients add the X25519MLKEM768 hybrid that current servers prefer.
+        /// </summary>
+        protected virtual IReadOnlyList<ushort> DefaultKeyShareGroups => new[] { Dtls13Groups.X25519 };
 
         /// <summary>Groups offered in supported_groups, in preference order (see <see cref="Dtls13Groups"/>).</summary>
         public IList<ushort> SupportedGroups { get; set; } = new List<ushort>(Dtls13Groups.DefaultPreference);
@@ -270,7 +277,8 @@ namespace SharpDTLS.DTLS13
             foreach (ushort group in SupportedGroups)
                 if (!Dtls13Groups.IsSupported(group))
                     throw new InvalidOperationException($"Group {Dtls13Groups.Name(group)} is not supported.");
-            foreach (ushort group in KeyShareGroups)
+            var shareGroups = KeyShareGroups ?? DefaultKeyShareGroups.Where(SupportedGroups.Contains).DefaultIfEmpty(SupportedGroups[0]).ToList();
+            foreach (ushort group in shareGroups)
             {
                 if (!SupportedGroups.Contains(group))
                     throw new InvalidOperationException($"Key share group {Dtls13Groups.Name(group)} is not in SupportedGroups.");
@@ -389,8 +397,7 @@ namespace SharpDTLS.DTLS13
             // 0-RTT only with the ticket as the first identity, within its limit and with its suite offered
             // (the server must select it), and never after a HelloRetryRequest (RFC 8446 §4.2.10).
             var first = _offeredPsks[0];
-            // TLS 0-RTT (with EndOfEarlyData) is not implemented: early data is DTLS only.
-            _earlyDataOffered = IsDatagram && EarlyData != null && first.Ticket != null && !_receivedHelloRetryRequest
+            _earlyDataOffered = EarlyData != null && first.Ticket != null && !_receivedHelloRetryRequest
                                 && first.Ticket.MaxEarlyDataSize >= EarlyData.Length && CipherSuites.Contains(first.Ticket.CipherSuite)
                                 && (first.Ticket.ApplicationProtocol == null || (ApplicationProtocols?.Contains(first.Ticket.ApplicationProtocol) ?? false));
             if (_earlyDataOffered)
@@ -413,12 +420,14 @@ namespace SharpDTLS.DTLS13
             }
         }
 
+        private Dtls13CryptoContext _earlyKeys;
+
         // Epoch 1, under client_early_traffic_secret of the ticket's suite; not part of any flight.
         private void SendEarlyData()
         {
             var ticketSuite = SuiteFor(_offeredPsks[0].Ticket.CipherSuite);
-            var earlyKeys = Dtls13CryptoUtils.CalculateEarlyKeys(_clientHello.ClientRandom, Session.Transcript.Hash(ticketSuite), _offeredPsks[0].Key, ticketSuite);
-            SendProtected(earlyKeys, new ApplicationDataDatagram(EarlyData).ToBytes());
+            _earlyKeys = Dtls13CryptoUtils.CalculateEarlyKeys(_clientHello.ClientRandom, Session.Transcript.Hash(ticketSuite), _offeredPsks[0].Key, ticketSuite);
+            SendProtected(_earlyKeys, new ApplicationDataDatagram(EarlyData).ToBytes());
         }
 
         // TLS 1.3 and the legacy engine's offer in one ClientHello: TLS 1.3 first in suites, versions, groups and schemes.
@@ -795,6 +804,9 @@ namespace SharpDTLS.DTLS13
 
             // Client's final flight: [Certificate, CertificateVerify,] Finished in the handshake epoch.
             BeginFlight();
+            // TLS (not DTLS, RFC 9147 §5.6): accepted 0-RTT data ends with EndOfEarlyData under the early keys.
+            if (!IsDatagram && EarlyDataAccepted)
+                SendHandshake(new EndOfEarlyDataDatagram(), _earlyKeys);
             if (_certificateRequest != null)
                 SendClientCertificate();
 

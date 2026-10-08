@@ -237,6 +237,12 @@ namespace SharpDTLS.DTLS13
         /// </summary>
         protected int SkipUndecryptableBytes { get; set; }
 
+        /// <summary>
+        /// TLS read keys that apply instead of the newest ones: a server that accepted 0-RTT reads the client's early
+        /// traffic keys until EndOfEarlyData (RFC 8446 §4.5).
+        /// </summary>
+        protected Dtls13CryptoContext TlsReadKeysOverride { get; set; }
+
         /// <summary>Processes bytes received from a TLS stream (any amount: partial or several records).</summary>
         public void ProcessStreamData(byte[] data, int offset, int count) => Run(() =>
         {
@@ -278,7 +284,7 @@ namespace SharpDTLS.DTLS13
             if (contentType != 0x16 && contentType != 0x17 && _tlsHandshake.Count > 0)
                 throw new DtlsException(AlertDescription.UnexpectedMessage, "Record interleaved with a fragmented handshake message.");
 
-            var keys = Session.ReadKeys.Count > 0 ? Session.ReadKeys[Session.ReadKeys.Count - 1] : null;
+            var keys = TlsReadKeysOverride ?? (Session.ReadKeys.Count > 0 ? Session.ReadKeys[Session.ReadKeys.Count - 1] : null);
             switch (contentType)
             {
                 case 0x14:
@@ -346,6 +352,15 @@ namespace SharpDTLS.DTLS13
             CheckReceivedRecordSize(inner.Length - 1);
             if (contentType != 0x16 && _tlsHandshake.Count > 0)
                 throw new DtlsException(AlertDescription.UnexpectedMessage, "Record interleaved with a fragmented handshake message.");
+
+            // Early traffic keys carry 0-RTT application data and then EndOfEarlyData.
+            if (keys.Epoch == 1 && contentType == 0x17)
+            {
+                OnEarlyData(inner.AsSpan(0, inner.Length - 1).ToArray());
+                return;
+            }
+            if (keys.Epoch == 1 && contentType != 0x16)
+                throw new DtlsException(AlertDescription.UnexpectedMessage, $"Content type 0x{contentType:X2} under the early traffic keys.");
 
             switch (contentType)
             {
@@ -567,6 +582,7 @@ namespace SharpDTLS.DTLS13
             IHandshakeDatagram datagram = message[0] switch
             {
                 0x04 => new NewSessionTicketDatagram(),
+                EndOfEarlyDataDatagram.HandshakeType => new EndOfEarlyDataDatagram(),
                 RequestConnectionIdDatagram.HandshakeType => new RequestConnectionIdDatagram(),
                 NewConnectionIdDatagram.HandshakeType => new NewConnectionIdDatagram(),
                 0x08 => new EncryptedExtensionsDatagram(),

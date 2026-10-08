@@ -534,13 +534,9 @@ namespace SharpDTLS.DTLS13
         /// </summary>
         private bool AcceptEarlyData()
         {
-            // TLS 0-RTT (with EndOfEarlyData) is not implemented: decline, and skip the client's early records.
-            if (!IsDatagram)
-            {
-                if (_clientHello.Extensions.OfType<EarlyDataExtension>().Any())
-                    SkipUndecryptableBytes = 64 * 1024;
-                return false;
-            }
+            // Over TLS, declined 0-RTT data still arrives and must be skipped (RFC 8446 §4.2.10).
+            if (!IsDatagram && _clientHello.Extensions.OfType<EarlyDataExtension>().Any())
+                SkipUndecryptableBytes = 64 * 1024;
             var offered = _clientHello.Extensions.OfType<ClientPreSharedKeyExtension>().FirstOrDefault();
             if (!_clientHello.Extensions.OfType<EarlyDataExtension>().Any() || offered == null)
                 return false;
@@ -602,6 +598,12 @@ namespace SharpDTLS.DTLS13
             Session.ServerHandshakeKeys = handshakeKeys;
             Session.WriteKeys = handshakeKeys;
             AddReadKeys(handshakeKeys);
+            if (!IsDatagram && _earlyKeys != null)
+            {
+                // TLS: the client's early data and EndOfEarlyData come first, under the early keys.
+                TlsReadKeysOverride = _earlyKeys;
+                SkipUndecryptableBytes = 0;
+            }
 
             SendHandshake(BuildEncryptedExtensions(), handshakeKeys);
 
@@ -704,6 +706,18 @@ namespace SharpDTLS.DTLS13
 
         private bool _awaitingClientHello2;
 
+        // TLS: EndOfEarlyData ends the early data, and the client's handshake keys apply from the next record on.
+        private bool OnEndOfEarlyData(byte[] message, IHandshakeDatagram parsed)
+        {
+            if (parsed is not EndOfEarlyDataDatagram)
+                return false;
+            if (IsDatagram || _earlyKeys == null || TlsReadKeysOverride != _earlyKeys)
+                throw new DtlsException(AlertDescription.UnexpectedMessage, "Unexpected EndOfEarlyData.");
+            Session.Transcript.AddHandshake(message);
+            TlsReadKeysOverride = null;
+            return true;
+        }
+
         // TLS: the ClientHello (or, after a HelloRetryRequest, ClientHello2) arrives on the connection's own stream.
         private void OnTlsClientHello(byte[] record)
         {
@@ -730,6 +744,10 @@ namespace SharpDTLS.DTLS13
         protected override void OnHandshakeMessage(byte[] message, IHandshakeDatagram parsed)
         {
             var suite = Session.CipherSuite;
+            if (OnEndOfEarlyData(message, parsed))
+                return;
+            if (TlsReadKeysOverride != null)
+                throw new DtlsException(AlertDescription.UnexpectedMessage, "Handshake message before EndOfEarlyData.");
 
             // A CompressedCertificate stands for the Certificate; the transcript keeps the message as received.
             if (parsed is CompressedCertificateDatagram compressed && _state == State.WaitClientCertificate)
