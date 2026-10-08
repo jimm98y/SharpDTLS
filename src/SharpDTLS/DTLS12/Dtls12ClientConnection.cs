@@ -258,7 +258,7 @@ namespace SharpDTLS.DTLS12
                 resumable = null; // RFC 6066 §3: a session belongs to one server name
             bool presentTicket = resumable?.Ticket != null && UseSessionTickets;
             _offeredSession = resumable != null && (presentTicket || resumable.SessionId.Length != 0) && offered.Contains(resumable.CipherSuite)
-                              && DtlsVersion.IsAtLeast(resumable.Version, MinimumVersion) && DtlsVersion.IsAtLeast(MaximumVersion, resumable.Version)
+                              && ProtocolVersions.IsAtLeast(resumable.Version, MinimumVersion) && ProtocolVersions.IsAtLeast(MaximumVersion, resumable.Version)
                 ? resumable : null;
             if (_offeredSession == null)
                 _offeredSessionId = null;
@@ -283,7 +283,7 @@ namespace SharpDTLS.DTLS12
                 groups.AddRange(EccPwd.Groups.Where(g => !groups.Contains(g)));
             ch.Extensions.Add(new SupportedGroupsExtension(groups.ToArray()));
             ch.Extensions.Add(new EcPointFormatsExtension(new byte[] { 0 })); // uncompressed
-            if (MaximumVersion == DtlsVersion.Dtls12)
+            if (ProtocolVersions.Level(MaximumVersion) >= 3)
                 ch.Extensions.Add(new SignatureAlgorithmsExtension(Dtls12Signatures.Supported));
             if (offeredSuites.Any(s => s.IsCbc))
                 ch.Extensions.Add(new EncryptThenMacExtension());
@@ -420,10 +420,10 @@ namespace SharpDTLS.DTLS12
             var sh = ServerHelloMessage.Decode(body);
 
             // The server's version must lie within [MinimumVersion, MaximumVersion].
-            if ((sh.ServerVersion != DtlsVersion.Dtls10 && sh.ServerVersion != DtlsVersion.Dtls12)
-                || !DtlsVersion.IsAtLeast(sh.ServerVersion, MinimumVersion)
-                || !DtlsVersion.IsAtLeast(MaximumVersion, sh.ServerVersion))
-                throw new DtlsException(AlertDescription.ProtocolVersion, $"Server selected unsupported version {DtlsVersion.Name(sh.ServerVersion)}.");
+            if (!ProtocolVersions.Legacy(IsDatagram).Contains(sh.ServerVersion)
+                || !ProtocolVersions.IsAtLeast(sh.ServerVersion, MinimumVersion)
+                || !ProtocolVersions.IsAtLeast(MaximumVersion, sh.ServerVersion))
+                throw new DtlsException(AlertDescription.ProtocolVersion, $"Server selected unsupported version {ProtocolVersions.Name(sh.ServerVersion)}.");
 
             if (!_clientHello.CipherSuites.Contains(sh.CipherSuite)
                 || !SharpDTLS.CipherSuites.TryGet(sh.CipherSuite, out var suite)
@@ -490,7 +490,7 @@ namespace SharpDTLS.DTLS12
             CipherSuite = suite;
             ServerRandom = sh.Random;
             AddToTranscript(message);
-            Debug.WriteLine($"{LogPrefix} ServerHello: {DtlsVersion.Name(NegotiatedVersion)}, {suite}");
+            Debug.WriteLine($"{LogPrefix} ServerHello: {ProtocolVersions.Name(NegotiatedVersion)}, {suite}");
 
             if (_offeredSession != null && sh.SessionId.AsSpan().SequenceEqual(_offeredSessionId))
             {

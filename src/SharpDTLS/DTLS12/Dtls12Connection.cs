@@ -45,10 +45,14 @@ namespace SharpDTLS.DTLS12
         protected int NextSendMessageSeq { get; set; }
         protected int NextReceiveMessageSeq { get; set; }
 
-        /// <summary>Version written in record headers: DTLS 1.0 until a version is negotiated (RFC 6347 §4.1).</summary>
-        protected ushort RecordVersion => NegotiatedVersion != 0 ? NegotiatedVersion : DtlsVersion.Dtls10;
+        /// <summary>Version written in record headers: the negotiated one, or the framing's initial version.</summary>
+        protected ushort RecordVersion => NegotiatedVersion != 0 ? NegotiatedVersion : _framing.InitialRecordVersion;
 
-        protected bool IsDtls12 => NegotiatedVersion == DtlsVersion.Dtls12;
+        /// <summary>Whether the negotiated version is (D)TLS 1.2, with its PRF, transcript hash and signature schemes.</summary>
+        protected bool IsDtls12 => ProtocolVersions.Level(NegotiatedVersion) >= 3;
+
+        /// <summary>Whether this runs over datagrams (DTLS) rather than a stream (TLS).</summary>
+        protected bool IsDatagram => _framing.IsDatagram;
 
         /// <summary>
         /// The side that sends the final flight resends it when the peer retransmits its own last
@@ -118,7 +122,7 @@ namespace SharpDTLS.DTLS12
         /// <summary>Concatenated handshake messages, the input to CertificateVerify signatures.</summary>
         protected byte[] TranscriptBytes() => _transcript.SelectMany(m => m).ToArray();
 
-        /// <summary>MD5 || SHA-1 in DTLS 1.0; the PRF hash of the cipher suite in DTLS 1.2.</summary>
+        /// <summary>MD5 || SHA-1 before (D)TLS 1.2; the PRF hash of the cipher suite in (D)TLS 1.2.</summary>
         protected byte[] TranscriptHash()
         {
             if (!IsDtls12)

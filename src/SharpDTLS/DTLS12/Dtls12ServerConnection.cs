@@ -250,17 +250,17 @@ namespace SharpDTLS.DTLS12
             var ch = _clientHello;
 
             // Highest version both sides support (DTLS version numbers count down).
-            ushort version = new[] { DtlsVersion.Dtls12, DtlsVersion.Dtls10 }
-                .FirstOrDefault(v => DtlsVersion.IsAtLeast(MaximumVersion, v) && DtlsVersion.IsAtLeast(v, MinimumVersion)
-                                     && DtlsVersion.IsAtLeast(ch.ClientVersion, v));
+            ushort version = ProtocolVersions.Legacy(IsDatagram)
+                .FirstOrDefault(v => ProtocolVersions.IsAtLeast(MaximumVersion, v) && ProtocolVersions.IsAtLeast(v, MinimumVersion)
+                                     && ProtocolVersions.IsAtLeast(ch.ClientVersion, v));
             if (version == 0)
-                throw new DtlsException(AlertDescription.ProtocolVersion, $"Client version {DtlsVersion.Name(ch.ClientVersion)} is not supported.");
+                throw new DtlsException(AlertDescription.ProtocolVersion, $"Client version {ProtocolVersions.Name(ch.ClientVersion)} is not supported.");
             NegotiatedVersion = version;
 
             // RFC 7507 §3: a client that fell back below our highest version is being downgraded.
             if (ch.CipherSuites.Contains(SharpDTLS.CipherSuites.TLS_FALLBACK_SCSV) && ch.ClientVersion != MaximumVersion
-                && DtlsVersion.IsAtLeast(MaximumVersion, ch.ClientVersion))
-                throw new DtlsException(AlertDescription.InappropriateFallback, $"Client fell back to {DtlsVersion.Name(ch.ClientVersion)}.");
+                && ProtocolVersions.IsAtLeast(MaximumVersion, ch.ClientVersion))
+                throw new DtlsException(AlertDescription.InappropriateFallback, $"Client fell back to {ProtocolVersions.Name(ch.ClientVersion)}.");
 
             if (!ch.CompressionMethods.Contains((byte)0))
                 throw new DtlsException(AlertDescription.IllegalParameter, "Client does not offer null compression.");
@@ -464,7 +464,7 @@ namespace SharpDTLS.DTLS12
                 SendHandshake(HandshakeType.Finished, ComputeVerifyData(fromClient: false));
                 ArmRetransmission();
                 _state = State.WaitFinished;
-                Debug.WriteLine($"{LogPrefix} Resuming session: {DtlsVersion.Name(NegotiatedVersion)}, {CipherSuite}");
+                Debug.WriteLine($"{LogPrefix} Resuming session: {ProtocolVersions.Name(NegotiatedVersion)}, {CipherSuite}");
                 return;
             }
 
@@ -513,7 +513,7 @@ namespace SharpDTLS.DTLS12
             SendHandshake(HandshakeType.ServerHelloDone, Array.Empty<byte>());
             ArmRetransmission();
             _state = _certificateRequest != null ? State.WaitClientCertificate : State.WaitClientKeyExchange;
-            Debug.WriteLine($"{LogPrefix} Sent server flight: {DtlsVersion.Name(NegotiatedVersion)}, {CipherSuite}");
+            Debug.WriteLine($"{LogPrefix} Sent server flight: {ProtocolVersions.Name(NegotiatedVersion)}, {CipherSuite}");
         }
 
         protected override void OnHandshakeMessage(byte type, byte[] body, byte[] message, ushort epoch)

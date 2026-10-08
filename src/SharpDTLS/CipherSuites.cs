@@ -126,11 +126,15 @@ namespace SharpDTLS
         /// <summary>PRF hash in DTLS 1.2 (DTLS 1.0 always uses the MD5/SHA-1 PRF).</summary>
         public PrfHashAlgorithm Prf { get; private set; }
 
-        /// <summary>Oldest version the suite may be used with (AEAD and SHA-256+ MACs need DTLS 1.2).</summary>
-        public ushort MinimumVersion { get; private set; }
+        /// <summary>Oldest DTLS version the suite may be used with (AEAD and SHA-256+ MACs need (D)TLS 1.2).</summary>
+        public ushort MinimumVersion => MinimumLevel >= 3 ? DtlsVersion.Dtls12 : DtlsVersion.Dtls10;
 
-        /// <summary>Newest version the suite may be used with (export, DES and IDEA suites are not defined for TLS 1.2).</summary>
-        public ushort MaximumVersion { get; private set; }
+        /// <summary>Newest DTLS version the suite may be used with (export, DES and IDEA suites are not defined for TLS 1.2).</summary>
+        public ushort MaximumVersion => MaximumLevel >= 3 ? DtlsVersion.Dtls12 : DtlsVersion.Dtls10;
+
+        /// <summary>Oldest and newest usable versions as <see cref="ProtocolVersions.Level"/> (1 = TLS 1.0 ... 3 = (D)TLS 1.2).</summary>
+        internal int MinimumLevel { get; private set; }
+        internal int MaximumLevel { get; private set; }
 
         public bool IsExport { get; private set; }
 
@@ -258,14 +262,14 @@ namespace SharpDTLS
         };
 
         public bool IsUsableWith(ushort version)
-            => DtlsVersion.IsAtLeast(version, MinimumVersion) && DtlsVersion.IsAtLeast(MaximumVersion, version);
+            => ProtocolVersions.Level(version) >= MinimumLevel && ProtocolVersions.Level(version) <= MaximumLevel;
 
         public override string ToString() => $"{Name} (0x{Id:X4})";
 
         private void Parse()
         {
-            MinimumVersion = DtlsVersion.Dtls10;
-            MaximumVersion = DtlsVersion.Dtls12;
+            MinimumLevel = 1;
+            MaximumLevel = 3;
             string rest = Name.StartsWith("TLS_") ? Name.Substring(4) : Name;
 
             int with = rest.IndexOf("_WITH_", StringComparison.Ordinal);
@@ -302,7 +306,7 @@ namespace SharpDTLS
             {
                 Mac = MacAlgorithm.Aead;
                 Prf = macPart == "SHA384" ? PrfHashAlgorithm.Sha384 : PrfHashAlgorithm.Sha256;
-                MinimumVersion = DtlsVersion.Dtls12;
+                MinimumLevel = 3;
             }
             else
             {
@@ -317,13 +321,13 @@ namespace SharpDTLS
                 };
                 Prf = Mac == MacAlgorithm.HmacSha384 ? PrfHashAlgorithm.Sha384 : PrfHashAlgorithm.Sha256;
                 if (Mac is MacAlgorithm.HmacSha256 or MacAlgorithm.HmacSha384)
-                    MinimumVersion = DtlsVersion.Dtls12;
+                    MinimumLevel = 3;
             }
 
             // RFC 5469: DES and IDEA suites must not be used with TLS 1.2. Export suites are prohibited
-            // altogether (IsProhibited); this records only that they predate TLS 1.1.
+            // altogether (IsProhibited); this records only that they predate TLS 1.2.
             if (IsExport || Cipher is BulkCipherAlgorithm.DesCbc or BulkCipherAlgorithm.IdeaCbc)
-                MaximumVersion = DtlsVersion.Dtls10;
+                MaximumLevel = 2;
         }
     }
 

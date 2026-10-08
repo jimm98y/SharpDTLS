@@ -13,12 +13,6 @@ namespace SharpDTLS
         /// <summary>True when <paramref name="version"/> is the same as or newer than <paramref name="minimum"/>.</summary>
         public static bool IsAtLeast(ushort version, ushort minimum) => version <= minimum;
 
-        public static string Name(ushort version) => version switch
-        {
-            Dtls10 => "DTLS 1.0",
-            Dtls12 => "DTLS 1.2",
-            Dtls13 => "DTLS 1.3",
-            _ => $"0x{version:X4}",
-        };
+        public static string Name(ushort version) => ProtocolVersions.Name(version);
     }
 }

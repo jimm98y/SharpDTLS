@@ -43,6 +43,11 @@ namespace SharpDTLS.DTLS12
 
             public DatagramFraming(Dtls12Connection connection) : base(connection) { }
 
+            public override bool IsDatagram => true;
+
+            // RFC 6347 §4.1: DTLS 1.0 in record headers until a version is negotiated.
+            public override ushort InitialRecordVersion => DtlsVersion.Dtls10;
+
             public override bool IsReadProtected => _readEpoch > 0;
 
             // A tls12_cid record's DTLSInnerPlaintext has the content type in it as well.

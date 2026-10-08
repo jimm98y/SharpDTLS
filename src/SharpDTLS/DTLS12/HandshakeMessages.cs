@@ -205,7 +205,7 @@ namespace SharpDTLS.DTLS12
         public byte[] Encode(ushort version)
         {
             var w = new TlsWriter().WriteOpaque8(CertificateTypes);
-            if (version == DtlsVersion.Dtls12)
+            if (ProtocolVersions.Level(version) >= 3)
                 w.WriteUInt16List16(SignatureAlgorithms);
             var authorities = new TlsWriter();
             foreach (var dn in CertificateAuthorities)
@@ -217,7 +217,7 @@ namespace SharpDTLS.DTLS12
         {
             var r = new TlsReader(body);
             var m = new CertificateRequestMessage { CertificateTypes = r.ReadOpaque8() };
-            m.SignatureAlgorithms = version == DtlsVersion.Dtls12 ? r.ReadUInt16List16() : null;
+            m.SignatureAlgorithms = ProtocolVersions.Level(version) >= 3 ? r.ReadUInt16List16() : null;
             var authorities = r.ReadNested(r.ReadUInt16());
             while (!authorities.IsEmpty)
                 m.CertificateAuthorities.Add(authorities.ReadOpaque16());
@@ -234,7 +234,7 @@ namespace SharpDTLS.DTLS12
         public byte[] Encode(ushort version)
         {
             var w = new TlsWriter();
-            if (version == DtlsVersion.Dtls12)
+            if (ProtocolVersions.Level(version) >= 3)
                 w.WriteUInt16(SignatureScheme.Value);
             return w.WriteOpaque16(Signature).ToArray();
         }
@@ -243,7 +243,7 @@ namespace SharpDTLS.DTLS12
         {
             var r = new TlsReader(body);
             var m = new CertificateVerifyMessage();
-            if (version == DtlsVersion.Dtls12)
+            if (ProtocolVersions.Level(version) >= 3)
                 m.SignatureScheme = r.ReadUInt16();
             m.Signature = r.ReadOpaque16();
             r.EnsureEnd();

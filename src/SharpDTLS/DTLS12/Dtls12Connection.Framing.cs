@@ -36,6 +36,12 @@ namespace SharpDTLS.DTLS12
             /// <summary>What a framed handshake message contributes to the transcript.</summary>
             public abstract byte[] TranscriptContribution(byte[] message);
 
+            /// <summary>Whether this is DTLS (versions count down from 0xFEFF) rather than TLS.</summary>
+            public abstract bool IsDatagram { get; }
+
+            /// <summary>The record version before one is negotiated.</summary>
+            public abstract ushort InitialRecordVersion { get; }
+
             /// <summary>Record sequence numbers for unprotected records continue from here.</summary>
             public abstract void SetInitialRecordSequence(ulong next);
         }
