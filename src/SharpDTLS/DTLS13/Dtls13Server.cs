@@ -829,10 +829,11 @@ namespace SharpDTLS.DTLS13
                 extensions.Extensions.Add(new AlpnExtension(new[] { ApplicationProtocol }));
             if (_recordSizeResponse != null)
                 extensions.Extensions.Add(_recordSizeResponse);
-            // The chosen certificate types (RFC 7250 §4.2); client_certificate_type only with a CertificateRequest.
+            // The chosen certificate types (RFC 7250 §4.2); client_certificate_type only when a CertificateRequest can
+            // follow, now or after the handshake.
             if (_psk == null && RawPublicKeys.Find(_clientHello.Extensions, CertificateTypeExtension.ServerType) != null)
                 extensions.Extensions.Add(new CertificateTypeExtension(CertificateTypeExtension.ServerType, _serverCertificateType.Value));
-            if (_psk == null && _server.RequireClientCertificate && _clientCertificateType != null
+            if (_psk == null && (_server.RequireClientCertificate || AllowsPostHandshakeAuthentication) && _clientCertificateType != null
                 && RawPublicKeys.Find(_clientHello.Extensions, CertificateTypeExtension.ClientType) != null)
                 extensions.Extensions.Add(new CertificateTypeExtension(CertificateTypeExtension.ClientType, _clientCertificateType.Value));
 
@@ -1016,6 +1017,136 @@ namespace SharpDTLS.DTLS13
             // Retransmitted until the client ACKs it (RFC 9147 §5.8).
             SendPostHandshakeFlight(() => SendHandshake(new NewSessionTicketDatagram(state.Seal(keys), nonce, lifetime, ageAdd) { MaxEarlyDataSize = state.MaxEarlyDataSize },
                 Session.WriteKeys, addToTranscript: false));
+        }
+
+        // ── Post-handshake client authentication (RFC 8446 §4.6.2) ────────────────────────────
+
+        private sealed class PostHandshakeAuthentication
+        {
+            public CertificateRequestDatagram Request;
+            public Dtls13Transcript Transcript;
+            public bool Required;
+            public int Stage; // 0 Certificate, 1 CertificateVerify, 2 Finished
+            public X509Certificate Certificate;
+            public byte[] RawPublicKey;
+            public AsymmetricKeyParameter PublicKey;
+        }
+
+        private PostHandshakeAuthentication _postHandshakeAuthentication;
+
+        /// <summary>Whether the client offered post_handshake_auth, so <see cref="RequestClientCertificate"/> may be used.</summary>
+        public bool AllowsPostHandshakeAuthentication => _clientHello?.Extensions.OfType<PostHandshakeAuthExtension>().Any() == true;
+
+        /// <summary>
+        /// Raised when the client answered <see cref="RequestClientCertificate"/>: <see cref="ClientCertificate"/> (or
+        /// <see cref="ClientRawPublicKey"/>) is then the authenticated client, or unchanged when it sent none.
+        /// </summary>
+        public event EventHandler PostHandshakeAuthenticationCompleted;
+
+        /// <summary>
+        /// Asks the client for its certificate after the handshake (RFC 8446 §4.6.2). The answer is checked like one in
+        /// the handshake (ClientCertificateValidator or ClientRawPublicKeyValidator, CertificateVerify, Finished); with
+        /// <paramref name="required"/> an answer without a certificate is a certificate_required alert.
+        /// </summary>
+        public void RequestClientCertificate(bool required = true) => Locked(() =>
+        {
+            if (!IsHandshakeComplete || IsClosed)
+                throw new InvalidOperationException("The handshake has not completed.");
+            if (!AllowsPostHandshakeAuthentication)
+                throw new InvalidOperationException("The client did not offer post-handshake authentication.");
+            if (_postHandshakeAuthentication != null)
+                throw new InvalidOperationException("A post-handshake certificate request is already outstanding.");
+            if (_clientCertificateType == null)
+                throw new InvalidOperationException("No client certificate type in common.");
+
+            CertificateCompression.Validate(_server.CertificateCompressionAlgorithms);
+            var request = new CertificateRequestDatagram
+            {
+                RequestContext = Dtls13CryptoUtils.GenerateRandom(8),
+                CompressionAlgorithms = _server.CertificateCompressionAlgorithms,
+            };
+            var authentication = new PostHandshakeAuthentication { Request = request, Transcript = Session.Transcript.Clone(), Required = required };
+            _postHandshakeAuthentication = authentication;
+            SendPostHandshakeFlight(() => authentication.Transcript.AddHandshake(SendHandshake(request, Session.WriteKeys, addToTranscript: false)));
+        });
+
+        protected override bool OnPostHandshakeAuthMessage(byte[] message, IHandshakeDatagram parsed)
+        {
+            var auth = _postHandshakeAuthentication;
+            if (auth == null)
+                return false;
+            var suite = Session.CipherSuite;
+            if (parsed is CompressedCertificateDatagram compressed && auth.Stage == 0)
+            {
+                parsed = compressed.Decompress(auth.Request.CompressionAlgorithms);
+                CertificateCompressionAlgorithm = compressed.Algorithm;
+            }
+
+            switch (parsed)
+            {
+                case CertificateDatagram certificate when auth.Stage == 0:
+                    if (!certificate.RequestContext.AsSpan().SequenceEqual(auth.Request.RequestContext))
+                        throw new DtlsException(AlertDescription.IllegalParameter, "Certificate request context does not match.");
+                    if (certificate.CertificateChain.Count == 0)
+                    {
+                        if (auth.Required)
+                            throw new DtlsException(AlertDescription.CertificateRequired, "Client did not send a certificate.");
+                        auth.Stage = 2;
+                    }
+                    else if (_clientCertificateType == CertificateType.RawPublicKey)
+                    {
+                        if (certificate.CertificateChain.Count != 1)
+                            throw new DtlsException(AlertDescription.DecodeError, "A raw public key Certificate has one entry.");
+                        auth.PublicKey = RawPublicKeys.Decode(certificate.Certificate);
+                        if (_server.ClientRawPublicKeyValidator != null && !_server.ClientRawPublicKeyValidator(certificate.Certificate))
+                            throw new DtlsException(AlertDescription.BadCertificate, "Client raw public key was rejected.");
+                        auth.RawPublicKey = certificate.Certificate;
+                        auth.Stage = 1;
+                    }
+                    else
+                    {
+                        auth.Certificate = SharpDTLS.DTLS12.Dtls12ClientConnection.ParseCertificate(certificate.Certificate);
+                        if (_server.ClientCertificateValidator != null && !_server.ClientCertificateValidator(auth.Certificate, certificate.CertificateChain))
+                            throw new DtlsException(AlertDescription.BadCertificate, "Client certificate was rejected.");
+                        auth.PublicKey = auth.Certificate.GetPublicKey();
+                        auth.Stage = 1;
+                    }
+                    auth.Transcript.AddHandshake(message);
+                    return true;
+
+                case CertificateVerifyDatagram certificateVerify when auth.Stage == 1:
+                {
+                    ushort scheme = (ushort)certificateVerify.SignatureType;
+                    if (!auth.Request.SignatureAlgorithms.Contains(scheme))
+                        throw new DtlsException(AlertDescription.IllegalParameter, $"Client used signature scheme 0x{scheme:X4}, which was not requested.");
+                    byte[] content = Dtls13Signatures.BuildSignedContent(server: false, auth.Transcript.Hash(suite));
+                    if (!Dtls13Signatures.Verify(scheme, auth.PublicKey, content, certificateVerify.Signature))
+                        throw new DtlsException(AlertDescription.DecryptError, "Client CertificateVerify signature is invalid.");
+                    auth.Transcript.AddHandshake(message);
+                    auth.Stage = 2;
+                    return true;
+                }
+
+                case FinishedDatagram finished when auth.Stage == 2:
+                {
+                    var clientKeys = Session.ReadKeys[Session.ReadKeys.Count - 1];
+                    byte[] expected = Dtls13CryptoUtils.CalculateFinished(clientKeys.ClientSecret, auth.Transcript.Hash(suite), suite);
+                    if (!System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(expected, finished.VerifyData))
+                        throw new DtlsException(AlertDescription.DecryptError, "Post-handshake Finished verification failed.");
+                    SendAck();
+                    _postHandshakeAuthentication = null;
+                    if (auth.PublicKey != null)
+                    {
+                        (_clientCertificate, _clientPublicKey, ClientRawPublicKey) = (auth.Certificate, auth.PublicKey, auth.RawPublicKey);
+                        Session.ReceivedClientCertificate = true;
+                    }
+                    RaiseEvent(() => PostHandshakeAuthenticationCompleted?.Invoke(this, EventArgs.Empty));
+                    return true;
+                }
+
+                default:
+                    throw new DtlsException(AlertDescription.UnexpectedMessage, $"Unexpected message 0x{message[0]:X2} in post-handshake authentication.");
+            }
         }
     }
 }

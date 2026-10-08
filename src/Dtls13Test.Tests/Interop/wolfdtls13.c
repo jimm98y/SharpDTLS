@@ -25,6 +25,8 @@
  *   -rpk                offer and accept raw public keys (RFC 7250) in both directions; a ".der" certificate file
  *                       is our SubjectPublicKeyInfo; prints "CERTTYPE:<server> <client>" after the handshake
  *   -rpk_pin <der>      authenticate the peer by this pinned SubjectPublicKeyInfo
+ *   -pha                client: allow post-handshake authentication; server (with -verify): ask for the client
+ *                       certificate only after the handshake, when stdin says "REQCERT"; "PEER" prints "PEER:yes|no"
  *   -resume             two connections: the client resumes the first one's session ticket, the server
  *                       accepts the second connection with the same context; both print "RESUMED" or
  *                       "NOT RESUMED" after the second handshake
@@ -110,7 +112,7 @@ int main(int argc, char **argv)
     int port = atoi(argv[2]);
     const char *cert = NULL, *key = NULL, *cipher = NULL, *verify = NULL, *group = NULL, *srtp = NULL, *exportLabel = NULL;
     int exportLength = 0;
-    int hrr = 0, resume = 0, pskOnly = 0, mfl = 0, ocsp = 0, rpk = 0, argi = 3;
+    int hrr = 0, resume = 0, pskOnly = 0, mfl = 0, ocsp = 0, rpk = 0, pha = 0, argi = 3;
     const char *rpkPin = NULL;
     const char *pskHex = NULL, *host = NULL, *sni = NULL, *alpn = NULL, *cidHex = NULL;
 
@@ -138,6 +140,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[argi], "-mfl") && argi + 1 < argc) mfl = atoi(argv[++argi]);
         else if (!strcmp(argv[argi], "-ocsp")) ocsp = 1;
         else if (!strcmp(argv[argi], "-rpk")) rpk = 1;
+        else if (!strcmp(argv[argi], "-pha")) pha = 1;
         else if (!strcmp(argv[argi], "-rpk_pin") && argi + 1 < argc) rpkPin = argv[++argi];
         else if (!strcmp(argv[argi], "-ocsp_resp") && argi + 1 < argc) ocspRespFile = argv[++argi];
         else if (!strcmp(argv[argi], "-srtp") && argi + 1 < argc) srtp = argv[++argi];
@@ -186,7 +189,8 @@ int main(int argc, char **argv)
     if (verify) {
         if (wolfSSL_CTX_load_verify_locations(ctx, verify, NULL) != WOLFSSL_SUCCESS)
             fail("load verify", NULL, 0);
-        wolfSSL_CTX_set_verify(ctx, server ? WOLFSSL_VERIFY_PEER | WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT : WOLFSSL_VERIFY_PEER, NULL);
+        wolfSSL_CTX_set_verify(ctx, server && pha ? WOLFSSL_VERIFY_PEER | WOLFSSL_VERIFY_POST_HANDSHAKE
+                                  : server ? WOLFSSL_VERIFY_PEER | WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT : WOLFSSL_VERIFY_PEER, NULL);
     } else {
         wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_NONE, NULL);
     }
@@ -252,6 +256,8 @@ int main(int argc, char **argv)
     if (wolfSSL_set_dtls_fd_connected(ssl, fd) != WOLFSSL_SUCCESS)
         fail("set fd", NULL, 0);
 
+    if (pha && !server && wolfSSL_allow_post_handshake_auth(ssl) != 0)
+        fail("allow_post_handshake_auth", NULL, 0);
     if (rpk) {
         const char types[] = { WOLFSSL_CERT_TYPE_RPK, WOLFSSL_CERT_TYPE_X509 };
         if (wolfSSL_set_server_cert_type(ssl, types, 2) != WOLFSSL_SUCCESS || wolfSSL_set_client_cert_type(ssl, types, 2) != WOLFSSL_SUCCESS)
@@ -390,7 +396,18 @@ int main(int argc, char **argv)
             char *nl;
             while ((nl = memchr(line, '\n', lineLen)) != NULL) {
                 size_t len = (size_t)(nl - line) + 1;
-                if (len >= 9 && !strncmp(line, "KEYUPDATE", 9)) {
+                if (len >= 7 && !strncmp(line, "REQCERT", 7)) {
+                    ret = wolfSSL_request_certificate(ssl);
+                    if (ret != WOLFSSL_SUCCESS && wolfSSL_get_error(ssl, ret) != WOLFSSL_ERROR_WANT_WRITE)
+                        fail("request_certificate", ssl, ret);
+                    printf("REQCERT SENT\n");
+                    fflush(stdout);
+                } else if (len >= 4 && !strncmp(line, "PEER", 4)) {
+                    WOLFSSL_X509 *peerCert = wolfSSL_get_peer_certificate(ssl);
+                    printf("PEER:%s\n", peerCert ? "yes" : "no");
+                    fflush(stdout);
+                    if (peerCert) wolfSSL_X509_free(peerCert);
+                } else if (len >= 9 && !strncmp(line, "KEYUPDATE", 9)) {
                     ret = wolfSSL_update_keys(ssl);
                     if (ret != WOLFSSL_SUCCESS && wolfSSL_get_error(ssl, ret) != WOLFSSL_ERROR_WANT_WRITE)
                         fail("update_keys", ssl, ret);

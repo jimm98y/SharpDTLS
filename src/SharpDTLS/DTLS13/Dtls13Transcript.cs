@@ -14,6 +14,14 @@ namespace SharpDTLS.DTLS13
 
         public int Count => _messages.Count;
 
+        /// <summary>A copy that can be extended independently (post-handshake authentication, RFC 8446 §4.6.2).</summary>
+        public Dtls13Transcript Clone()
+        {
+            var copy = new Dtls13Transcript();
+            copy._messages.AddRange(_messages);
+            return copy;
+        }
+
         /// <summary>
         /// Adds a complete (unfragmented) DTLS handshake message starting at <paramref name="offset"/>.
         /// Trailing bytes after the message body (e.g. the inner content type) are ignored.

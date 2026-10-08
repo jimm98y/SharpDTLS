@@ -444,9 +444,14 @@ namespace SharpDTLS.DTLS13
                     break;
 
                 default:
-                    throw new DtlsException(AlertDescription.UnexpectedMessage, $"Unexpected post-handshake message 0x{message[0]:X2}");
+                    if (!OnPostHandshakeAuthMessage(message, parsed))
+                        throw new DtlsException(AlertDescription.UnexpectedMessage, $"Unexpected post-handshake message 0x{message[0]:X2}");
+                    break;
             }
         }
+
+        /// <summary>Post-handshake authentication messages (RFC 8446 §4.6.2); false when not expected.</summary>
+        protected virtual bool OnPostHandshakeAuthMessage(byte[] message, IHandshakeDatagram parsed) => false;
 
         private void StartKeyUpdate(bool requestUpdate)
         {

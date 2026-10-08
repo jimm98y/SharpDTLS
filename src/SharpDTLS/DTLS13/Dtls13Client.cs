@@ -75,6 +75,15 @@ namespace SharpDTLS.DTLS13
         /// <summary>The algorithm the server compressed its certificate with, or null when it was not compressed.</summary>
         public ushort? CertificateCompressionAlgorithm { get; private set; }
 
+        /// <summary>
+        /// Let the server ask for our certificate after the handshake (post_handshake_auth, RFC 8446 §4.6.2). Requests are
+        /// answered with <see cref="ClientCertificate"/> (or a raw public key) and its key, or with no certificate.
+        /// </summary>
+        public bool AllowPostHandshakeAuthentication { get; set; }
+
+        /// <summary>The server asked for our certificate after the handshake; raised after the answer was sent.</summary>
+        public event EventHandler PostHandshakeCertificateRequested;
+
         /// <summary>Ask the server to staple an OCSP response for its certificate (status_request, RFC 8446 §4.4.2.1).</summary>
         public bool RequestOcspStapling { get; set; }
 
@@ -256,6 +265,8 @@ namespace SharpDTLS.DTLS13
             clientHello.Extensions.AddRange(RecordSizeNegotiation.Offer(RecordSizeLimit, MaxFragmentLength, dtls13: true));
             if (RequestOcspStapling)
                 clientHello.Extensions.Add(new StatusRequestExtension(request: true));
+            if (AllowPostHandshakeAuthentication)
+                clientHello.Extensions.Add(new PostHandshakeAuthExtension());
             CertificateCompression.Validate(CertificateCompressionAlgorithms);
             if (CertificateCompressionAlgorithms is { Count: > 0 })
                 clientHello.Extensions.Add(new CompressCertificateExtension(CertificateCompressionAlgorithms));
@@ -689,32 +700,68 @@ namespace SharpDTLS.DTLS13
                 Session.PeerCertificate, nst.MaxEarlyDataSize, ServerName, ApplicationProtocol);
         }
 
-        private void SendClientCertificate()
+        private void SendClientCertificate() => SendClientCertificate(_certificateRequest, Session.ServerHandshakeKeys, Session.Transcript);
+
+        /// <summary>
+        /// Certificate and, when we can sign with a scheme the server accepts, CertificateVerify over
+        /// <paramref name="transcript"/>: the handshake's, or a copy for post-handshake authentication.
+        /// </summary>
+        private void SendClientCertificate(CertificateRequestDatagram request, Dtls13CryptoContext keys, Dtls13Transcript transcript)
         {
             var suite = Session.CipherSuite;
-            var keys = Session.ServerHandshakeKeys;
+            bool inHandshake = transcript == Session.Transcript;
 
             // Send our certificate only if we can sign with a scheme the server accepts.
             bool rawPublicKey = _clientCertificateType == CertificateType.RawPublicKey;
             ushort? scheme = null;
             if ((ClientCertificate != null || rawPublicKey) && ClientCertificateKeyPair != null)
-                scheme = Dtls13Signatures.SelectScheme(ClientCertificateKeyPair.Private, _certificateRequest.SignatureAlgorithms);
+                scheme = Dtls13Signatures.SelectScheme(ClientCertificateKeyPair.Private, request.SignatureAlgorithms);
 
             var chain = !scheme.HasValue ? Array.Empty<byte[]>()
                 : rawPublicKey ? new[] { RawPublicKeys.Encode(ClientCertificateKeyPair.Public) }
                 : new[] { ClientCertificate.GetEncoded() }.Concat((ClientIntermediateCertificates ?? Array.Empty<X509Certificate>()).Select(c => c.GetEncoded())).ToArray();
-            var certificate = new CertificateDatagram(chain, _certificateRequest.RequestContext);
-            ushort? compression = chain.Length > 0 ? CertificateCompression.Select(CertificateCompressionAlgorithms, _certificateRequest.CompressionAlgorithms) : null;
-            SendHandshake(compression.HasValue ? new CompressedCertificateDatagram(compression.Value, certificate) : certificate, keys);
+            var certificate = new CertificateDatagram(chain, request.RequestContext);
+            ushort? compression = chain.Length > 0 ? CertificateCompression.Select(CertificateCompressionAlgorithms, request.CompressionAlgorithms) : null;
+            byte[] sent = SendHandshake(compression.HasValue ? new CompressedCertificateDatagram(compression.Value, certificate) : certificate, keys, inHandshake);
+            if (!inHandshake)
+                transcript.AddHandshake(sent);
 
             if (scheme.HasValue)
             {
-                byte[] content = Dtls13Signatures.BuildSignedContent(server: false, Session.Transcript.Hash(suite));
+                byte[] content = Dtls13Signatures.BuildSignedContent(server: false, transcript.Hash(suite));
                 byte[] signature = Dtls13Signatures.Sign(scheme.Value, ClientCertificateKeyPair.Private, content);
-                SendHandshake(new CertificateVerifyDatagram(signature, scheme.Value), keys);
+                sent = SendHandshake(new CertificateVerifyDatagram(signature, scheme.Value), keys, inHandshake);
+                if (!inHandshake)
+                    transcript.AddHandshake(sent);
             }
 
             Debug.WriteLine($"[DTLS13 Client] Sent Certificate ({chain.Length} entries)");
+        }
+
+        // RFC 8446 §4.6.2: Certificate, CertificateVerify and Finished over the handshake transcript (through our Finished)
+        // plus the CertificateRequest, with the current application traffic secret as the Finished base key.
+        protected override bool OnPostHandshakeAuthMessage(byte[] message, IHandshakeDatagram parsed)
+        {
+            if (parsed is not CertificateRequestDatagram request)
+                return false;
+            if (!AllowPostHandshakeAuthentication)
+                throw new DtlsException(AlertDescription.UnexpectedMessage, "CertificateRequest without post_handshake_auth.");
+            if (request.RequestContext.Length == 0)
+                throw new DtlsException(AlertDescription.IllegalParameter, "Post-handshake CertificateRequest with an empty context.");
+
+            var transcript = Session.Transcript.Clone();
+            transcript.AddHandshake(message);
+            SendAck();
+            SendPostHandshakeFlight(() =>
+            {
+                var suite = Session.CipherSuite;
+                var keys = Session.WriteKeys;
+                SendClientCertificate(request, keys, transcript);
+                byte[] verifyData = Dtls13CryptoUtils.CalculateFinished(keys.ClientSecret, transcript.Hash(suite), suite);
+                SendHandshake(new FinishedDatagram { VerifyData = verifyData }, keys, addToTranscript: false);
+            });
+            RaiseEvent(() => PostHandshakeCertificateRequested?.Invoke(this, EventArgs.Empty));
+            return true;
         }
     }
 }
