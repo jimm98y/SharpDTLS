@@ -122,6 +122,25 @@ namespace Dtls13Test.Tests
             }
         }
 
+        [TestMethod]
+        public void Tls10_IsOffByDefault()
+        {
+            using var server = new Tls12Server();
+            server.Start(new IPEndPoint(IPAddress.Loopback, 0));
+            var tcp = new TcpClient();
+            tcp.Connect(server.LocalEndpoint);
+            var client = new Tls12Client(tcp.GetStream()) { MinimumVersion = TlsVersion.Tls10, MaximumVersion = TlsVersion.Tls10 };
+            var failed = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
+            client.Failed += (_, ex) => failed.TrySetResult(ex);
+            client.BeginHandshake();
+            Assert.IsTrue(failed.Task.Wait(Timeout));
+            Assert.AreEqual(AlertDescription.ProtocolVersion, (failed.Task.Result as DtlsException)?.Alert, failed.Task.Result.ToString());
+
+            server.MinimumVersion = TlsVersion.Tls10;
+            var accepted = TestTls12.Connect(server.LocalEndpoint, c => { c.MinimumVersion = TlsVersion.Tls10; c.MaximumVersion = TlsVersion.Tls10; });
+            Assert.AreEqual(TlsVersion.Tls10, accepted.NegotiatedVersion);
+        }
+
         // ── OpenSSL ──────────────────────────────────────────────────────────────────────────
 
         [TestCategory("Interop")]

@@ -26,17 +26,24 @@ namespace SharpDTLS.DTLS12
 
     public static class RecordCiphers
     {
-        /// <summary>Length of the key block: MAC keys, encryption keys and fixed IVs for both directions.</summary>
-        public static int KeyBlockLength(CipherSuiteInfo suite)
-            => 2 * (suite.MacKeyLength + suite.KeyLength + suite.FixedIvLength);
+        /// <summary>
+        /// Length of the key block: MAC keys, encryption keys and fixed IVs for both directions. With
+        /// <paramref name="implicitIv"/> (TLS 1.0, RFC 2246 §6.3) CBC suites also take their initial IVs from it.
+        /// </summary>
+        public static int KeyBlockLength(CipherSuiteInfo suite, bool implicitIv = false)
+            => 2 * (suite.MacKeyLength + suite.KeyLength + IvLength(suite, implicitIv));
+
+        private static int IvLength(CipherSuiteInfo suite, bool implicitIv)
+            => implicitIv && suite.IsCbc ? BlockCipherFactory(suite.Cipher)().GetBlockSize() : suite.FixedIvLength;
 
         /// <summary>
         /// Splits the key block (client_write_MAC_key, server_write_MAC_key, client_write_key,
         /// server_write_key, client_write_IV, server_write_IV) into the two directional ciphers.
         /// </summary>
-        public static (IRecordCipher ClientWrite, IRecordCipher ServerWrite) Create(CipherSuiteInfo suite, byte[] keyBlock, bool encryptThenMac)
+        public static (IRecordCipher ClientWrite, IRecordCipher ServerWrite) Create(CipherSuiteInfo suite, byte[] keyBlock, bool encryptThenMac,
+            bool implicitIv = false)
         {
-            int mac = suite.MacKeyLength, key = suite.KeyLength, iv = suite.FixedIvLength;
+            int mac = suite.MacKeyLength, key = suite.KeyLength, iv = IvLength(suite, implicitIv);
             byte[] Slice(int offset, int length) => keyBlock.AsSpan(offset, length).ToArray();
 
             byte[] clientMac = Slice(0, mac);
@@ -46,11 +53,11 @@ namespace SharpDTLS.DTLS12
             byte[] clientIv  = Slice(2 * mac + 2 * key, iv);
             byte[] serverIv  = Slice(2 * mac + 2 * key + iv, iv);
 
-            return (CreateOne(suite, clientKey, clientIv, clientMac, encryptThenMac),
-                    CreateOne(suite, serverKey, serverIv, serverMac, encryptThenMac));
+            return (CreateOne(suite, clientKey, clientIv, clientMac, encryptThenMac, implicitIv),
+                    CreateOne(suite, serverKey, serverIv, serverMac, encryptThenMac, implicitIv));
         }
 
-        private static IRecordCipher CreateOne(CipherSuiteInfo suite, byte[] key, byte[] iv, byte[] macKey, bool encryptThenMac)
+        private static IRecordCipher CreateOne(CipherSuiteInfo suite, byte[] key, byte[] iv, byte[] macKey, bool encryptThenMac, bool implicitIv)
         {
             switch (suite.Cipher)
             {
@@ -76,7 +83,7 @@ namespace SharpDTLS.DTLS12
                 default:
                     var engine = BlockCipherFactory(suite.Cipher)
                         ?? throw new DtlsException(AlertDescription.InternalError, $"No record cipher for {suite.Cipher}");
-                    return new CbcRecordCipher(engine, key, macKey, suite.Mac, encryptThenMac);
+                    return new CbcRecordCipher(engine, key, macKey, suite.Mac, encryptThenMac, implicitIv ? iv : null);
             }
         }
 
@@ -298,8 +305,9 @@ namespace SharpDTLS.DTLS12
     }
 
     /// <summary>
-    /// Block cipher in CBC mode with an explicit per-record IV and HMAC, either MAC-then-encrypt
-    /// (RFC 5246 §6.2.3.2) or encrypt-then-MAC (RFC 7366).
+    /// Block cipher in CBC mode with HMAC, either MAC-then-encrypt (RFC 5246 §6.2.3.2) or encrypt-then-MAC (RFC 7366).
+    /// Records carry an explicit random IV, or in TLS 1.0 (RFC 2246 §6.2.3.2) none: the IV is the last ciphertext
+    /// block of the previous record in the same direction, starting from the key block.
     /// </summary>
     internal sealed class CbcRecordCipher : IRecordCipher
     {
@@ -312,8 +320,12 @@ namespace SharpDTLS.DTLS12
         private readonly int _macLength;
         private readonly SecureRandom _random = new SecureRandom();
 
-        public CbcRecordCipher(Func<IBlockCipher> createEngine, byte[] key, byte[] macKey, MacAlgorithm mac, bool encryptThenMac)
+        // TLS 1.0's chained IV; null for explicit IVs.
+        private byte[] _chainedIv;
+
+        public CbcRecordCipher(Func<IBlockCipher> createEngine, byte[] key, byte[] macKey, MacAlgorithm mac, bool encryptThenMac, byte[] chainedIv = null)
         {
+            _chainedIv = chainedIv;
             _createEngine = createEngine;
             _key = key;
             _macKey = macKey;
@@ -323,22 +335,41 @@ namespace SharpDTLS.DTLS12
             _macLength = RecordCiphers.CreateHmac(mac).GetMacSize();
         }
 
+        private int ExplicitIvLength => _chainedIv == null ? _blockSize : 0;
+
         public byte[] Encrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] plaintext, byte[] connectionId = null)
         {
-            byte[] iv = new byte[_blockSize];
-            _random.NextBytes(iv);
+            byte[] iv = _chainedIv;
+            if (iv == null)
+            {
+                iv = new byte[_blockSize];
+                _random.NextBytes(iv);
+            }
+            byte[] explicitIv = _chainedIv == null ? iv : Array.Empty<byte>();
 
+            byte[] ciphertext;
+            byte[] record;
             if (_encryptThenMac)
             {
-                byte[] ciphertext = CbcProcess(true, iv, Pad(plaintext, plaintext.Length));
-                byte[] ivAndCiphertext = Concat(iv, ciphertext);
-                byte[] mac = ComputeMac(contentType, version, epoch, sequenceNumber, ivAndCiphertext, connectionId);
-                return Concat(ivAndCiphertext, mac);
+                ciphertext = CbcProcess(true, iv, Pad(plaintext, plaintext.Length));
+                byte[] ivAndCiphertext = Concat(explicitIv, ciphertext);
+                record = Concat(ivAndCiphertext, ComputeMac(contentType, version, epoch, sequenceNumber, ivAndCiphertext, connectionId));
             }
+            else
+            {
+                byte[] withMac = Concat(plaintext, ComputeMac(contentType, version, epoch, sequenceNumber, plaintext, connectionId));
+                ciphertext = CbcProcess(true, iv, Pad(withMac, withMac.Length));
+                record = Concat(explicitIv, ciphertext);
+            }
+            Chain(ciphertext);
+            return record;
+        }
 
-            byte[] macBefore = ComputeMac(contentType, version, epoch, sequenceNumber, plaintext, connectionId);
-            byte[] withMac = Concat(plaintext, macBefore);
-            return Concat(iv, CbcProcess(true, iv, Pad(withMac, withMac.Length)));
+        // The next record's IV is this record's last ciphertext block (TLS 1.0).
+        private void Chain(byte[] ciphertext)
+        {
+            if (_chainedIv != null)
+                _chainedIv = ciphertext.AsSpan(ciphertext.Length - _blockSize).ToArray();
         }
 
         public byte[] Decrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment, byte[] connectionId = null)
@@ -349,7 +380,7 @@ namespace SharpDTLS.DTLS12
         private byte[] DecryptEncryptThenMac(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment, byte[] connectionId)
         {
             int ivAndCiphertextLength = fragment.Length - _macLength;
-            if (ivAndCiphertextLength < 2 * _blockSize || (ivAndCiphertextLength - _blockSize) % _blockSize != 0)
+            if (ivAndCiphertextLength < ExplicitIvLength + _blockSize || (ivAndCiphertextLength - ExplicitIvLength) % _blockSize != 0)
                 throw new DtlsRecordDiscardedException("Invalid CBC record length");
 
             byte[] ivAndCiphertext = fragment.AsSpan(0, ivAndCiphertextLength).ToArray();
@@ -358,7 +389,9 @@ namespace SharpDTLS.DTLS12
                 throw new DtlsRecordDiscardedException("Record failed authentication");
 
             // The MAC was verified first, so padding errors cannot act as an oracle.
-            byte[] padded = CbcProcess(false, ivAndCiphertext.AsSpan(0, _blockSize).ToArray(), ivAndCiphertext.AsSpan(_blockSize).ToArray());
+            byte[] ciphertext = ivAndCiphertext.AsSpan(ExplicitIvLength).ToArray();
+            byte[] padded = CbcProcess(false, _chainedIv ?? ivAndCiphertext.AsSpan(0, _blockSize).ToArray(), ciphertext);
+            Chain(ciphertext);
             int padLength = padded[padded.Length - 1];
             if (padLength + 1 > padded.Length)
                 throw new DtlsRecordDiscardedException("Invalid padding");
@@ -375,11 +408,13 @@ namespace SharpDTLS.DTLS12
         /// </summary>
         private byte[] DecryptMacThenEncrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment, byte[] connectionId)
         {
-            int ciphertextLength = fragment.Length - _blockSize;
+            int ciphertextLength = fragment.Length - ExplicitIvLength;
             if (ciphertextLength < _macLength + 1 || ciphertextLength % _blockSize != 0)
                 throw new DtlsRecordDiscardedException("Invalid CBC record length");
 
-            byte[] plaintext = CbcProcess(false, fragment.AsSpan(0, _blockSize).ToArray(), fragment.AsSpan(_blockSize).ToArray());
+            byte[] ciphertext = fragment.AsSpan(ExplicitIvLength).ToArray();
+            byte[] plaintext = CbcProcess(false, _chainedIv ?? fragment.AsSpan(0, _blockSize).ToArray(), ciphertext);
+            Chain(ciphertext);
 
             int padLength = plaintext[plaintext.Length - 1];
             int good = (padLength + 1 + _macLength <= plaintext.Length) ? 1 : 0;

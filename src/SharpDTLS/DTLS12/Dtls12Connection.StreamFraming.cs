@@ -185,7 +185,17 @@ namespace SharpDTLS.DTLS12
                 _writeSequence = 0;
             }
 
-            public override void WriteApplicationData(byte[] data) => C.Enqueue(WriteRecord(0x17, data));
+            public override void WriteApplicationData(byte[] data)
+            {
+                // TLS 1.0 CBC: a predictable IV (the last ciphertext block) enables BEAST, so the first byte goes in its
+                // own record and the rest gets an IV the attacker could not choose (the 1/n-1 split).
+                if (ProtocolVersions.Level(C.NegotiatedVersion) == 1 && C.CipherSuite.IsCbc && data.Length > 1)
+                {
+                    C.Enqueue(WriteRecord(0x17, data.AsSpan(0, 1).ToArray()));
+                    data = data.AsSpan(1).ToArray();
+                }
+                C.Enqueue(WriteRecord(0x17, data));
+            }
 
             public override void SendAlert(byte level, AlertDescription description)
                 => C.Enqueue(WriteRecord(0x15, new[] { level, (byte)description }));

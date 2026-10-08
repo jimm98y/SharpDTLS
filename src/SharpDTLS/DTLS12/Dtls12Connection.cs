@@ -195,8 +195,10 @@ namespace SharpDTLS.DTLS12
         protected void DeriveKeysFromMasterSecret(byte[] masterSecret)
         {
             MasterSecret = masterSecret;
-            byte[] keyBlock = Prf(MasterSecret, "key expansion", Concat(ServerRandom, ClientRandom), RecordCiphers.KeyBlockLength(CipherSuite));
-            var (clientWrite, serverWrite) = RecordCiphers.Create(CipherSuite, keyBlock, UseEncryptThenMac && CipherSuite.IsCbc);
+            // TLS 1.0 takes CBC IVs from the key block and chains them (DTLS 1.0 is TLS 1.1, with explicit IVs).
+            bool implicitIv = ProtocolVersions.Level(NegotiatedVersion) == 1;
+            byte[] keyBlock = Prf(MasterSecret, "key expansion", Concat(ServerRandom, ClientRandom), RecordCiphers.KeyBlockLength(CipherSuite, implicitIv));
+            var (clientWrite, serverWrite) = RecordCiphers.Create(CipherSuite, keyBlock, UseEncryptThenMac && CipherSuite.IsCbc, implicitIv);
             _framing.SetPendingCiphers(read: IsClient ? serverWrite : clientWrite, write: IsClient ? clientWrite : serverWrite);
 
             KeyLogWriter?.Invoke($"CLIENT_RANDOM {Convert.ToHexString(ClientRandom).ToLowerInvariant()} {Convert.ToHexString(MasterSecret).ToLowerInvariant()}");

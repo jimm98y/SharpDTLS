@@ -21,7 +21,10 @@ namespace Dtls13Test.Tests
 
         public static IEnumerable<object[]> ImplementedSuites => CipherSuites.All.Select(s => new object[] { s.Id, s.Name });
 
-        private static (CipherSuiteInfo Suite, string OpenSslName, string VersionFlag, ushort Version) Prepare(ushort id)
+        /// <summary>The suites TLS 1.0 allows (no AEAD or SHA-256 MACs): its chained CBC IVs and the 1/n-1 split.</summary>
+        public static IEnumerable<object[]> Tls10Suites => CipherSuites.All.Where(s => s.IsUsableWith(TlsVersion.Tls10)).Select(s => new object[] { s.Id, s.Name });
+
+        private static (CipherSuiteInfo Suite, string OpenSslName, string VersionFlag, ushort Version) Prepare(ushort id, bool tls10 = false)
         {
             OpenSsl.RequireOpenSsl();
             var suite = CipherSuites.Get(id);
@@ -29,15 +32,23 @@ namespace Dtls13Test.Tests
                 Assert.Inconclusive("OpenSSL 3.6 SRP is unusable from the command line");
             if (!TestOpenSslCipherMatrix._openSsl.Value.Names.TryGetValue(id, out string name))
                 Assert.Inconclusive($"OpenSSL does not support {suite.Name}");
+            if (tls10)
+                return (suite, name, "-tls1", TlsVersion.Tls10);
             bool tls12 = suite.IsUsableWith(TlsVersion.Tls12);
             return (suite, name, tls12 ? "-tls1_2" : "-tls1_1", tls12 ? TlsVersion.Tls12 : TlsVersion.Tls11);
         }
 
         [DynamicData(nameof(ImplementedSuites))]
         [TestMethod]
-        public void SharpTlsClient_To_OpenSslServer(ushort id, string name)
+        public void SharpTlsClient_To_OpenSslServer(ushort id, string name) => ClientToServer(id, name, tls10: false);
+
+        [DynamicData(nameof(Tls10Suites))]
+        [TestMethod]
+        public void Tls10_SharpTlsClient_To_OpenSslServer(ushort id, string name) => ClientToServer(id, name, tls10: true);
+
+        private static void ClientToServer(ushort id, string name, bool tls10)
         {
-            var (suite, openSslName, versionFlag, version) = Prepare(id);
+            var (suite, openSslName, versionFlag, version) = Prepare(id, tls10);
             string dir = OpenSsl.NewTempDirectory();
             var (keyPair, certificate) = TestCredentials.For(suite);
             string certPath = OpenSsl.WritePem(dir, "cert.pem", certificate);
@@ -73,13 +84,19 @@ namespace Dtls13Test.Tests
 
         [DynamicData(nameof(ImplementedSuites))]
         [TestMethod]
-        public void OpenSslClient_To_SharpTlsServer(ushort id, string name)
+        public void OpenSslClient_To_SharpTlsServer(ushort id, string name) => ServerFromClient(id, name, tls10: false);
+
+        [DynamicData(nameof(Tls10Suites))]
+        [TestMethod]
+        public void Tls10_OpenSslClient_To_SharpTlsServer(ushort id, string name) => ServerFromClient(id, name, tls10: true);
+
+        private static void ServerFromClient(ushort id, string name, bool tls10)
         {
-            var (suite, openSslName, versionFlag, _) = Prepare(id);
+            var (suite, openSslName, versionFlag, _) = Prepare(id, tls10);
             string dir = OpenSsl.NewTempDirectory();
             var (keyPair, certificate) = TestCredentials.For(suite);
 
-            using var server = new Tls12Server(keyPair, certificate) { MinimumVersion = TlsVersion.Tls11, CipherSuites = new List<ushort> { id } };
+            using var server = new Tls12Server(keyPair, certificate) { MinimumVersion = TlsVersion.Tls10, CipherSuites = new List<ushort> { id } };
             string psk = "";
             if (suite.RequiresPsk)
             {

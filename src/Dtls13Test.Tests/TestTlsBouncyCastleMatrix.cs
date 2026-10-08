@@ -27,14 +27,28 @@ namespace Dtls13Test.Tests
 
         public static IEnumerable<object[]> ImplementedSuites => CipherSuites.All.Select(s => new object[] { s.Id, s.Name });
 
-        private static (CipherSuiteInfo Suite, BcTlsCrypto Crypto, ProtocolVersion BcVersion, ushort Version) Prepare(ushort id)
+        public static IEnumerable<object[]> Tls10Suites => CipherSuites.All.Where(s => s.IsUsableWith(TlsVersion.Tls10)).Select(s => new object[] { s.Id, s.Name });
+
+        private static (CipherSuiteInfo Suite, BcTlsCrypto Crypto, ProtocolVersion BcVersion, ushort Version) Prepare(ushort id, bool tls10 = false)
         {
             var suite = CipherSuites.Get(id);
             var crypto = new BcTlsCrypto(new SecureRandom());
             if (!TlsUtilities.IsSupportedCipherSuite(crypto, id))
                 Assert.Inconclusive($"BouncyCastle does not support {suite.Name}");
+            if (tls10)
+                return (suite, crypto, ProtocolVersion.TLSv10, TlsVersion.Tls10);
             bool tls12 = suite.IsUsableWith(TlsVersion.Tls12);
             return (suite, crypto, tls12 ? ProtocolVersion.TLSv12 : ProtocolVersion.TLSv11, tls12 ? TlsVersion.Tls12 : TlsVersion.Tls11);
+        }
+
+        private static string ReadAtLeast(System.IO.Stream stream, int length)
+        {
+            var text = new StringBuilder();
+            byte[] buffer = new byte[2048];
+            int n;
+            while (text.Length < length && (n = stream.Read(buffer, 0, buffer.Length)) > 0)
+                text.Append(Encoding.UTF8.GetString(buffer, 0, n));
+            return text.ToString();
         }
 
         private static Task<T> RunBlocking<T>(Func<T> work)
@@ -42,9 +56,15 @@ namespace Dtls13Test.Tests
 
         [DynamicData(nameof(ImplementedSuites))]
         [TestMethod]
-        public void SharpTlsClient_To_BouncyCastleServer(ushort id, string name)
+        public void SharpTlsClient_To_BouncyCastleServer(ushort id, string name) => ClientToServer(id, name, tls10: false);
+
+        [DynamicData(nameof(Tls10Suites))]
+        [TestMethod]
+        public void Tls10_SharpTlsClient_To_BouncyCastleServer(ushort id, string name) => ClientToServer(id, name, tls10: true);
+
+        private static void ClientToServer(ushort id, string name, bool tls10)
         {
-            var (suite, crypto, bcVersion, version) = Prepare(id);
+            var (suite, crypto, bcVersion, version) = Prepare(id, tls10);
             var (keyPair, certificate) = TestCredentials.For(suite);
             var listener = new TcpListener(IPAddress.Loopback, 0);
             listener.Start();
@@ -56,9 +76,7 @@ namespace Dtls13Test.Tests
                     : new BcTestServer(crypto, id, bcVersion, keyPair.Private, certificate.GetEncoded());
                 var protocol = new TlsServerProtocol(tcp.GetStream());
                 protocol.Accept(peer);
-                byte[] buffer = new byte[2048];
-                int n = protocol.Stream.Read(buffer, 0, buffer.Length);
-                string text = Encoding.UTF8.GetString(buffer, 0, n);
+                string text = ReadAtLeast(protocol.Stream, 4);
                 byte[] reply = Encoding.UTF8.GetBytes("pong:" + text);
                 protocol.Stream.Write(reply, 0, reply.Length);
                 protocol.Stream.Flush();
@@ -79,9 +97,19 @@ namespace Dtls13Test.Tests
                     (client.PskIdentity, client.PskKey) = (TestCredentials.PskIdentity, TestCredentials.PskKey);
                 var handshake = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
                 var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var text = new StringBuilder();
                 client.HandshakeFinished += (_, _) => handshake.TrySetResult(null);
                 client.Failed += (_, ex) => handshake.TrySetResult(ex);
-                client.ApplicationDataReceived += (_, d) => received.TrySetResult(Encoding.UTF8.GetString(d));
+                // TLS is a byte stream: with TLS 1.0's 1/n-1 split the reply comes in two records.
+                client.ApplicationDataReceived += (_, d) =>
+                {
+                    lock (text)
+                    {
+                        text.Append(Encoding.UTF8.GetString(d));
+                        if (text.Length >= "pong:ping".Length)
+                            received.TrySetResult(text.ToString());
+                    }
+                };
                 client.BeginHandshake();
                 Assert.IsTrue(handshake.Task.Wait(Timeout), $"{name}: handshake did not complete; {(bcServer.IsFaulted ? bcServer.Exception.GetBaseException().Message : "")}");
                 Assert.IsNull(handshake.Task.Result, $"{name}: {handshake.Task.Result}; BouncyCastle: {(bcServer.IsFaulted ? bcServer.Exception.GetBaseException().Message : "")}");
@@ -98,14 +126,20 @@ namespace Dtls13Test.Tests
 
         [DynamicData(nameof(ImplementedSuites))]
         [TestMethod]
-        public void BouncyCastleClient_To_SharpTlsServer(ushort id, string name)
+        public void BouncyCastleClient_To_SharpTlsServer(ushort id, string name) => ServerFromClient(id, name, tls10: false);
+
+        [DynamicData(nameof(Tls10Suites))]
+        [TestMethod]
+        public void Tls10_BouncyCastleClient_To_SharpTlsServer(ushort id, string name) => ServerFromClient(id, name, tls10: true);
+
+        private static void ServerFromClient(ushort id, string name, bool tls10)
         {
-            var (suite, crypto, bcVersion, _) = Prepare(id);
+            var (suite, crypto, bcVersion, _) = Prepare(id, tls10);
             if (suite.IsStaticKeyAgreement)
                 Assert.Inconclusive("BouncyCastle's TLS client fails to send the empty ClientKeyExchange of fixed (EC)DH "
                     + "authentication (TlsFatalAlert from CheckUint24 in HandshakeMessageOutput.Send); its DTLS client works");
             var (keyPair, certificate) = TestCredentials.For(suite);
-            using var server = new Tls12Server(keyPair, certificate) { MinimumVersion = TlsVersion.Tls11, CipherSuites = new List<ushort> { id } };
+            using var server = new Tls12Server(keyPair, certificate) { MinimumVersion = TlsVersion.Tls10, CipherSuites = new List<ushort> { id } };
             var (fixedKeyPair, fixedCertificate) = TestCredentials.FixedClientFor(suite);
             if (suite.IsStaticKeyAgreement)
                 server.RequireClientCertificate = true;
@@ -114,10 +148,14 @@ namespace Dtls13Test.Tests
             if (suite.RequiresPsk)
                 (server.PskIdentityResolver, server.PskIdentityHint) = (TestCredentials.ResolvePsk, TestCredentials.PskHint);
             SharpDTLS.DTLS12.Dtls12ServerConnection connection = null;
+            var request = new StringBuilder();
             server.ApplicationDataReceived += (_, e) =>
             {
                 connection = e.Connection; // the connection is gone from Connections once the client hangs up
-                e.Connection.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.Data)));
+                // TLS is a byte stream: with TLS 1.0's 1/n-1 split "ping" comes in two records.
+                request.Append(Encoding.UTF8.GetString(e.Data));
+                if (request.Length == 4)
+                    e.Connection.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + request));
             };
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
 
@@ -133,9 +171,7 @@ namespace Dtls13Test.Tests
                 byte[] ping = Encoding.UTF8.GetBytes("ping");
                 protocol.Stream.Write(ping, 0, ping.Length);
                 protocol.Stream.Flush();
-                byte[] buffer = new byte[2048];
-                int n = protocol.Stream.Read(buffer, 0, buffer.Length);
-                return Encoding.UTF8.GetString(buffer, 0, n);
+                return ReadAtLeast(protocol.Stream, "pong:ping".Length);
             });
 
             Assert.IsTrue(bcClient.Wait(Timeout), $"{name}: BouncyCastle client did not finish");
