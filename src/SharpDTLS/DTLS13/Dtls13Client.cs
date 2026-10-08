@@ -32,7 +32,12 @@ namespace SharpDTLS.DTLS13
         private ushort _hrrCipherSuite;
         private CertificateRequestDatagram _certificateRequest;
         private X509Certificate _serverCertificate;
-        private Dtls13SessionTicket _offeredTicket;
+        private readonly List<OfferedPsk> _offeredPsks = new();
+        private OfferedPsk _selectedPsk;
+
+        /// <summary>A PSK offered in pre_shared_key: a resumption ticket or the external PSK.</summary>
+        private sealed record OfferedPsk(byte[] Identity, uint ObfuscatedAge, byte[] Key, Dtls13CipherSuite HashSuite,
+            Dtls13SessionTicket Ticket);
 
         public event EventHandler<EventArgs> HandshakeFinished;
 
@@ -47,6 +52,23 @@ namespace SharpDTLS.DTLS13
 
         /// <summary>Whether the server accepted <see cref="ResumptionTicket"/>.</summary>
         public bool IsResumed { get; private set; }
+
+        /// <summary>
+        /// An externally provisioned PSK to authenticate with (RFC 8446 §4.2.11), offered after any resumption ticket.
+        /// The server is then not authenticated by a certificate.
+        /// </summary>
+        public Dtls13ExternalPsk ExternalPsk { get; set; }
+
+        /// <summary>Whether the handshake was authenticated with <see cref="ExternalPsk"/>.</summary>
+        public bool IsExternalPsk { get; private set; }
+
+        /// <summary>
+        /// PSK key exchange modes to offer (RFC 8446 §4.2.9). The default psk_dhe_ke keeps forward secrecy; offering
+        /// only psk_ke drops the key share entirely, for peers that cannot afford (EC)DHE.
+        /// </summary>
+        public byte[] PskKeyExchangeModes { get; set; } = { PskKeyExchangeModesExtension.PskDheKe };
+
+        private bool OffersPskDhe => PskKeyExchangeModes.Contains(PskKeyExchangeModesExtension.PskDheKe);
 
         public IClientTransport ClientTransport { get; }
 
@@ -115,43 +137,62 @@ namespace SharpDTLS.DTLS13
             if (cookie != null)
                 clientHello.Extensions.Add(new CookieExtension(cookie));
 
-            if (UseSessionTickets)
+            if (UseSessionTickets || ExternalPsk != null)
             {
-                // Only psk_dhe_ke: resumption keeps forward secrecy (psk_ke is not offered).
-                clientHello.Extensions.Add(new PskKeyExchangeModesExtension(PskKeyExchangeModesExtension.PskDheKe));
-                OfferTicket(clientHello);
+                // psk_ke only: no (EC)DHE at all, so no key share (the handshake then needs the PSK to be accepted).
+                if (!OffersPskDhe && (ExternalPsk != null || (UseSessionTickets && ResumptionTicket is { IsExpired: false })))
+                {
+                    clientHello.Extensions.RemoveAll(e => e is ClientKeyShareExtension || e is SupportedGroups);
+                    Session.PrivateKey = null;
+                }
+                clientHello.Extensions.Add(new PskKeyExchangeModesExtension(PskKeyExchangeModes));
+                OfferPsks(clientHello);
             }
 
             return clientHello;
         }
 
         /// <summary>
-        /// Adds pre_shared_key (last, RFC 8446 §4.2.11) for a usable ticket and computes its binder over the
-        /// ClientHello up to the binders, after any message_hash || HelloRetryRequest already in the transcript.
+        /// Adds pre_shared_key (last, RFC 8446 §4.2.11) with a usable resumption ticket and the external PSK, and
+        /// computes each binder over the ClientHello up to the binders, after any message_hash || HelloRetryRequest
+        /// already in the transcript.
         /// </summary>
-        private void OfferTicket(ClientHelloDatagram clientHello)
+        private void OfferPsks(ClientHelloDatagram clientHello)
         {
+            _offeredPsks.Clear();
+
+            // A PSK's hash must match the suite: after a HelloRetryRequest that is the selected one.
+            bool Compatible(Dtls13CipherSuite hashSuite) => _receivedHelloRetryRequest
+                ? Dtls13CipherSuite.Get(_hrrCipherSuite).HashAlgorithm == hashSuite.HashAlgorithm
+                : CipherSuites.Any(id => Dtls13CipherSuite.Get(id).HashAlgorithm == hashSuite.HashAlgorithm);
+
             var ticket = ResumptionTicket;
-            _offeredTicket = null;
-            if (ticket == null || ticket.IsExpired || !Dtls13CipherSuite.IsSupported(ticket.CipherSuite))
+            if (UseSessionTickets && ticket != null && !ticket.IsExpired && Dtls13CipherSuite.IsSupported(ticket.CipherSuite)
+                && Compatible(Dtls13CipherSuite.Get(ticket.CipherSuite)))
+                _offeredPsks.Add(new OfferedPsk(ticket.Ticket, ticket.ObfuscatedAge, ticket.Psk, Dtls13CipherSuite.Get(ticket.CipherSuite), ticket));
+
+            // External PSKs have no age: obfuscated_ticket_age is 0 (RFC 8446 §4.2.11).
+            if (ExternalPsk != null && Compatible(Dtls13CipherSuite.Get(ExternalPsk.CipherSuite)))
+                _offeredPsks.Add(new OfferedPsk(ExternalPsk.Identity, 0, ExternalPsk.Key, Dtls13CipherSuite.Get(ExternalPsk.CipherSuite), null));
+
+            if (_offeredPsks.Count == 0)
                 return;
 
-            // The PSK's hash must match the suite: after a HelloRetryRequest that is the selected one.
-            var ticketSuite = Dtls13CipherSuite.Get(ticket.CipherSuite);
-            bool compatible = _receivedHelloRetryRequest
-                ? Dtls13CipherSuite.Get(_hrrCipherSuite).HashAlgorithm == ticketSuite.HashAlgorithm
-                : CipherSuites.Any(id => Dtls13CipherSuite.Get(id).HashAlgorithm == ticketSuite.HashAlgorithm);
-            if (!compatible)
-                return;
+            var extension = new ClientPreSharedKeyExtension();
+            foreach (var offered in _offeredPsks)
+            {
+                extension.Identities.Add((offered.Identity, offered.ObfuscatedAge));
+                extension.Binders.Add(new byte[offered.HashSuite.HashLength]);
+            }
+            clientHello.Extensions.Add(extension);
 
-            var psk = new ClientPreSharedKeyExtension();
-            psk.Identities.Add((ticket.Ticket, ticket.ObfuscatedAge));
-            psk.Binders.Add(new byte[ticketSuite.HashLength]);
-            clientHello.Extensions.Add(psk);
-
-            byte[] truncated = PskBinders.TruncatedClientHello(clientHello.ToBytes(), psk.BindersLength);
-            psk.Binders[0] = Dtls13CryptoUtils.CalculateBinder(ticket.Psk, Session.Transcript.HashWith(ticketSuite, truncated), ticketSuite);
-            _offeredTicket = ticket;
+            byte[] truncated = PskBinders.TruncatedClientHello(clientHello.ToBytes(), extension.BindersLength);
+            for (int i = 0; i < _offeredPsks.Count; i++)
+            {
+                var offered = _offeredPsks[i];
+                extension.Binders[i] = Dtls13CryptoUtils.CalculateBinder(offered.Key, Session.Transcript.HashWith(offered.HashSuite, truncated),
+                    offered.HashSuite, external: offered.Ticket == null);
+            }
         }
 
         // ── ServerHello / HelloRetryRequest ──────────────────────────────────────────────────
@@ -230,10 +271,13 @@ namespace SharpDTLS.DTLS13
             if (_receivedHelloRetryRequest && serverHello.SelectedCipherSuite != _hrrCipherSuite)
                 throw new DtlsException(AlertDescription.IllegalParameter, "ServerHello cipher suite differs from HelloRetryRequest.");
 
+            // Without a key_share the server chose psk_ke, which needs an accepted PSK and our offer of that mode.
             var keyShare = serverHello.Extensions.OfType<ServerKeyShareExtension>().FirstOrDefault();
-            if (keyShare == null || keyShare.PublicKey == null)
+            bool pskOnly = keyShare == null && serverHello.Extensions.OfType<ServerPreSharedKeyExtension>().Any()
+                           && PskKeyExchangeModes.Contains(PskKeyExchangeModesExtension.PskKe);
+            if (!pskOnly && (keyShare == null || keyShare.PublicKey == null))
                 throw new DtlsException(AlertDescription.MissingExtension, "ServerHello has no key_share.");
-            if (keyShare.KeyType != GroupX25519)
+            if (keyShare != null && (keyShare.KeyType != GroupX25519 || Session.PrivateKey == null))
                 throw new DtlsException(AlertDescription.IllegalParameter, $"Server selected group 0x{keyShare.KeyType:X4}, which was not offered.");
 
             StopRetransmission();
@@ -241,28 +285,34 @@ namespace SharpDTLS.DTLS13
             var suite = Dtls13CipherSuite.Get(serverHello.SelectedCipherSuite);
             Session.CipherSuite = suite;
 
-            // RFC 8446 §4.2.11: the server may only select the identity we offered, with a suite of the same hash.
+            // RFC 8446 §4.2.11: the server may only select an identity we offered, with a suite of the same hash.
             byte[] psk = null;
             var selectedPsk = serverHello.Extensions.OfType<ServerPreSharedKeyExtension>().FirstOrDefault();
             if (selectedPsk != null)
             {
-                if (_offeredTicket == null || selectedPsk.SelectedIdentity != 0)
+                if (selectedPsk.SelectedIdentity >= _offeredPsks.Count)
                     throw new DtlsException(AlertDescription.IllegalParameter, "Server selected a PSK that was not offered.");
-                if (Dtls13CipherSuite.Get(_offeredTicket.CipherSuite).HashAlgorithm != suite.HashAlgorithm)
+                _selectedPsk = _offeredPsks[selectedPsk.SelectedIdentity];
+                if (_selectedPsk.HashSuite.HashAlgorithm != suite.HashAlgorithm)
                     throw new DtlsException(AlertDescription.IllegalParameter, "Server selected a cipher suite incompatible with the PSK.");
-                psk = _offeredTicket.Psk;
-                IsResumed = true;
-                if (_offeredTicket.ServerCertificate != null)
+                psk = _selectedPsk.Key;
+                IsResumed = _selectedPsk.Ticket != null;
+                IsExternalPsk = _selectedPsk.Ticket == null;
+                if (_selectedPsk.Ticket?.ServerCertificate != null)
                 {
-                    _serverCertificate = new X509CertificateParser().ReadCertificate(_offeredTicket.ServerCertificate);
-                    Session.PeerCertificate = _offeredTicket.ServerCertificate;
+                    _serverCertificate = new X509CertificateParser().ReadCertificate(_selectedPsk.Ticket.ServerCertificate);
+                    Session.PeerCertificate = _selectedPsk.Ticket.ServerCertificate;
                 }
+            }
+            else if (pskOnly)
+            {
+                throw new DtlsException(AlertDescription.MissingExtension, "ServerHello has neither key_share nor pre_shared_key.");
             }
 
             Session.Transcript.AddPlaintextRecord(record);
             NextReceiveMessageSeq = serverHello.SequenceNumber + 1;
 
-            byte[] sharedSecret = Dtls13CryptoUtils.DeriveSharedSecretX25519(Session.PrivateKey, keyShare.PublicKey);
+            byte[] sharedSecret = keyShare == null ? null : Dtls13CryptoUtils.DeriveSharedSecretX25519(Session.PrivateKey, keyShare.PublicKey);
             var handshakeKeys = Dtls13CryptoUtils.CalculateHandshakeKeys(_clientHello.ClientRandom, Session.Transcript.Hash(suite), sharedSecret, suite, psk);
 
             Session.ServerHandshakeKeys = handshakeKeys;
@@ -292,7 +342,7 @@ namespace SharpDTLS.DTLS13
                     }
                     Session.Transcript.AddHandshake(message);
                     // A PSK handshake authenticates with the PSK: no Certificate or CertificateVerify follows.
-                    _state = IsResumed ? State.WaitFinished : State.WaitCertificateOrCertificateRequest;
+                    _state = _selectedPsk != null ? State.WaitFinished : State.WaitCertificateOrCertificateRequest;
                     break;
 
                 case State.WaitCertificateOrCertificateRequest when parsed is CertificateRequestDatagram certificateRequest:

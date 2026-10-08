@@ -13,6 +13,8 @@
  *   -group <name>       client: initial key share (x25519 | p256)
  *   -srtp <profiles>    offer/accept DTLS-SRTP, e.g. SRTP_AES128_CM_SHA1_80; prints "SRTP:<hex keying material>"
  *   -export <label> <n> print "EXPORT:<hex>" of n bytes exported with label (empty context)
+ *   -psk <hex> -psk_identity <id>   authenticate with an external PSK (TLS 1.3 PSK callbacks)
+ *   -psk_only           with -psk: psk_ke, no (EC)DHE
  *   -resume             two connections: the client resumes the first one's session ticket, the server
  *                       accepts the second connection with the same context; both print "RESUMED" or
  *                       "NOT RESUMED" after the second handshake
@@ -34,6 +36,32 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+static unsigned char pskKey[64];
+static unsigned int pskKeyLen;
+static const char *pskIdentity;
+static const char *pskCipher = "TLS13-AES128-GCM-SHA256";
+
+static unsigned int client_psk_cb(WOLFSSL *ssl, const char *hint, char *identity, unsigned int idMax,
+                                  unsigned char *key, unsigned int keyMax, const char **ciphersuite)
+{
+    (void)ssl; (void)hint;
+    if (strlen(pskIdentity) >= idMax || pskKeyLen > keyMax) return 0;
+    strcpy(identity, pskIdentity);
+    memcpy(key, pskKey, pskKeyLen);
+    *ciphersuite = pskCipher;
+    return pskKeyLen;
+}
+
+static unsigned int server_psk_cb(WOLFSSL *ssl, const char *identity, unsigned char *key, unsigned int keyMax,
+                                  const char **ciphersuite)
+{
+    (void)ssl;
+    if (strcmp(identity, pskIdentity) != 0 || pskKeyLen > keyMax) return 0;
+    memcpy(key, pskKey, pskKeyLen);
+    *ciphersuite = pskCipher;
+    return pskKeyLen;
+}
+
 static void fail(const char *what, WOLFSSL *ssl, int ret)
 {
     char buf[WOLFSSL_MAX_ERROR_SZ];
@@ -54,7 +82,8 @@ int main(int argc, char **argv)
     int port = atoi(argv[2]);
     const char *cert = NULL, *key = NULL, *cipher = NULL, *verify = NULL, *group = NULL, *srtp = NULL, *exportLabel = NULL;
     int exportLength = 0;
-    int hrr = 0, resume = 0, argi = 3;
+    int hrr = 0, resume = 0, pskOnly = 0, argi = 3;
+    const char *pskHex = NULL;
 
     if (server) {
         if (argc < 5) { fprintf(stderr, "server needs cert and key\n"); return 2; }
@@ -66,6 +95,9 @@ int main(int argc, char **argv)
         if (!strcmp(argv[argi], "-cipher") && argi + 1 < argc) cipher = argv[++argi];
         else if (!strcmp(argv[argi], "-hrr")) hrr = 1;
         else if (!strcmp(argv[argi], "-resume")) resume = 1;
+        else if (!strcmp(argv[argi], "-psk") && argi + 1 < argc) pskHex = argv[++argi];
+        else if (!strcmp(argv[argi], "-psk_identity") && argi + 1 < argc) pskIdentity = argv[++argi];
+        else if (!strcmp(argv[argi], "-psk_only")) pskOnly = 1;
         else if (!strcmp(argv[argi], "-verify") && argi + 1 < argc) verify = argv[++argi];
         else if (!strcmp(argv[argi], "-cert") && argi + 1 < argc) cert = argv[++argi];
         else if (!strcmp(argv[argi], "-key") && argi + 1 < argc) key = argv[++argi];
@@ -84,6 +116,18 @@ int main(int argc, char **argv)
         fail("load key", NULL, 0);
     if (cipher && wolfSSL_CTX_set_cipher_list(ctx, cipher) != WOLFSSL_SUCCESS)
         fail("cipher list", NULL, 0);
+
+    if (pskHex) {
+        size_t hexLen = strlen(pskHex);
+        if (!pskIdentity || hexLen % 2 || hexLen / 2 > sizeof(pskKey)) { fprintf(stderr, "bad -psk\n"); return 2; }
+        for (size_t i = 0; i < hexLen / 2; i++) sscanf(pskHex + 2 * i, "%2hhx", &pskKey[i]);
+        pskKeyLen = (unsigned int)(hexLen / 2);
+        if (cipher) pskCipher = cipher;
+        if (server) wolfSSL_CTX_set_psk_server_tls13_callback(ctx, server_psk_cb);
+        else wolfSSL_CTX_set_psk_client_tls13_callback(ctx, client_psk_cb);
+        if (pskOnly && wolfSSL_CTX_no_dhe_psk(ctx) != 0)
+            fail("no_dhe_psk", NULL, 0);
+    }
 
     if (srtp && wolfSSL_CTX_set_tlsext_use_srtp(ctx, srtp) != 0)
         fail("use_srtp", NULL, 0);

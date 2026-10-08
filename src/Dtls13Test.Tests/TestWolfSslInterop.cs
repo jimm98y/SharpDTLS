@@ -239,6 +239,77 @@ namespace Dtls13Test.Tests
             }
         }
 
+        private const string PskHex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+        private const string PskIdentity = "device-17";
+
+        [DataRow("TLS13-AES128-GCM-SHA256", false, true)]
+        [DataRow("TLS13-AES128-GCM-SHA256", true, false)]
+        [DataRow("TLS13-AES256-GCM-SHA384", false, false)]
+        [DataRow("TLS13-AES256-GCM-SHA384", true, true)]
+        [TestMethod]
+        public void WolfSslClient_WithExternalPsk_To_SharpDtlsServer(string cipher, bool pskOnly, bool helloRetry)
+        {
+            WolfSsl.RequireWolfSsl();
+            string dir = OpenSsl.NewTempDirectory();
+            ushort suite = SuiteIds[cipher];
+            using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
+            var server = new Dtls13Server(transport)
+            {
+                ShouldSendHelloRetry = helloRetry,
+                CipherSuites = new List<ushort> { suite },
+                AllowPskOnlyKeyExchange = pskOnly,
+                ExternalPskResolver = id => Encoding.ASCII.GetString(id) == PskIdentity
+                    ? new Dtls13ExternalPsk(id, Convert.FromHexString(PskHex), suite) : null,
+            };
+            var received = new List<string>();
+            server.ApplicationDataReceived += (_, e) => { lock (received) received.Add(Encoding.UTF8.GetString(e.Data)); };
+
+            using var client = new OpenSslProcess(
+                $"client {transport.LocalEndpoint.Port} -cipher {cipher} -psk {PskHex} -psk_identity {PskIdentity}{(pskOnly ? " -psk_only" : "")}",
+                dir, WolfSsl.Harness);
+            Assert.IsTrue(client.WaitForOutput("CONNECTED", Timeout), "handshake did not complete:\n" + client.Output);
+            Assert.IsTrue(WaitFor(() => server.Connections.Any(c => c.IsHandshakeComplete)), client.Output);
+            var connection = server.Connections.Single();
+            Assert.IsTrue(connection.IsExternalPsk, "the server authenticated with a certificate instead");
+            Assert.AreEqual(pskOnly, connection.IsPskOnlyKeyExchange);
+
+            client.WriteLine("over-psk");
+            Assert.IsTrue(WaitFor(() => Contains(received, "over-psk")), client.Output);
+            connection.SendApplicationData(Encoding.UTF8.GetBytes("back\n"));
+            Assert.IsTrue(client.WaitForOutput("RECV:back", Timeout), client.Output);
+        }
+
+        [DataRow("TLS13-AES128-GCM-SHA256", false, true)]
+        [DataRow("TLS13-AES128-GCM-SHA256", true, false)]
+        [DataRow("TLS13-AES256-GCM-SHA384", true, true)]
+        [TestMethod]
+        public void SharpDtlsClient_WithExternalPsk_To_WolfSslServer(string cipher, bool pskOnly, bool helloRetry)
+        {
+            WolfSsl.RequireWolfSsl();
+            string dir = OpenSsl.NewTempDirectory();
+            ushort suite = SuiteIds[cipher];
+            var (kp, cert) = Credentials(ec: true);
+            string certPath = OpenSsl.WritePem(dir, "cert.pem", cert);
+            string keyPath = OpenSsl.WritePem(dir, "key.pem", kp.Private);
+            using var server = OpenSslProcess.StartServer(p =>
+                $"server {p} {certPath} {keyPath} -cipher {cipher} -psk {PskHex} -psk_identity {PskIdentity}{(pskOnly ? " -psk_only" : "")}{(helloRetry ? " -hrr" : "")}",
+                dir, Timeout, out int port, WolfSsl.Harness);
+            Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), "server did not start:\n" + server.Output);
+
+            using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
+            var client = Handshake(new Dtls13Client(transport)
+            {
+                CipherSuites = new List<ushort> { suite },
+                ExternalPsk = new Dtls13ExternalPsk(Encoding.ASCII.GetBytes(PskIdentity), Convert.FromHexString(PskHex), suite),
+                PskKeyExchangeModes = pskOnly ? new[] { PskKeyExchangeModesExtension.PskKe } : new[] { PskKeyExchangeModesExtension.PskDheKe },
+            }, server);
+            Assert.IsTrue(client.IsExternalPsk, "wolfSSL did not accept the PSK:\n" + server.Output);
+            Assert.IsNull(client.ServerCertificate);
+
+            client.SendApplicationData(Encoding.UTF8.GetBytes("over-psk\n"));
+            Assert.IsTrue(server.WaitForOutput("RECV:over-psk", Timeout), server.Output);
+        }
+
         private static Dtls13Client Handshake(Dtls13Client client, OpenSslProcess peer)
         {
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);

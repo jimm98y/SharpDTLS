@@ -204,13 +204,14 @@ namespace SharpDTLS.DTLS13
                 .HkdfExtract(suite.HashAlgorithm, new BcTlsSecret(_crypto, psk ?? new byte[suite.HashLength])).Extract();
 
         /// <summary>
-        /// PSK binder (RFC 8446 §4.2.11.2): HMAC(finished_key(Derive-Secret(early_secret, "res binder", "")),
-        /// Transcript-Hash(truncated ClientHello)).
+        /// PSK binder (RFC 8446 §4.2.11.2): HMAC(finished_key(Derive-Secret(early_secret, "res binder" or
+        /// "ext binder", "")), Transcript-Hash(truncated ClientHello)).
         /// </summary>
-        public static byte[] CalculateBinder(byte[] psk, byte[] truncatedTranscriptHash, Dtls13CipherSuite suite)
+        public static byte[] CalculateBinder(byte[] psk, byte[] truncatedTranscriptHash, Dtls13CipherSuite suite, bool external = false)
         {
             byte[] earlySecret = CalculateEarlySecret(psk, suite);
-            byte[] binderKey = HkdfExpandLabel(new BcTlsSecret(_crypto, earlySecret), suite.HashAlgorithm, "res binder", EmptyHash(suite), suite.HashLength).Extract();
+            byte[] binderKey = HkdfExpandLabel(new BcTlsSecret(_crypto, earlySecret), suite.HashAlgorithm, external ? "ext binder" : "res binder",
+                EmptyHash(suite), suite.HashLength).Extract();
             return CalculateFinished(binderKey, truncatedTranscriptHash, suite);
         }
 
