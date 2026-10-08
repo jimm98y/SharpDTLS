@@ -115,6 +115,20 @@ namespace SharpDTLS.DTLS10
             return PRF(preMasterSecret, "master secret", seed, 48);
         }
 
+        // RFC 5705 §4: PRF(master_secret, label, client_random + server_random [+ context_length + context])
+        public static byte[] ExportKeyingMaterial(byte[] masterSecret, byte[] clientRandom, byte[] serverRandom,
+            string label, byte[] context, int length)
+        {
+            return PRF(masterSecret, label, DTLS12.Dtls12CryptoUtils.BuildExporterSeed(clientRandom, serverRandom, context), length);
+        }
+
+        // RFC 7627 §4: master_secret = PRF(pre_master_secret, "extended master secret", session_hash)[0..47]
+        // where session_hash is MD5 || SHA1 of the handshake messages up to and including ClientKeyExchange.
+        public static byte[] CalculateExtendedMasterSecret(byte[] preMasterSecret, byte[] sessionHash)
+        {
+            return PRF(preMasterSecret, "extended master secret", sessionHash, 48);
+        }
+
         // Key block: clientMacKey(20) + serverMacKey(20) + clientKey(keyLen) + serverKey(keyLen)
         // keyLen: 16 for AES-128 suites (0xC013, 0xC009), 32 for AES-256 (0xC014, 0xC00A)
         public static Dtls10CryptoContext DeriveKeys(byte[] masterSecret, byte[] clientRandom, byte[] serverRandom, ushort cipherSuite = 0xC013)
@@ -140,8 +154,7 @@ namespace SharpDTLS.DTLS10
         }
 
         // Returns MD5(messages) || SHA1(messages) = 36 bytes (TLS 1.0/1.1 convention).
-        // Each message contributes: type(1) + length(3) + body
-        // (stripping the 13-byte DTLS record header and the 8-byte DTLS reconstruction fields)
+        // Each message contributes its 12-byte DTLS handshake header + body (record header stripped).
         public static byte[] HashTranscript(List<IDatagram> messages)
         {
             var md5  = new MD5Digest();
@@ -164,10 +177,7 @@ namespace SharpDTLS.DTLS10
                 }
 
                 byte[] bytes = msgToHash.Bytes;
-                // type(1) + length(3) — skip reconstruction fields (msg_seq + frag_offset + frag_len = 8 bytes)
-                byte[] contribution = bytes.Skip(skip).Take(4)
-                    .Concat(bytes.Skip(skip + 4 + 8).Take(bytes.Length - skip - 4 - 8))
-                    .ToArray();
+                byte[] contribution = DtlsHandshakeHash.Contribution(bytes, skip);
 
                 md5.BlockUpdate(contribution, 0, contribution.Length);
                 sha1.BlockUpdate(contribution, 0, contribution.Length);
@@ -195,9 +205,7 @@ namespace SharpDTLS.DTLS10
                 else if (msg is ServerEncryptedDatagram se) { m = se.Datagram; skip = 0; }
 
                 byte[] bytes = m.Bytes;
-                byte[] contribution = bytes.Skip(skip).Take(4)
-                    .Concat(bytes.Skip(skip + 4 + 8).Take(bytes.Length - skip - 4 - 8))
-                    .ToArray();
+                byte[] contribution = DtlsHandshakeHash.Contribution(bytes, skip);
                 result.AddRange(contribution);
             }
             return result.ToArray();

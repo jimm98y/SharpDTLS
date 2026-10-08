@@ -5,8 +5,8 @@ using System.Linq;
 namespace SharpDTLS.DTLS10.Messages
 {
     // DTLS 1.0 ServerKeyExchange for ECDHE_RSA.
-    // Body: ECCurveType(1) + NamedCurve(2) + point_length(1) + point(N) + hash_alg(1) + sig_alg(1) + sig_length(2) + sig
-    // In DTLS 1.0 (TLS 1.1-based) the default signature is SHA1+RSA.
+    // Body: ECCurveType(1) + NamedCurve(2) + point_length(1) + point(N) + sig_length(2) + sig
+    // DTLS 1.0 is based on TLS 1.1, which has no SignatureAndHashAlgorithm field (RFC 4492 §5.4).
     public class ServerKeyExchangeDatagram : IDatagram
     {
         public ushort MessageSequenceNumber { get; set; } = 3;
@@ -16,8 +16,6 @@ namespace SharpDTLS.DTLS10.Messages
         public ushort NamedCurve { get; set; } = 0x001D;  // x25519
         public byte[] PublicKey  { get; set; }
 
-        public byte   HashAlgorithm { get; set; } = 0x02; // SHA1
-        public byte   SigAlgorithm  { get; set; } = 0x01; // RSA
         public byte[] Signature     { get; set; }
 
         public byte[] EcParamsBytes => BuildEcParams();
@@ -25,13 +23,10 @@ namespace SharpDTLS.DTLS10.Messages
 
         public ServerKeyExchangeDatagram() { }
 
-        public ServerKeyExchangeDatagram(byte[] publicKey, byte[] signature,
-            byte hashAlg = 0x02, byte sigAlg = 0x01, ushort namedCurve = 0x001D)
+        public ServerKeyExchangeDatagram(byte[] publicKey, byte[] signature, ushort namedCurve = 0x001D)
         {
             PublicKey     = publicKey;
             Signature     = signature;
-            HashAlgorithm = hashAlg;
-            SigAlgorithm  = sigAlg;
             NamedCurve    = namedCurve;
         }
 
@@ -65,8 +60,6 @@ namespace SharpDTLS.DTLS10.Messages
             PublicKey  = new byte[pkLen];
             Buffer.BlockCopy(bytes, p, PublicKey, 0, pkLen); p += pkLen;
 
-            HashAlgorithm = bytes[p++];
-            SigAlgorithm  = bytes[p++];
             ushort sigLen = (ushort)((bytes[p] << 8) | bytes[p + 1]); p += 2;
             Signature = new byte[sigLen];
             Buffer.BlockCopy(bytes, p, Signature, 0, sigLen);
@@ -74,14 +67,14 @@ namespace SharpDTLS.DTLS10.Messages
 
         public byte[] ToBytes()
         {
-            int hsBodyLen = 1 + 2 + 1 + PublicKey.Length + 1 + 1 + 2 + Signature.Length;
+            int hsBodyLen = 1 + 2 + 1 + PublicKey.Length + 2 + Signature.Length;
             byte[] buf = new byte[13 + 12 + hsBodyLen];
 
             buf[0] = 0x16;
             buf[1] = 0xFE; buf[2] = 0xFF; // DTLS 1.0
             buf[3] = 0x00; buf[4] = 0x00;
-            buf[5]  = (byte)((RecordSequenceNumber >> 40) & 0xFF);
-            buf[6]  = (byte)((RecordSequenceNumber >> 32) & 0xFF);
+            buf[5]  = (byte)(((long)RecordSequenceNumber >> 40) & 0xFF);
+            buf[6]  = (byte)(((long)RecordSequenceNumber >> 32) & 0xFF);
             buf[7]  = (byte)((RecordSequenceNumber >> 24) & 0xFF);
             buf[8]  = (byte)((RecordSequenceNumber >> 16) & 0xFF);
             buf[9]  = (byte)((RecordSequenceNumber >> 8) & 0xFF);
@@ -107,8 +100,6 @@ namespace SharpDTLS.DTLS10.Messages
             buf[p++] = (byte)(NamedCurve & 0xFF);
             buf[p++] = (byte)PublicKey.Length;
             Buffer.BlockCopy(PublicKey, 0, buf, p, PublicKey.Length); p += PublicKey.Length;
-            buf[p++] = HashAlgorithm;
-            buf[p++] = SigAlgorithm;
             buf[p++] = (byte)((Signature.Length >> 8) & 0xFF);
             buf[p++] = (byte)(Signature.Length & 0xFF);
             Buffer.BlockCopy(Signature, 0, buf, p, Signature.Length); p += Signature.Length;

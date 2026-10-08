@@ -8,7 +8,8 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-using System.Text;
+using System.Security.Cryptography;
+using System.Threading;
 
 namespace SharpDTLS.DTLS10
 {
@@ -24,9 +25,17 @@ namespace SharpDTLS.DTLS10
     {
         public event EventHandler<EventArgs>     HandshakeFinished;
         public event EventHandler<AlertDatagram> AlertReceived;
+        public event EventHandler<byte[]>        ApplicationDataReceived;
+        public event EventHandler<Exception>     Failed;
 
         public Dtls10Session Session { get; } = new Dtls10Session();
         public IClientTransport ClientTransport { get; }
+
+        /// <summary>SRTP protection profiles offered in use_srtp (RFC 5764); null to not offer DTLS-SRTP.</summary>
+        public ushort[] SrtpProtectionProfiles { get; set; } = { DtlsSrtp.SRTP_AES128_CM_HMAC_SHA1_80, DtlsSrtp.SRTP_AEAD_AES_128_GCM };
+
+        /// <summary>The SRTP protection profile selected by the server, or null.</summary>
+        public ushort? SelectedSrtpProtectionProfile => Session.SrtpProtectionProfile;
 
         // Set these before BeginHandshake to enable client authentication.
         public AsymmetricCipherKeyPair ClientCertificateKeyPair { get; set; }
@@ -35,83 +44,206 @@ namespace SharpDTLS.DTLS10
         private ServerHelloDatagram       _serverHello;
         private ServerCertificateDatagram _serverCert;
         private ServerKeyExchangeDatagram _serverKex;
+        private ClientHelloDatagram       _clientHello;
         private bool                      _certRequested;
         private bool                      _changeCipherSpecReceived;
         private bool                      _handshakeComplete;
 
         private int _expectedServerMsgSeq = 0;
+
+        // Every send goes through the outbox, which is flushed outside the lock so that timer threads
+        // and synchronous transports cannot deadlock.
+        private readonly object _sync = new object();
+        private readonly Queue<byte[]> _outbox = new Queue<byte[]>();
+
+        // Current flight; each entry re-serializes its message with a fresh record sequence number,
+        // as a retransmission must not reuse one (the peer's replay window would drop it).
+        private readonly List<Func<byte[]>> _flight = new List<Func<byte[]>>();
+        private readonly RetransmitTimer _retransmitTimer;
+        private bool _failed;
+
+        /// <summary>Initial retransmission timeout; doubles on every retransmission (RFC 6347 §4.2.4.1).</summary>
+        public TimeSpan InitialRetransmitTimeout { get; set; } = TimeSpan.FromSeconds(1);
         private readonly SortedDictionary<int, List<byte[]>> _handshakeReorderBuffer = new();
         private readonly HandshakeReassembler _reassembler = new();
 
         public Dtls10Client(IClientTransport clientTransport)
         {
             ClientTransport = clientTransport;
+            _retransmitTimer = new RetransmitTimer(
+                () => Locked(RetransmitFlight),
+                () => Locked(() => Fail(new DtlsException(AlertDescription.HandshakeFailure, "DTLS handshake timed out."))));
             ClientTransport.OnDataReceived += OnDataReceived;
         }
 
-        public void BeginHandshake()
+        public void BeginHandshake() => Locked(() =>
         {
-            var (priv, pub) = Dtls10CryptoUtils.CreateX25519KeyPair();
-            Session.PrivateKey   = priv.GetEncoded();
-            Session.PublicKey    = pub.GetEncoded();
             Session.ClientRandom = Dtls10CryptoUtils.GenerateRandom(32);
 
             SendClientHello(cookie: null);
-        }
+        });
 
         private void SendClientHello(byte[] cookie)
         {
-            _expectedServerMsgSeq = 0;
             _handshakeReorderBuffer.Clear();
 
-            var ch = new ClientHelloDatagram(includeSrtp: true)
+            // RFC 6347 §4.2.2: the ClientHello answering a HelloVerifyRequest continues the message and
+            // record sequence numbers (message_seq 1), and the server's ServerHello follows with message_seq 1.
+            var ch = new ClientHelloDatagram(includeSrtp: false)
             {
                 ClientRandom          = Session.ClientRandom,
                 Cookie                = cookie ?? Array.Empty<byte>(),
-                RecordSequenceNumber  = Session.RecordSequenceNumber++,
                 MessageSequenceNumber = Session.MessageSequenceNumber++,
             };
 
-            if (cookie != null && cookie.Length > 0)
-            {
-                Session.HandshakeMessages.Clear();
-                Session.MessageSequenceNumber = 1;
-                ch.MessageSequenceNumber = 0;
-                Session.RecordSequenceNumber = 1;
-                ch.RecordSequenceNumber = 1;
-            }
+            ch.Extensions.RemoveAll(e => e is DTLS12.Messages.SupportedGroupsExtension);
+            ch.Extensions.Insert(0, new DTLS12.Messages.SupportedGroupsExtension(EcdheGroups.Supported));
+            ch.Extensions.Add(new RenegotiationInfoExtension());
+            ch.Extensions.Add(new ExtendedMasterSecretExtension());
+            if (SrtpProtectionProfiles != null && SrtpProtectionProfiles.Length > 0)
+                ch.Extensions.Add(new DTLS12.Messages.UseSrtpExtension(SrtpProtectionProfiles));
+            _clientHello = ch;
 
+            // The initial ClientHello and HelloVerifyRequest are not part of the transcript.
+            Session.HandshakeMessages.Clear();
             Session.HandshakeMessages.Add(ch);
-            ClientTransport.Send(ch.ToBytes());
+            BeginFlight();
+            SendInFlight(() => { ch.RecordSequenceNumber = Session.RecordSequenceNumber++; return ch.ToBytes(); });
+            _retransmitTimer.Start(InitialRetransmitTimeout);
             Debug.WriteLine($"[DTLS10 Client] Sent ClientHello (cookie len={ch.Cookie.Length})");
         }
 
-        private void OnDataReceived(object sender, byte[] data)
+        private void OnDataReceived(object sender, byte[] datagram) => Locked(() =>
         {
-            Console.WriteLine($"[DTLS10 Client] received {data.Length} bytes");
+            if (_failed)
+                return;
 
+            // A datagram may carry several records (RFC 6347 §4.1.1).
+            foreach (var data in DtlsRecordSplitter.Split(datagram))
+            {
+                try
+                {
+                    byte recordType = data[0];
+
+                    if (recordType == 0x16)
+                        HandleHandshakeRecord(data);
+                    else if (recordType == 0x14)
+                        HandleChangeCipherSpec(data);
+                    else if (recordType == 0x17)
+                        HandleApplicationData(data);
+                    else if (recordType == 0x15)
+                        HandleAlert(data);
+                }
+                catch (DtlsException ex)
+                {
+                    Fail(ex);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    // Malformed or unauthenticated records are dropped silently (RFC 4347 §4.1.2.1).
+                    Debug.WriteLine($"[DTLS10 Client] Dropped record: {ex.Message}");
+                }
+            }
+        });
+
+        private void Fail(DtlsException ex)
+        {
+            if (_failed)
+                return;
+            _failed = true;
+            _retransmitTimer.Stop();
+            Debug.WriteLine($"[DTLS10 Client] Handshake failed: {ex.Message}");
+            if (ex.Message != "DTLS handshake timed out.")
+                SendAlert(ex.Alert);
+            Failed?.Invoke(this, ex);
+        }
+
+        // ── Sending and retransmission ──────────────────────────────────────
+
+        private void Send(byte[] datagram) => _outbox.Enqueue(datagram);
+
+        private void BeginFlight()
+        {
+            _retransmitTimer.Stop();
+            _flight.Clear();
+        }
+
+        private void SendInFlight(Func<byte[]> build)
+        {
+            _flight.Add(build);
+            Send(build());
+        }
+
+        private void RetransmitFlight()
+        {
+            if (_failed || _flight.Count == 0)
+                return;
+            Debug.WriteLine($"[DTLS10 Client] Retransmitting flight ({_flight.Count} records)");
+            foreach (var build in _flight)
+                Send(build());
+        }
+
+        private void Locked(Action action)
+        {
+            lock (_sync)
+                action();
+
+            if (Monitor.IsEntered(_sync))
+                return; // the outermost caller flushes once the lock is released
+
+            while (true)
+            {
+                byte[] next;
+                lock (_sync)
+                {
+                    if (_outbox.Count == 0)
+                        return;
+                    next = _outbox.Dequeue();
+                }
+                try { ClientTransport.Send(next); }
+                catch (Exception ex) { Debug.WriteLine($"[DTLS10 Client] Send failed: {ex.Message}"); }
+            }
+        }
+
+        private void SendAlert(AlertDescription description)
+        {
             try
             {
-                byte recordType = data[0];
-
-                if (recordType == 0x16)
-                    HandleHandshakeRecord(data);
-                else if (recordType == 0x14)
-                    HandleChangeCipherSpec(data);
-                else if (recordType == 0x17)
-                    HandleApplicationData(data);
-                else if (recordType == 0x15)
-                    HandleAlert(data);
+                var alert = new AlertDatagram(2, (byte)description);
+                if (_handshakeComplete)
+                {
+                    var enc = new ClientEncryptedDatagram(Session.CryptoContext, new RawPlaintextDatagram(new[] { alert.Level, alert.Description }), 0x15)
+                    {
+                        Epoch          = 1,
+                        SequenceNumber = Session.CryptoContext.ClientSequenceNumber++,
+                    };
+                    Send(enc.ToBytes());
+                }
+                else
+                {
+                    alert.RecordSequenceNumber = Session.RecordSequenceNumber++;
+                    Send(alert.ToBytes());
+                }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[DTLS10 Client] Error: {ex.Message}");
+                Debug.WriteLine($"[DTLS10 Client] Failed to send alert: {ex.Message}");
             }
         }
 
         private void HandleHandshakeRecord(byte[] data)
         {
             if (_handshakeComplete) return;
+
+            bool epochZero = data[3] == 0 && data[4] == 0;
+            if (epochZero && (_changeCipherSpecReceived || (data.Length > 18 && ((data[17] << 8) | data[18]) < _expectedServerMsgSeq)))
+            {
+                // The server retransmitted an earlier flight, so it has not seen ours: resend it.
+                if (_retransmitTimer.IsRunning)
+                    RetransmitFlight();
+                return;
+            }
 
             // After CCS, the next 0x16 record is the encrypted Finished — data[13] is the nonce, not a handshake type.
             if (_changeCipherSpecReceived)
@@ -137,10 +269,8 @@ namespace SharpDTLS.DTLS10
             if (!_reassembler.TryAddUnencryptedFragment(data, out byte[] complete))
                 return;
 
-            byte hsType = complete[13];
+            _expectedServerMsgSeq++;
             DispatchHandshakeMessage(complete);
-            if (hsType != 0x03)
-                _expectedServerMsgSeq++;
 
             while (_handshakeReorderBuffer.TryGetValue(_expectedServerMsgSeq, out var bufferedList))
             {
@@ -153,8 +283,8 @@ namespace SharpDTLS.DTLS10
                 if (completeMsg == null) break;
 
                 _handshakeReorderBuffer.Remove(_expectedServerMsgSeq);
-                DispatchHandshakeMessage(completeMsg);
                 _expectedServerMsgSeq++;
+                DispatchHandshakeMessage(completeMsg);
             }
         }
 
@@ -163,8 +293,8 @@ namespace SharpDTLS.DTLS10
             byte hsType = data[13];
             switch (hsType)
             {
-                case 0x03: HandleHelloVerifyRequest(data); break;
-                case 0x02: HandleServerHello(data);        break;
+                case 0x03: _retransmitTimer.Stop(); HandleHelloVerifyRequest(data); break;
+                case 0x02: _retransmitTimer.Stop(); HandleServerHello(data);        break;
                 case 0x0B: HandleServerCertificate(data);  break;
                 case 0x0C: HandleServerKeyExchange(data);  break;
                 case 0x0D: HandleCertificateRequest(data); break;
@@ -187,6 +317,24 @@ namespace SharpDTLS.DTLS10
         {
             _serverHello = new ServerHelloDatagram();
             _serverHello.FromBytes(data);
+
+            if (data[25] != 0xFE || data[26] != 0xFF)
+                throw new DtlsException(AlertDescription.ProtocolVersion, "Server did not negotiate DTLS 1.0.");
+            if (!_clientHello.CipherSuites.Contains(_serverHello.SelectedCipherSuite))
+                throw new DtlsException(AlertDescription.IllegalParameter, $"Server selected a cipher suite that was not offered (0x{_serverHello.SelectedCipherSuite:X4}).");
+
+            var renegotiationInfo = _serverHello.Extensions.OfType<RenegotiationInfoExtension>().FirstOrDefault();
+            if (renegotiationInfo != null && renegotiationInfo.RenegotiatedConnection.Length != 0)
+                throw new DtlsException(AlertDescription.HandshakeFailure, "Non-empty renegotiation_info in initial handshake.");
+            Session.UseExtendedMasterSecret = _serverHello.Extensions.OfType<ExtendedMasterSecretExtension>().Any();
+
+            var srtp = _serverHello.Extensions.OfType<DTLS12.Messages.ServerUseSrtpExtension>().FirstOrDefault();
+            if (srtp != null)
+            {
+                if (SrtpProtectionProfiles == null || !SrtpProtectionProfiles.Contains(srtp.SelectedProfile))
+                    throw new DtlsException(AlertDescription.IllegalParameter, $"Server selected SRTP profile 0x{srtp.SelectedProfile:X4}, which was not offered.");
+                Session.SrtpProtectionProfile = srtp.SelectedProfile;
+            }
             Session.ServerRandom = _serverHello.ServerRandom;
             Session.CipherSuite  = _serverHello.SelectedCipherSuite;
             Session.HandshakeMessages.Add(_serverHello);
@@ -206,19 +354,20 @@ namespace SharpDTLS.DTLS10
             _serverKex = new ServerKeyExchangeDatagram();
             _serverKex.FromBytes(data);
 
+            if (_serverKex.CurveType != 0x03 || !EcdheGroups.IsSupported(_serverKex.NamedCurve))
+                throw new DtlsException(AlertDescription.IllegalParameter, $"Server selected curve 0x{_serverKex.NamedCurve:X4}, which was not offered.");
+
             byte[] ecParams = BuildEcParams(_serverKex);
             byte[] toVerify = Session.ClientRandom.Concat(Session.ServerRandom).Concat(ecParams).ToArray();
 
-            X509Certificate cert = new X509CertificateParser().ReadCertificate(_serverCert.Certificate);
-            AsymmetricKeyParameter pubKey = cert.GetPublicKey();
+            X509Certificate cert = new X509CertificateParser().ReadCertificate(_serverCert.Certificate)
+                ?? throw new DtlsException(AlertDescription.BadCertificate, "Server certificate could not be parsed.");
 
-            bool isEcKey = pubKey is ECPublicKeyParameters;
-            ISigner signer = SignerUtilities.GetSigner(isEcKey ? "SHA256WITHECDSA" : "SHA1WITHRSA");
-            signer.Init(false, pubKey);
-            signer.BlockUpdate(toVerify, 0, toVerify.Length);
+            if (!Dtls10Signatures.Verify(cert.GetPublicKey(), toVerify, _serverKex.Signature))
+                throw new DtlsException(AlertDescription.DecryptError, "ServerKeyExchange signature is invalid.");
 
-            if (!signer.VerifySignature(_serverKex.Signature))
-                throw new Exception("ServerKeyExchange signature invalid!");
+            Session.NamedGroup = _serverKex.NamedCurve;
+            (Session.PrivateKey, Session.PublicKey) = EcdheGroups.GenerateKeyPair(Session.NamedGroup);
 
             Session.HandshakeMessages.Add(_serverKex);
             Debug.WriteLine($"[DTLS10 Client] Received ServerKeyExchange, signature verified");
@@ -245,8 +394,10 @@ namespace SharpDTLS.DTLS10
 
         private void SendClientFlightAndFinished()
         {
+            BeginFlight();
+
             // ── Client Certificate (if requested) ──────────────────────────────
-            bool sendingCert = _certRequested && ClientCertificate != null;
+            bool sendingCert = _certRequested && ClientCertificate != null && ClientCertificateKeyPair != null;
 
             if (_certRequested)
             {
@@ -257,35 +408,30 @@ namespace SharpDTLS.DTLS10
                     MessageSequenceNumber = Session.MessageSequenceNumber++,
                 };
                 Session.HandshakeMessages.Add(clientCert);
-                ClientTransport.Send(clientCert.ToBytes());
+                SendInFlight(() => { clientCert.RecordSequenceNumber = Session.RecordSequenceNumber++; return clientCert.ToBytes(); });
                 Debug.WriteLine($"[DTLS10 Client] Sent Certificate (len={certDer.Length})");
             }
 
             // ── ClientKeyExchange ───────────────────────────────────────────────
             var cke = new ClientKeyExchangeDatagram(Session.PublicKey)
             {
-                RecordSequenceNumber  = Session.RecordSequenceNumber++,
                 MessageSequenceNumber = Session.MessageSequenceNumber++,
             };
             Session.HandshakeMessages.Add(cke);
-            ClientTransport.Send(cke.ToBytes());
+            SendInFlight(() => { cke.RecordSequenceNumber = Session.RecordSequenceNumber++; return cke.ToBytes(); });
 
-            byte[] preMaster = Dtls10CryptoUtils.DeriveSharedSecretX25519(Session.PrivateKey, _serverKex.PublicKey);
-            byte[] master    = Dtls10CryptoUtils.CalculateMasterSecret(preMaster, Session.ClientRandom, Session.ServerRandom);
+            byte[] preMaster = EcdheGroups.Agree(Session.NamedGroup, Session.PrivateKey, _serverKex.PublicKey);
+            byte[] master    = Session.UseExtendedMasterSecret
+                ? Dtls10CryptoUtils.CalculateExtendedMasterSecret(preMaster, Dtls10CryptoUtils.HashTranscript(Session.HandshakeMessages))
+                : Dtls10CryptoUtils.CalculateMasterSecret(preMaster, Session.ClientRandom, Session.ServerRandom);
             Session.CryptoContext = Dtls10CryptoUtils.DeriveKeys(master, Session.ClientRandom, Session.ServerRandom, Session.CipherSuite);
-
-            Debug.WriteLine($"[DTLS10 Client] master_secret: {Convert.ToHexString(master).ToLower()}");
 
             // ── CertificateVerify (only if we sent a non-empty cert) ────────────
             if (sendingCert)
             {
                 byte[] transcriptBytes = Dtls10CryptoUtils.GetTranscriptBytes(Session.HandshakeMessages);
 
-                bool isEcKey = ClientCertificateKeyPair.Private is ECPrivateKeyParameters;
-                ISigner signer = SignerUtilities.GetSigner(isEcKey ? "SHA256WITHECDSA" : "SHA256WITHRSA");
-                signer.Init(true, ClientCertificateKeyPair.Private);
-                signer.BlockUpdate(transcriptBytes, 0, transcriptBytes.Length);
-                byte[] signature = signer.GenerateSignature();
+                byte[] signature = Dtls10Signatures.Sign(ClientCertificateKeyPair.Private, transcriptBytes);
 
                 var certVerify = new CertificateVerifyDatagram(signature)
                 {
@@ -293,7 +439,7 @@ namespace SharpDTLS.DTLS10
                     MessageSequenceNumber = Session.MessageSequenceNumber++,
                 };
                 Session.HandshakeMessages.Add(certVerify);
-                ClientTransport.Send(certVerify.ToBytes());
+                SendInFlight(() => { certVerify.RecordSequenceNumber = Session.RecordSequenceNumber++; return certVerify.ToBytes(); });
                 Debug.WriteLine($"[DTLS10 Client] Sent CertificateVerify");
             }
 
@@ -301,9 +447,8 @@ namespace SharpDTLS.DTLS10
             var ccs = new ChangeCipherSpecDatagram
             {
                 Epoch                = 0,
-                RecordSequenceNumber = Session.RecordSequenceNumber++,
             };
-            ClientTransport.Send(ccs.ToBytes());
+            SendInFlight(() => { ccs.RecordSequenceNumber = Session.RecordSequenceNumber++; return ccs.ToBytes(); });
 
             // ── Finished (encrypted) ────────────────────────────────────────────
             byte[] transcriptHash = Dtls10CryptoUtils.HashTranscript(Session.HandshakeMessages);
@@ -314,9 +459,9 @@ namespace SharpDTLS.DTLS10
             var encFinished = new ClientEncryptedDatagram(Session.CryptoContext, finished)
             {
                 Epoch          = 1,
-                SequenceNumber = Session.CryptoContext.ClientSequenceNumber++,
             };
-            ClientTransport.Send(encFinished.ToBytes());
+            SendInFlight(() => { encFinished.SequenceNumber = Session.CryptoContext.ClientSequenceNumber++; return encFinished.ToBytes(); });
+            _retransmitTimer.Start(InitialRetransmitTimeout);
 
             Debug.WriteLine($"[DTLS10 Client] Sent ClientKeyExchange + [CertVerify +] CCS + Finished");
         }
@@ -331,13 +476,10 @@ namespace SharpDTLS.DTLS10
 
         private void HandleServerFinished(byte[] data)
         {
-            var enc = new ServerEncryptedDatagram(Session.CryptoContext)
-            {
-                Epoch          = 1,
-                SequenceNumber = Session.CryptoContext.ServerSequenceNumber++,
-            };
+            var enc = new ServerEncryptedDatagram(Session.CryptoContext);
             enc.FromBytes(data);
-            var serverFinished = enc.Datagram as FinishedDatagram;
+            var serverFinished = enc.Datagram as FinishedDatagram
+                ?? throw new DtlsException(AlertDescription.UnexpectedMessage, "Expected Finished.");
 
             // Reconstruct transcript hash as the server computed it (includes client Finished).
             byte[] transcriptHash = Dtls10CryptoUtils.HashTranscript(Session.HandshakeMessages);
@@ -355,9 +497,11 @@ namespace SharpDTLS.DTLS10
             byte[] expectedVerify = Dtls10CryptoUtils.CalculateVerifyData(
                 Session.CryptoContext.MasterSecret, "server finished", fullTranscriptHash);
 
-            if (!expectedVerify.SequenceEqual(serverFinished.VerifyData))
-                throw new Exception("Server Finished verify_data mismatch!");
+            if (!CryptographicOperations.FixedTimeEquals(expectedVerify, serverFinished.VerifyData))
+                throw new DtlsException(AlertDescription.DecryptError, "Server Finished verification failed.");
 
+            // Only the verified server Finished ends our final flight (the CCS before it may arrive alone).
+            _retransmitTimer.Stop();
             _handshakeComplete = true;
             Debug.WriteLine($"[DTLS10 Client] Server Finished verified — handshake complete!");
             HandshakeFinished?.Invoke(this, EventArgs.Empty);
@@ -365,27 +509,24 @@ namespace SharpDTLS.DTLS10
 
         private void HandleApplicationData(byte[] data)
         {
-            var enc = new ServerEncryptedDatagram(Session.CryptoContext)
-            {
-                Epoch          = 1,
-                SequenceNumber = Session.CryptoContext.ServerSequenceNumber++,
-            };
+            if (!_handshakeComplete)
+                throw new DtlsRecordDiscardedException("Application data before handshake completion");
+
+            var enc = new ServerEncryptedDatagram(Session.CryptoContext);
             enc.FromBytes(data);
             var appData = enc.Datagram as ApplicationDataDatagram;
-            Console.WriteLine($"[DTLS10 Client] AppData from server: {Encoding.UTF8.GetString(appData.Data)}");
+            ApplicationDataReceived?.Invoke(this, appData.Data);
         }
 
         private void HandleAlert(byte[] data)
         {
             AlertDatagram alert;
 
-            if (_handshakeComplete && Session.CryptoContext != null)
+            if (data[3] != 0 || data[4] != 0)
             {
-                var enc = new ServerEncryptedDatagram(Session.CryptoContext)
-                {
-                    Epoch          = 1,
-                    SequenceNumber = Session.CryptoContext.ServerSequenceNumber++,
-                };
+                if (Session.CryptoContext == null)
+                    throw new DtlsRecordDiscardedException("Encrypted alert before keys are established");
+                var enc = new ServerEncryptedDatagram(Session.CryptoContext);
                 enc.FromBytes(data);
                 alert = enc.Datagram as AlertDatagram;
             }
@@ -399,16 +540,36 @@ namespace SharpDTLS.DTLS10
             AlertReceived?.Invoke(this, alert);
         }
 
-        public void SendApplicationData(byte[] data)
+        /// <summary>RFC 5705 keying material exporter.</summary>
+        public byte[] ExportKeyingMaterial(string label, byte[] context, int length)
         {
+            if (!_handshakeComplete)
+                throw new InvalidOperationException("The handshake has not completed.");
+            return Dtls10CryptoUtils.ExportKeyingMaterial(Session.CryptoContext.MasterSecret, Session.ClientRandom, Session.ServerRandom, label, context, length);
+        }
+
+        /// <summary>SRTP master keys and salts (RFC 5764 §4.2), or null when use_srtp was not negotiated.</summary>
+        public DtlsSrtpKeys GetSrtpKeys()
+        {
+            if (Session.SrtpProtectionProfile == null)
+                return null;
+            ushort profile = Session.SrtpProtectionProfile.Value;
+            return DtlsSrtp.Split(profile, ExportKeyingMaterial(DtlsSrtp.ExporterLabel, null, DtlsSrtp.KeyingMaterialLength(profile)));
+        }
+
+        public void SendApplicationData(byte[] data) => Locked(() =>
+        {
+            if (!_handshakeComplete)
+                throw new InvalidOperationException("The handshake has not completed.");
+
             var appData = new ApplicationDataDatagram(data);
             var enc = new ClientEncryptedDatagram(Session.CryptoContext, appData, 0x17)
             {
                 Epoch          = 1,
                 SequenceNumber = Session.CryptoContext.ClientSequenceNumber++,
             };
-            ClientTransport.Send(enc.ToBytes());
-        }
+            Send(enc.ToBytes());
+        });
 
         private static byte[] BuildEcParams(ServerKeyExchangeDatagram kex)
         {
