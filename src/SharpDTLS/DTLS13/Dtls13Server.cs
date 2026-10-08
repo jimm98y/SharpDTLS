@@ -38,57 +38,18 @@ namespace SharpDTLS.DTLS13
     /// DTLS 1.3 server. Answers new clients statelessly (HelloRetryRequest with cookie) and keeps
     /// one <see cref="Dtls13ServerConnection"/> per remote endpoint once the cookie has been verified.
     /// </summary>
-    public class Dtls13Server
+    public class Dtls13Server : Tls13ServerBase
     {
         private readonly ConcurrentDictionary<string, Dtls13ServerConnection> _connections = new();
         private readonly ClientHelloReassembler _clientHelloReassembler = new();
-
-        internal AsymmetricCipherKeyPair ServerKeyPair { get; }
-        internal X509Certificate ServerCertificate { get; }
 
         public IServerTransport ServerTransport { get; }
 
         /// <summary>Send a HelloRetryRequest with a cookie before allocating state (address validation, RFC 9147 §5.1).</summary>
         public bool ShouldSendHelloRetry { get; set; } = true;
 
-        /// <summary>Request a client certificate and abort with certificate_required if none is sent.</summary>
-        public bool RequireClientCertificate { get; set; } = false;
-
-        /// <summary>Cipher suites in server preference order: the defaults in <see cref="Dtls13CipherSuite.Supported"/>, or any of <see cref="Dtls13CipherSuite.All"/>.</summary>
-        public IList<ushort> CipherSuites { get; set; } = new List<ushort>(Dtls13CipherSuite.Supported);
-
         /// <summary>SRTP protection profiles in server preference order; null to never negotiate use_srtp.</summary>
         public ushort[] SrtpProtectionProfiles { get; set; } = { 0x0007, 0x0001 };
-
-        /// <summary>Intermediate CA certificates sent after the server certificate, issuer of the previous one first.</summary>
-        public IList<X509Certificate> IntermediateCertificates { get; set; }
-
-        /// <summary>
-        /// Chooses the credentials for the client's server_name (RFC 6066), which is null when the client sent none.
-        /// Returning null uses the default certificate.
-        /// </summary>
-        public Func<string, ServerCredentials> CertificateSelector { get; set; }
-
-        /// <summary>Application protocols (ALPN, RFC 7301) in server preference order; null to ignore ALPN.</summary>
-        public IList<string> ApplicationProtocols { get; set; }
-
-        /// <summary>
-        /// The most payload per record we accept (64 to 16384), sent in record_size_limit (RFC 8449) to clients that
-        /// offer it; null for 16384. Clients' limits (and max_fragment_length requests) are always honoured.
-        /// </summary>
-        public int? RecordSizeLimit { get; set; }
-
-        /// <summary>
-        /// A DER OCSP response for the server certificate to staple for clients that ask (RFC 8446 §4.4.2.1); null for
-        /// none. Certificates from the CertificateSelector staple their own <see cref="ServerCredentials.OcspResponse"/>.
-        /// </summary>
-        public byte[] OcspResponse { get; set; }
-
-        /// <summary>
-        /// Key exchange groups in server preference order (see <see cref="Dtls13Groups"/>). A group the client already
-        /// sent a share for is preferred, to avoid a HelloRetryRequest; otherwise the server asks for its best group.
-        /// </summary>
-        public IList<ushort> SupportedGroups { get; set; } = new List<ushort>(Dtls13Groups.DefaultPreference);
 
         /// <summary>
         /// Negotiate connection IDs (RFC 9147 §9) with clients that offer them: their records are then routed by CID,
@@ -107,90 +68,12 @@ namespace SharpDTLS.DTLS13
 
         private readonly ConcurrentDictionary<string, Dtls13ServerConnection> _connectionsById = new();
 
-        /// <summary>Optional client certificate validation. Return false to abort with bad_certificate.</summary>
-        public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ClientCertificateValidator { get; set; }
-
-        /// <summary>
-        /// Certificate types we authenticate with, in preference order (RFC 7250); null for X.509 only. With
-        /// <see cref="CertificateType.RawPublicKey"/> clients that support it get the key pair's SubjectPublicKeyInfo, so a
-        /// server can do without a certificate.
-        /// </summary>
-        public IList<CertificateType> ServerCertificateTypes { get; set; }
-
-        /// <summary>Certificate types accepted from clients, in preference order (RFC 7250); null for X.509 only.</summary>
-        public IList<CertificateType> ClientCertificateTypes { get; set; }
-
-        /// <summary>
-        /// Certificate compression algorithms (RFC 8879) in server preference order: our Certificate is compressed with the
-        /// first one the client offers, and clients may compress theirs with any of them. Null disables compression.
-        /// </summary>
-        public IList<ushort> CertificateCompressionAlgorithms { get; set; } = CertificateCompression.Supported.ToList();
-
-        /// <summary>Checks a client's raw public key (DER SubjectPublicKeyInfo); false aborts with bad_certificate.</summary>
-        public Func<byte[], bool> ClientRawPublicKeyValidator { get; set; }
-
-        /// <summary>
-        /// Chooses credentials from what the client said (server name, trusted CAs, signature schemes); returning null
-        /// falls back to <see cref="CertificateSelector"/> and then the default certificate.
-        /// </summary>
-        public Func<CertificateSelectionContext, ServerCredentials> CredentialsSelector { get; set; }
-
-        /// <summary>CAs named in our CertificateRequests (certificate_authorities), to guide the client's choice; null names none.</summary>
-        public IList<X509Certificate> ClientCertificateAuthorities { get; set; }
-
         public TimeSpan InitialRetransmitTimeout { get; set; } = TimeSpan.FromSeconds(1);
-
-        /// <summary>Optional NSS key log sink (SSLKEYLOGFILE format).</summary>
-        public Action<string> KeyLogWriter { get; set; }
-
-        /// <summary>
-        /// Keys for session tickets (random per server by default): after each full or resumed handshake a client
-        /// that offers psk_dhe_ke gets a ticket it can resume with. Null disables tickets and resumption.
-        /// </summary>
-        public SessionTicketKeys TicketKeys { get; set; } = new SessionTicketKeys();
-
-        /// <summary>Maps a client's PSK identity to its external PSK (null for unknown identities); enables external PSKs.</summary>
-        public Func<byte[], Dtls13ExternalPsk> ExternalPskResolver { get; set; }
-
-        /// <summary>
-        /// Accept psk_ke, PSK handshakes without (EC)DHE (RFC 8446 §4.2.9), when the client offers it. Off by default:
-        /// such handshakes have no forward secrecy. psk_dhe_ke is preferred when the client offers both.
-        /// </summary>
-        public bool AllowPskOnlyKeyExchange { get; set; }
-
-        /// <summary>
-        /// Maximum 0-RTT data per connection advertised in tickets (RFC 8446 §4.2.10); 0 (the default) disables early
-        /// data. Early data can be replayed by an attacker, so only enable it for idempotent requests. It is accepted
-        /// only without a HelloRetryRequest (set <see cref="ShouldSendHelloRetry"/> to false), for a fresh ticket
-        /// (<see cref="EarlyDataFreshnessWindow"/>) whose ClientHello has not been seen before.
-        /// </summary>
-        public uint MaxEarlyDataSize { get; set; }
-
-        /// <summary>
-        /// Anti-replay window (RFC 8446 §8.2): early data is accepted only when the client's ticket age is within this
-        /// of the server's view, and each ClientHello is remembered for this long.
-        /// </summary>
-        public TimeSpan EarlyDataFreshnessWindow { get; set; } = TimeSpan.FromSeconds(10);
 
         /// <summary>0-RTT data accepted before the handshake completes; it may be a replay.</summary>
         public event EventHandler<Dtls13DataReceivedEventArgs> EarlyDataReceived;
 
-        private readonly ConcurrentDictionary<string, DateTime> _seenEarlyDataClientHellos = new();
-
-        /// <summary>
-        /// RFC 8446 §8.2 ClientHello recording: remembers the binder of each 0-RTT ClientHello for the freshness
-        /// window and refuses a second one. Older entries are outside the window and are pruned.
-        /// </summary>
-        internal bool RecordEarlyDataClientHello(byte[] binder)
-        {
-            var now = DateTime.UtcNow;
-            foreach (var entry in _seenEarlyDataClientHellos)
-                if (now - entry.Value > EarlyDataFreshnessWindow)
-                    _seenEarlyDataClientHellos.TryRemove(entry);
-            return _seenEarlyDataClientHellos.TryAdd(Convert.ToHexString(binder), now);
-        }
-
-        internal void OnEarlyData(Dtls13ServerConnection connection, byte[] data)
+        internal override void OnEarlyData(Dtls13ServerConnection connection, byte[] data)
             => EarlyDataReceived?.Invoke(this, new Dtls13DataReceivedEventArgs(connection.RemoteEndPoint, connection, data));
 
         public event EventHandler<EventArgs> HandshakeFinished;
@@ -205,12 +88,8 @@ namespace SharpDTLS.DTLS13
 
         /// <param name="keyPair">The certificate key, or null with <paramref name="certificate"/> for a PSK-only server.</param>
         public Dtls13Server(IServerTransport serverTransport, AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
+            : base(keyPair, certificate)
         {
-            if (certificate != null && keyPair == null)
-                throw new ArgumentException("A certificate needs its key pair.");
-            ServerKeyPair = keyPair;
-            ServerCertificate = certificate;
-
             ServerTransport = serverTransport;
             ServerTransport.OnDataReceived += ServerTransport_OnDataReceived;
         }
@@ -291,63 +170,17 @@ namespace SharpDTLS.DTLS13
 
         private void HandleClientHello(EndPoint endpoint, byte[] datagram, byte[] record)
         {
-
             var clientHello = new ClientHelloDatagram();
             clientHello.FromBytes(record);
 
-            var versions = clientHello.Extensions.OfType<ClientSupportedVersions>().FirstOrDefault();
-            if (versions == null || !versions.Versions.Contains(ClientSupportedVersions.Dtls13))
-                throw new DtlsException(AlertDescription.ProtocolVersion, "Client does not support DTLS 1.3.");
-            if (clientHello.LegacyCookie.Length != 0)
-                throw new DtlsException(AlertDescription.IllegalParameter, "DTLS 1.3 ClientHello has a legacy_cookie.");
-
-            // A psk_ke-only client sends no key share or groups; whether its PSK is acceptable is checked later.
-            var modes = clientHello.Extensions.OfType<PskKeyExchangeModesExtension>().FirstOrDefault();
-            bool pskOnly = AllowPskOnlyKeyExchange && clientHello.Extensions.OfType<ClientPreSharedKeyExtension>().Any()
-                           && modes != null && modes.Modes.Contains(PskKeyExchangeModesExtension.PskKe)
-                           && !modes.Modes.Contains(PskKeyExchangeModesExtension.PskDheKe);
-            // Group: the server's most preferred one the client sent a share for, else its most preferred mutual
-            // group, requested with a HelloRetryRequest (RFC 8446 §4.2.8).
-            var offeredGroups = clientHello.Extensions.OfType<SupportedGroups>().FirstOrDefault()?.Groups ?? Array.Empty<ushort>();
-            var shares = clientHello.Extensions.OfType<ClientKeyShareExtension>().FirstOrDefault();
-            var mutual = SupportedGroups.Where(g => offeredGroups.Contains(g) && Dtls13Groups.IsSupported(g)).ToList();
-            ushort shareGroup = mutual.FirstOrDefault(g => shares?.GetKeyShare(g) != null);
-            if (!pskOnly && mutual.Count == 0)
-                throw new DtlsException(AlertDescription.HandshakeFailure, "No supported key exchange group in common.");
-
-            ushort suiteId = CipherSuites.FirstOrDefault(s => clientHello.CipherSuites.Contains(s));
-            if (suiteId == 0)
-                throw new DtlsException(AlertDescription.HandshakeFailure, "No cipher suite in common.");
-
-            bool hasKeyShare = shareGroup != 0;
-            var ipEndpoint = (IPEndPoint)endpoint;
-            string ip = ipEndpoint.Address.ToString();
-
-            HelloRetryState retry = null;
-            var cookie = clientHello.Extensions.OfType<CookieExtension>().FirstOrDefault();
-            if (cookie != null && Dtls13CryptoUtils.ValidateCookie(DateTime.UtcNow, ip, ipEndpoint.Port, cookie.Cookie,
-                    out ushort cookieSuite, out byte[] clientHello1Hash, out ushort requestedGroup))
+            var decision = DecideClientHello(clientHello, record, endpoint, ShouldSendHelloRetry);
+            if (decision.HelloRetryRequest != null)
             {
-                if (!clientHello.CipherSuites.Contains(cookieSuite) || !CipherSuites.Contains(cookieSuite))
-                    throw new DtlsException(AlertDescription.IllegalParameter, "ClientHello2 does not offer the cipher suite selected in HelloRetryRequest.");
-                // ClientHello2 must carry a share for the group the HelloRetryRequest asked for (RFC 8446 §4.1.2).
-                if (requestedGroup != 0)
-                {
-                    if (shares?.GetKeyShare(requestedGroup) == null)
-                        throw new DtlsException(AlertDescription.IllegalParameter, $"ClientHello2 has no {Dtls13Groups.Name(requestedGroup)} key share.");
-                    shareGroup = requestedGroup;
-                }
-                else if (!hasKeyShare && !pskOnly)
-                {
-                    throw new DtlsException(AlertDescription.IllegalParameter, "ClientHello2 has no usable key share.");
-                }
-
-                suiteId = cookieSuite;
-                retry = new HelloRetryState(clientHello1Hash, cookie.Cookie, requestedGroup);
-            }
-            else if (ShouldSendHelloRetry || (!hasKeyShare && !pskOnly))
-            {
-                SendHelloRetryRequest(endpoint, record, clientHello, suiteId, requestedGroup: !hasKeyShare && !pskOnly ? mutual[0] : (ushort)0);
+                // RFC 9147 §5.1: reuse the ClientHello's message and record sequence numbers, so a stateless server never repeats one.
+                decision.HelloRetryRequest.SequenceNumber = clientHello.SequenceNumber;
+                decision.HelloRetryRequest.RecordSequenceNumber = clientHello.RecordSequenceNumber;
+                Debug.WriteLine($"[DTLS13 Server] Sending HelloRetryRequest to {endpoint}");
+                ServerTransport.Send(endpoint, decision.HelloRetryRequest.ToBytes());
                 return;
             }
 
@@ -358,7 +191,7 @@ namespace SharpDTLS.DTLS13
                 return;
             }
 
-            connection.Start(record, clientHello, Dtls13CipherSuite.Get(suiteId), retry, shareGroup);
+            connection.Start(record, clientHello, Dtls13CipherSuite.Get(decision.SuiteId), decision.Retry, decision.ShareGroup);
             if (connection.ConnectionId != null && !connection.IsClosed)
                 _connectionsById[Convert.ToHexString(connection.ConnectionId)] = connection;
         }
@@ -372,28 +205,6 @@ namespace SharpDTLS.DTLS13
             _connections[connection.RemoteEndPoint.ToString()] = connection;
         }
 
-        private void SendHelloRetryRequest(EndPoint endpoint, byte[] record, ClientHelloDatagram clientHello, ushort suiteId, ushort requestedGroup)
-        {
-            var suite = Dtls13CipherSuite.Get(suiteId);
-            var transcript = new Dtls13Transcript();
-            transcript.AddPlaintextRecord(record);
-
-            var ipEndpoint = (IPEndPoint)endpoint;
-            byte[] cookie = Dtls13CryptoUtils.CreateCookie(DateTime.UtcNow, ipEndpoint.Address.ToString(), ipEndpoint.Port,
-                suiteId, transcript.Hash(suite), requestedGroup);
-
-            // RFC 9147 §5: DTLS servers never echo legacy_session_id.
-            var hrr = new HelloRetryRequest(suiteId, cookie, requestedGroup != 0 ? requestedGroup : null, Array.Empty<byte>())
-            {
-                SequenceNumber = clientHello.SequenceNumber,
-                // RFC 9147 §5.1: reuse the ClientHello's record sequence number so a stateless server never repeats one.
-                RecordSequenceNumber = clientHello.RecordSequenceNumber,
-            };
-
-            Debug.WriteLine($"[DTLS13 Server] Sending HelloRetryRequest to {endpoint}");
-            ServerTransport.Send(endpoint, hrr.ToBytes());
-        }
-
         private void SendPlaintextAlert(EndPoint endpoint, AlertDescription alert)
         {
             byte[] record = { 0x15, 0xFE, 0xFD, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, (byte)alert };
@@ -403,35 +214,21 @@ namespace SharpDTLS.DTLS13
 
         // ── Callbacks from connections ───────────────────────────────────────────────────────
 
-        internal void OnConnectionEstablished(Dtls13ServerConnection connection)
+        internal override void OnConnectionEstablished(Dtls13ServerConnection connection)
             => HandshakeFinished?.Invoke(this, new Dtls13ConnectionEventArgs(connection.RemoteEndPoint, connection));
 
-        internal void OnApplicationData(Dtls13ServerConnection connection, byte[] data)
+        internal override void OnApplicationData(Dtls13ServerConnection connection, byte[] data)
             => ApplicationDataReceived?.Invoke(this, new Dtls13DataReceivedEventArgs(connection.RemoteEndPoint, connection, data));
 
-        internal void OnKeyUpdate(KeyUpdateDatagram keyUpdate)
+        internal override void OnKeyUpdate(KeyUpdateDatagram keyUpdate)
             => KeyUpdateReceived?.Invoke(this, keyUpdate);
 
-        internal void OnConnectionClosed(Dtls13ServerConnection connection)
+        internal override void OnConnectionClosed(Dtls13ServerConnection connection)
         {
             _connections.TryRemove(new KeyValuePair<string, Dtls13ServerConnection>(connection.RemoteEndPoint.ToString(), connection));
             foreach (var entry in _connectionsById.Where(e => e.Value == connection).ToList())
                 _connectionsById.TryRemove(entry);
             ConnectionClosed?.Invoke(this, new Dtls13ConnectionEventArgs(connection.RemoteEndPoint, connection));
-        }
-
-        internal sealed class HelloRetryState
-        {
-            public HelloRetryState(byte[] clientHello1Hash, byte[] cookie, ushort requestedGroup)
-            {
-                ClientHello1Hash = clientHello1Hash;
-                Cookie = cookie;
-                RequestedGroup = requestedGroup;
-            }
-
-            public byte[] ClientHello1Hash { get; }
-            public byte[] Cookie { get; }
-            public ushort RequestedGroup { get; }
         }
     }
 
@@ -449,7 +246,10 @@ namespace SharpDTLS.DTLS13
             Connected,
         }
 
-        private readonly Dtls13Server _server;
+        private readonly Tls13ServerBase _server;
+
+        // The DTLS server, for its datagram-only settings (connection IDs, SRTP, address updates).
+        private Dtls13Server DatagramServer => (Dtls13Server)_server;
         private State _state = State.Start;
         private ClientHelloDatagram _clientHello;
         private CertificateRequestDatagram _certificateRequest;
@@ -497,19 +297,19 @@ namespace SharpDTLS.DTLS13
             var old = _address.Current;
             _address.Confirm(address);
             if (!old.Equals(address))
-                RaiseEvent(() => _server.OnPeerAddressConfirmed(this, old));
+                RaiseEvent(() => DatagramServer.OnPeerAddressConfirmed(this, old));
         });
 
-        protected override void OnConnectionIdIssued(byte[] connectionId) => _server.RegisterConnectionId(this, connectionId);
+        protected override void OnConnectionIdIssued(byte[] connectionId) => DatagramServer.RegisterConnectionId(this, connectionId);
 
         protected override void OnRecordAuthenticated(ulong epoch, ulong sequenceNumber, bool withConnectionId)
         {
-            if (!_address.Observe(epoch, sequenceNumber, withConnectionId, DatagramSource, _server.AutoUpdatePeerAddress, out var old))
+            if (!_address.Observe(epoch, sequenceNumber, withConnectionId, DatagramSource, DatagramServer.AutoUpdatePeerAddress, out var old))
                 return;
             var change = (old, DatagramSource);
             RaiseEvent(() => PeerAddressChanged?.Invoke(this, change));
-            if (_server.AutoUpdatePeerAddress)
-                RaiseEvent(() => _server.OnPeerAddressConfirmed(this, old));
+            if (DatagramServer.AutoUpdatePeerAddress)
+                RaiseEvent(() => DatagramServer.OnPeerAddressConfirmed(this, old));
         }
 
         /// <summary>The host name the client asked for in server_name, or null.</summary>
@@ -561,7 +361,7 @@ namespace SharpDTLS.DTLS13
             Closed += (_, _) => _server.OnConnectionClosed(this);
         }
 
-        internal void Start(byte[] record, ClientHelloDatagram clientHello, Dtls13CipherSuite suite, Dtls13Server.HelloRetryState retry, ushort group)
+        internal void Start(byte[] record, ClientHelloDatagram clientHello, Dtls13CipherSuite suite, Tls13ServerBase.HelloRetryState retry, ushort group)
         {
             Run(() =>
             {
@@ -609,10 +409,10 @@ namespace SharpDTLS.DTLS13
                     _clientHello.Extensions.OfType<MaxFragmentLengthExtension>().FirstOrDefault(), _server.RecordSizeLimit, dtls13: true);
 
                 var offeredCid = _clientHello.Extensions.OfType<ConnectionIdExtension>().FirstOrDefault();
-                if (_server.UseConnectionIds && offeredCid != null)
+                if (DatagramServer.UseConnectionIds && offeredCid != null)
                 {
                     WriteConnectionId = offeredCid.ConnectionId;
-                    ReadConnectionId = Dtls13CryptoUtils.GenerateRandom(_server.ConnectionIdLength);
+                    ReadConnectionId = Dtls13CryptoUtils.GenerateRandom(DatagramServer.ConnectionIdLength);
                 }
 
                 SelectPsk(record);
@@ -831,7 +631,7 @@ namespace SharpDTLS.DTLS13
             var extensions = new EncryptedExtensionsDatagram();
 
             var offered = _clientHello.Extensions.OfType<UseSrtpExtension>().FirstOrDefault();
-            ushort? profile = DtlsSrtp.Select(_server.SrtpProtectionProfiles, offered?.SrtpProtectionProfiles);
+            ushort? profile = DtlsSrtp.Select(DatagramServer.SrtpProtectionProfiles, offered?.SrtpProtectionProfiles);
             if (profile.HasValue)
             {
                 SelectedSrtpProtectionProfile = profile;

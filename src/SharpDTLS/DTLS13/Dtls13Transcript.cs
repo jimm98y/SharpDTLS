@@ -38,8 +38,22 @@ namespace SharpDTLS.DTLS13
             _messages.Add(tlsForm);
         }
 
-        /// <summary>Adds a handshake message carried in a plaintext DTLS record (13-byte record header).</summary>
-        public void AddPlaintextRecord(byte[] record) => AddHandshake(record, 13);
+        /// <summary>
+        /// Adds a handshake message carried whole in a plaintext record: DTLS (13-byte record header, 12-byte handshake
+        /// header) or TLS (5-byte record header, the message already in TLS form).
+        /// </summary>
+        public void AddPlaintextRecord(byte[] record)
+        {
+            if (record[1] == 0xFE)
+            {
+                AddHandshake(record, 13);
+                return;
+            }
+            int length = (record[6] << 16) | (record[7] << 8) | record[8];
+            if (record.Length < 9 + length)
+                throw new DtlsException(AlertDescription.DecodeError, "Truncated handshake message.");
+            _messages.Add(record.AsSpan(5, 4 + length).ToArray());
+        }
 
         /// <summary>
         /// Replaces the transcript (ClientHello1) with the synthetic message_hash message used after a

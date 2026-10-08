@@ -317,6 +317,12 @@ namespace SharpDTLS.DTLS13
         /// </summary>
         public static byte[] TruncatedClientHello(byte[] record, int bindersLength)
         {
+            if (record[1] != 0xFE)
+            {
+                // TLS record: 5-byte record header, then the message in TLS form.
+                int tlsLength = (record[6] << 16) | (record[7] << 8) | record[8];
+                return record.AsSpan(5, 4 + tlsLength - bindersLength).ToArray();
+            }
             int length = (record[14] << 16) | (record[15] << 8) | record[16];
             byte[] tlsForm = new byte[4 + length - bindersLength];
             Buffer.BlockCopy(record, 13, tlsForm, 0, 4);
