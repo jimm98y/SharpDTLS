@@ -81,7 +81,15 @@ namespace SharpDTLS.DTLS12
         private Func<byte[], (byte[] Identity, byte[] Key)> EffectivePskProvider
             => PskProvider ?? (PskIdentity != null && PskKey != null ? _ => (PskIdentity, PskKey) : null);
 
-        /// <summary>Smallest finite-field Diffie-Hellman prime accepted from a server.</summary>
+        /// <summary>SRP username (RFC 5054); setting it with <see cref="SrpPassword"/> enables the SRP suites.</summary>
+        public byte[] SrpIdentity { get; set; }
+
+        /// <summary>The SRP password that goes with <see cref="SrpIdentity"/>.</summary>
+        public byte[] SrpPassword { get; set; }
+
+        private bool HaveSrp => SrpIdentity != null && SrpPassword != null;
+
+        /// <summary>Smallest finite-field Diffie-Hellman prime, or SRP group modulus, accepted from a server.</summary>
         public int MinimumDhPrimeBits { get; set; } = 1024;
 
         public bool ExtendedMasterSecretNegotiated => UseExtendedMasterSecret;
@@ -101,9 +109,9 @@ namespace SharpDTLS.DTLS12
         private void SendClientHello(byte[] cookie)
         {
             bool havePsk = EffectivePskProvider != null;
-            var offered = (CipherSuites ?? SharpDTLS.CipherSuites.DefaultFor(MinimumVersion, MaximumVersion, includePsk: havePsk))
+            var offered = (CipherSuites ?? SharpDTLS.CipherSuites.DefaultFor(MinimumVersion, MaximumVersion, includePsk: havePsk, includeSrp: HaveSrp))
                 .Where(id => SharpDTLS.CipherSuites.TryGet(id, out var s) && (s.IsUsableWith(MaximumVersion) || s.IsUsableWith(MinimumVersion))
-                             && (havePsk || !s.RequiresPsk))
+                             && (havePsk || !s.RequiresPsk) && (HaveSrp || !s.RequiresSrp))
                 .ToList();
             var offeredSuites = offered.Select(id => SharpDTLS.CipherSuites.Get(id)).ToList();
             if (offered.Count == 0)
@@ -132,6 +140,8 @@ namespace SharpDTLS.DTLS12
             ch.Extensions.Add(new RenegotiationInfoExtension());
             if (SrtpProtectionProfiles != null && SrtpProtectionProfiles.Length > 0)
                 ch.Extensions.Add(new UseSrtpExtension(SrtpProtectionProfiles));
+            if (offeredSuites.Any(s => s.RequiresSrp))
+                ch.Extensions.Add(new SrpExtension(SrpIdentity));
 
             _clientHello = ch;
 
@@ -288,6 +298,8 @@ namespace SharpDTLS.DTLS12
                 ServerPublicKey = _serverCertificate?.GetPublicKey(),
                 MinimumDhPrimeBits = MinimumDhPrimeBits,
                 PskProvider = EffectivePskProvider,
+                SrpIdentity = SrpIdentity,
+                SrpPassword = SrpPassword,
             });
 
             _state = _keyExchange.ServerKeyExchange switch

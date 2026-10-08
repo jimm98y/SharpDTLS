@@ -64,6 +64,9 @@ namespace SharpDTLS.DTLS12
         /// <summary>Maps a client's PSK identity to its key (null for unknown identities); enables the PSK suites.</summary>
         public Func<byte[], byte[]> PskIdentityResolver { get => Settings.PskIdentityResolver; set => Settings.PskIdentityResolver = value; }
 
+        /// <summary>Maps an SRP username to its verifier (null for unknown users); enables the SRP suites.</summary>
+        public Func<byte[], SrpVerifier> SrpVerifierProvider { get => Settings.SrpVerifierProvider; set => Settings.SrpVerifierProvider = value; }
+
         public IReadOnlyCollection<Dtls12ServerConnection> Connections => _connections.Values.ToList();
 
         public Dtls12ServerConnection GetConnection(EndPoint endpoint)

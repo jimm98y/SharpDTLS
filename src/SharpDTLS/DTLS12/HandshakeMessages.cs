@@ -31,6 +31,7 @@ namespace SharpDTLS.DTLS12
             0x000b => new EcPointFormatsExtension(),
             0x000d => new SignatureAlgorithmsExtension(),
             0x000e => new UseSrtpExtension(),
+            SrpExtension.Type => new SrpExtension(),
             0x0016 => new EncryptThenMacExtension(),
             ExtendedMasterSecretExtension.Type => new ExtendedMasterSecretExtension(),
             RenegotiationInfoExtension.Type => new RenegotiationInfoExtension(),

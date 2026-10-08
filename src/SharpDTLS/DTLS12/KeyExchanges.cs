@@ -73,6 +73,7 @@ namespace SharpDTLS.DTLS12
         public AsymmetricKeyParameter ServerPrivateKey { get; init; }
         public byte[] PskIdentityHint { get; init; }
         public Func<byte[], byte[]> PskResolver { get; init; }
+        public Func<byte[], SrpVerifier> SrpVerifierProvider { get; init; }
     }
 
     internal sealed class ClientKeyExchangeContext
@@ -83,6 +84,9 @@ namespace SharpDTLS.DTLS12
 
         /// <summary>Maps the server's identity hint (possibly empty) to the PSK identity and key.</summary>
         public Func<byte[], (byte[] Identity, byte[] Key)> PskProvider { get; init; }
+
+        public byte[] SrpIdentity { get; init; }
+        public byte[] SrpPassword { get; init; }
     }
 
     internal static class KeyExchanges
@@ -100,6 +104,8 @@ namespace SharpDTLS.DTLS12
             KeyExchangeAlgorithm.ECDH_anon => new EcdheServerKeyExchange(context, signed: false),
             KeyExchangeAlgorithm.DH_DSS or KeyExchangeAlgorithm.DH_RSA => new StaticDhServerKeyExchange(context),
             KeyExchangeAlgorithm.ECDH_ECDSA or KeyExchangeAlgorithm.ECDH_RSA => new StaticEcdhServerKeyExchange(context),
+            KeyExchangeAlgorithm.SRP_SHA => new SrpServerKeyExchange(context, signed: false),
+            KeyExchangeAlgorithm.SRP_SHA_RSA or KeyExchangeAlgorithm.SRP_SHA_DSS => new SrpServerKeyExchange(context, signed: true),
             _ => throw new DtlsException(AlertDescription.InternalError, $"Key exchange {suite.KeyExchange} is not implemented."),
         };
 
@@ -116,6 +122,8 @@ namespace SharpDTLS.DTLS12
             KeyExchangeAlgorithm.ECDH_anon => new EcdheClientKeyExchange(signed: false),
             KeyExchangeAlgorithm.DH_DSS or KeyExchangeAlgorithm.DH_RSA => new StaticDhClientKeyExchange(context),
             KeyExchangeAlgorithm.ECDH_ECDSA or KeyExchangeAlgorithm.ECDH_RSA => new StaticEcdhClientKeyExchange(context),
+            KeyExchangeAlgorithm.SRP_SHA => new SrpClientKeyExchange(context, signed: false),
+            KeyExchangeAlgorithm.SRP_SHA_RSA or KeyExchangeAlgorithm.SRP_SHA_DSS => new SrpClientKeyExchange(context, signed: true),
             _ => throw new DtlsException(AlertDescription.InternalError, $"Key exchange {suite.KeyExchange} is not implemented."),
         };
     }

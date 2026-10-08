@@ -51,6 +51,9 @@ namespace Dtls13Test.Tests
         {
             OpenSsl.RequireOpenSsl();
             var suite = CipherSuites.Get(id);
+            // BouncyCastle covers SRP instead (TestBouncyCastleInterop).
+            if (suite.RequiresSrp)
+                Assert.Inconclusive("OpenSSL 3.6 SRP is unusable from the command line: s_server stalls after the user lookup and s_client ignores -srppass");
             if (!_openSsl.Value.Names.TryGetValue(id, out string name))
                 Assert.Inconclusive($"OpenSSL does not support {suite.Name}");
             bool dtls12 = suite.IsUsableWith(DtlsVersion.Dtls12);

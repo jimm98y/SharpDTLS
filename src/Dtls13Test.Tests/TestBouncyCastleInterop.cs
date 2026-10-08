@@ -189,6 +189,71 @@ namespace Dtls13Test.Tests
         }
     }
 
+    internal sealed class BcSrpIdentityManager : TlsSrpIdentityManager
+    {
+        public TlsSrpLoginParameters GetLoginParameters(byte[] identity)
+        {
+            var verifier = TestCredentials.ResolveSrp(identity);
+            if (verifier == null)
+                return null;
+            var config = new TlsSrpConfig();
+            config.SetExplicitNG(new[] { verifier.Group.N, verifier.Group.G });
+            return new TlsSrpLoginParameters(identity, config, verifier.Verifier, verifier.Salt);
+        }
+    }
+
+    internal sealed class BcSrpTestServer : SrpTlsServer
+    {
+        private readonly int[] _suites;
+        private readonly ProtocolVersion[] _versions;
+        private readonly AsymmetricKeyParameter _privateKey;
+        private readonly byte[] _certificate;
+
+        public BcSrpTestServer(BcTlsCrypto crypto, int suite, ProtocolVersion version, AsymmetricKeyParameter privateKey, byte[] certificate)
+            : base(crypto, new BcSrpIdentityManager())
+        {
+            _suites = new[] { suite };
+            _versions = version.Only();
+            _privateKey = privateKey;
+            _certificate = certificate;
+        }
+
+        protected override ProtocolVersion[] GetSupportedVersions() => _versions;
+        protected override int[] GetSupportedCipherSuites() => _suites;
+
+        private TlsCredentialedSigner Signer(short signatureAlgorithm)
+        {
+            var algorithm = TlsUtilities.IsTlsV12(m_context) ? new SignatureAndHashAlgorithm(HashAlgorithm.sha256, signatureAlgorithm) : null;
+            var chain = new Certificate(new[] { Crypto.CreateCertificate(_certificate) });
+            return new BcDefaultTlsCredentialedSigner(new TlsCryptoParameters(m_context), (BcTlsCrypto)Crypto, _privateKey, chain, algorithm);
+        }
+
+        protected override TlsCredentialedSigner GetRsaSignerCredentials() => Signer(SignatureAlgorithm.rsa);
+        protected override TlsCredentialedSigner GetDsaSignerCredentials() => Signer(SignatureAlgorithm.dsa);
+    }
+
+    internal sealed class BcSrpTestClient : SrpTlsClient
+    {
+        private readonly int[] _suites;
+        private readonly ProtocolVersion[] _versions;
+
+        public BcSrpTestClient(BcTlsCrypto crypto, int suite, ProtocolVersion version)
+            : base(crypto, TestCredentials.SrpIdentity, TestCredentials.SrpPassword)
+        {
+            _suites = new[] { suite };
+            _versions = version.Only();
+        }
+
+        protected override ProtocolVersion[] GetSupportedVersions() => _versions;
+        protected override int[] GetSupportedCipherSuites() => _suites;
+        public override TlsAuthentication GetAuthentication() => new AcceptAnyServer();
+
+        private sealed class AcceptAnyServer : ServerOnlyTlsAuthentication
+        {
+            public override void NotifyServerCertificate(TlsServerCertificate serverCertificate) { }
+        }
+    }
+
     internal sealed class BcTestClient : DefaultTlsClient
     {
         private readonly int[] _suites;
@@ -269,8 +334,8 @@ namespace Dtls13Test.Tests
             var log = new System.Collections.Concurrent.ConcurrentQueue<string>();
             var bcServer = RunBlocking(() =>
             {
-                TlsServer bcServerPeer = suite.RequiresPsk
-                    ? new BcPskTestServer(crypto, id, bcVersion, keyPair.Private, certificate.GetEncoded())
+                TlsServer bcServerPeer = suite.RequiresPsk ? new BcPskTestServer(crypto, id, bcVersion, keyPair.Private, certificate.GetEncoded())
+                    : suite.RequiresSrp ? new BcSrpTestServer(crypto, id, bcVersion, keyPair.Private, certificate.GetEncoded())
                     : new BcTestServer(crypto, id, bcVersion, keyPair.Private, certificate.GetEncoded());
                 var dtls = new DtlsServerProtocol().Accept(bcServerPeer, new BcUdpTransport(serverSocket, log));
                 byte[] buffer = new byte[2048];
@@ -285,6 +350,8 @@ namespace Dtls13Test.Tests
             var client = new Dtls12Client(transport) { MinimumVersion = version, MaximumVersion = version, CipherSuites = new List<ushort> { id } };
             if (suite.IsStaticKeyAgreement)
                 (client.ClientCertificateKeyPair, client.ClientCertificate) = TestCredentials.FixedClientFor(suite);
+            if (suite.RequiresSrp)
+                (client.SrpIdentity, client.SrpPassword) = (TestCredentials.SrpIdentity, TestCredentials.SrpPassword);
             if (suite.RequiresPsk)
             {
                 client.PskIdentity = TestCredentials.PskIdentity;
@@ -325,6 +392,8 @@ namespace Dtls13Test.Tests
             var (fixedKeyPair, fixedCertificate) = TestCredentials.FixedClientFor(suite);
             if (suite.IsStaticKeyAgreement)
                 server.RequireClientCertificate = true;
+            if (suite.RequiresSrp)
+                server.SrpVerifierProvider = TestCredentials.ResolveSrp;
             if (suite.RequiresPsk)
             {
                 server.PskIdentityResolver = TestCredentials.ResolvePsk;
@@ -336,7 +405,9 @@ namespace Dtls13Test.Tests
             clientSocket.Connect(new IPEndPoint(IPAddress.Loopback, transport.LocalEndpoint.Port));
             var bcClient = RunBlocking(() =>
             {
-                TlsClient bcClientPeer = suite.RequiresPsk ? new BcPskTestClient(crypto, id, bcVersion) : new BcTestClient(crypto, id, bcVersion, fixedKeyPair, fixedCertificate);
+                TlsClient bcClientPeer = suite.RequiresPsk ? new BcPskTestClient(crypto, id, bcVersion)
+                    : suite.RequiresSrp ? new BcSrpTestClient(crypto, id, bcVersion)
+                    : new BcTestClient(crypto, id, bcVersion, fixedKeyPair, fixedCertificate);
                 var dtls = new DtlsClientProtocol().Connect(bcClientPeer, new BcUdpTransport(clientSocket));
                 byte[] ping = Encoding.UTF8.GetBytes("ping");
                 dtls.Send(ping, 0, ping.Length);

@@ -26,6 +26,13 @@ namespace Dtls13Test.Tests
 
         public static byte[] ResolvePsk(byte[] identity) => identity.AsSpan().SequenceEqual(PskIdentity) ? PskKey : null;
 
+        // RFC 5054 Appendix B test user, on the 2048-bit group.
+        public static byte[] SrpIdentity => Encoding.ASCII.GetBytes("alice");
+        public static byte[] SrpPassword => Encoding.ASCII.GetBytes("password123");
+        private static readonly Lazy<SrpVerifier> _srpVerifier = new(() => SrpVerifier.Create(SrpIdentity, SrpPassword));
+
+        public static SrpVerifier ResolveSrp(byte[] identity) => identity.AsSpan().SequenceEqual(SrpIdentity) ? _srpVerifier.Value : null;
+
         private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _rsa = new(() => Dtls12CryptoUtils.GenerateSelfSignedCertificate());
         private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _ecdsa = new(() => SharpDTLS.DTLS13.Dtls13CryptoUtils.GenerateSelfSignedEcCertificate());
         private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _dsa = new(GenerateDsa);
@@ -143,6 +150,11 @@ namespace Dtls13Test.Tests
                 server.RequireClientCertificate = true;
                 (client.ClientCertificateKeyPair, client.ClientCertificate) = TestCredentials.FixedClientFor(suite);
             }
+            if (suite.RequiresSrp)
+            {
+                server.SrpVerifierProvider = TestCredentials.ResolveSrp;
+                (client.SrpIdentity, client.SrpPassword) = (TestCredentials.SrpIdentity, TestCredentials.SrpPassword);
+            }
             byte[] seenHint = null;
             if (suite.RequiresPsk)
             {
@@ -178,6 +190,8 @@ namespace Dtls13Test.Tests
             Assert.AreEqual(328, CipherSuites.Registry.Count(s => s.DtlsOk));
             Assert.IsTrue(CipherSuites.All.All(s => s.DtlsOk), "stream-cipher (non DTLS-OK) suites must never be implemented");
             Assert.IsFalse(CipherSuites.DefaultFor(DtlsVersion.Dtls10, DtlsVersion.Dtls12).Any(id => CipherSuites.Get(id).Security == CipherSuiteSecurity.Weak));
+            Assert.IsFalse(CipherSuites.DefaultFor(DtlsVersion.Dtls10, DtlsVersion.Dtls12).Any(id => CipherSuites.Get(id).RequiresSrp), "SRP suites need credentials");
+            Assert.IsTrue(CipherSuites.DefaultFor(DtlsVersion.Dtls10, DtlsVersion.Dtls12, includeSrp: true).Any(id => CipherSuites.Get(id).RequiresSrp));
         }
     }
 }

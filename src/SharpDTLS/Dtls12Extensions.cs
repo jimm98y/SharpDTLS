@@ -35,6 +35,45 @@ namespace SharpDTLS
         }
     }
 
+    /// <summary>srp (RFC 5054 §2.8.1): the client's SRP username, srp_I&lt;1..2^8-1&gt;.</summary>
+    public class SrpExtension : ITlsExtension
+    {
+        public const ushort Type = 0x000c;
+
+        public SrpExtension() { }
+
+        public SrpExtension(byte[] identity)
+        {
+            if (identity == null || identity.Length is 0 or > 255)
+                throw new ArgumentException("The SRP identity must be 1 to 255 bytes.", nameof(identity));
+            Identity = identity;
+        }
+
+        public byte[] Identity { get; private set; } = Array.Empty<byte>();
+
+        public int CalculateLength() => 5 + Identity.Length;
+
+        public int Read(int offset, byte[] source)
+        {
+            int length = (source[offset + 2] << 8) | source[offset + 3];
+            if (length < 2 || source.Length < offset + 4 + length || source[offset + 4] != length - 1)
+                throw new DtlsException(AlertDescription.DecodeError, "Invalid srp extension.");
+            Identity = source.AsSpan(offset + 5, length - 1).ToArray();
+            return 4 + length;
+        }
+
+        public int Write(int offset, byte[] destination)
+        {
+            destination[offset]     = 0x00;
+            destination[offset + 1] = 0x0c;
+            destination[offset + 2] = (byte)((1 + Identity.Length) >> 8);
+            destination[offset + 3] = (byte)(1 + Identity.Length);
+            destination[offset + 4] = (byte)Identity.Length;
+            Buffer.BlockCopy(Identity, 0, destination, offset + 5, Identity.Length);
+            return 5 + Identity.Length;
+        }
+    }
+
     /// <summary>
     /// extended_master_secret (RFC 7627): binds the master secret to the handshake transcript.
     /// </summary>

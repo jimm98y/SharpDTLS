@@ -144,6 +144,7 @@ namespace SharpDTLS
         public bool HasForwardSecrecy => KeyExchange is KeyExchangeAlgorithm.DHE_DSS or KeyExchangeAlgorithm.DHE_RSA
             or KeyExchangeAlgorithm.ECDHE_ECDSA or KeyExchangeAlgorithm.ECDHE_RSA or KeyExchangeAlgorithm.DHE_PSK
             or KeyExchangeAlgorithm.PSK_DHE or KeyExchangeAlgorithm.ECDHE_PSK
+            or KeyExchangeAlgorithm.SRP_SHA or KeyExchangeAlgorithm.SRP_SHA_RSA or KeyExchangeAlgorithm.SRP_SHA_DSS
             or KeyExchangeAlgorithm.DHE_DSS_EXPORT or KeyExchangeAlgorithm.DHE_RSA_EXPORT;
 
         /// <summary>
@@ -166,6 +167,9 @@ namespace SharpDTLS
         /// <summary>The key exchange authenticates with a pre-shared key (RFC 4279, RFC 5489).</summary>
         public bool RequiresPsk => KeyExchange is KeyExchangeAlgorithm.PSK or KeyExchangeAlgorithm.DHE_PSK
             or KeyExchangeAlgorithm.PSK_DHE or KeyExchangeAlgorithm.ECDHE_PSK or KeyExchangeAlgorithm.RSA_PSK;
+
+        /// <summary>The key exchange authenticates with an SRP password (RFC 5054).</summary>
+        public bool RequiresSrp => KeyExchange is KeyExchangeAlgorithm.SRP_SHA or KeyExchangeAlgorithm.SRP_SHA_RSA or KeyExchangeAlgorithm.SRP_SHA_DSS;
 
         /// <summary>Whether this implementation supports the suite.</summary>
         public bool IsImplemented => DtlsOk && CipherSuites.IsKeyExchangeImplemented(KeyExchange) && CipherSuites.IsCipherImplemented(Cipher)
@@ -303,6 +307,7 @@ namespace SharpDTLS
             KeyExchangeAlgorithm.ECDHE_PSK, KeyExchangeAlgorithm.RSA_PSK,
             KeyExchangeAlgorithm.DH_anon, KeyExchangeAlgorithm.ECDH_anon,
             KeyExchangeAlgorithm.DH_DSS, KeyExchangeAlgorithm.DH_RSA, KeyExchangeAlgorithm.ECDH_ECDSA, KeyExchangeAlgorithm.ECDH_RSA,
+            KeyExchangeAlgorithm.SRP_SHA, KeyExchangeAlgorithm.SRP_SHA_RSA, KeyExchangeAlgorithm.SRP_SHA_DSS,
         };
 
         private static readonly HashSet<BulkCipherAlgorithm> ImplementedCiphers = new()
@@ -349,12 +354,13 @@ namespace SharpDTLS
 
         /// <summary>
         /// Suites offered when none are configured: implemented, not weak, usable within the version range,
-        /// in preference order. PSK suites are included only when a pre-shared key is configured.
+        /// in preference order. PSK and SRP suites are included only when their credentials are configured.
         /// </summary>
-        public static List<ushort> DefaultFor(ushort minimumVersion, ushort maximumVersion, bool includePsk = false)
+        public static List<ushort> DefaultFor(ushort minimumVersion, ushort maximumVersion, bool includePsk = false, bool includeSrp = false)
             => _implemented
                 .Where(s => s.Security != CipherSuiteSecurity.Weak)
                 .Where(s => includePsk || !s.RequiresPsk)
+                .Where(s => includeSrp || !s.RequiresSrp)
                 .Where(s => !s.IsStaticKeyAgreement)
                 .Where(s => s.IsUsableWith(maximumVersion) || s.IsUsableWith(minimumVersion))
                 .Select(s => s.Id)

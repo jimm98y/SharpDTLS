@@ -37,6 +37,9 @@ namespace SharpDTLS.DTLS12
 
         /// <summary>Maps a client's PSK identity to its key (null for unknown identities); enables the PSK suites.</summary>
         public Func<byte[], byte[]> PskIdentityResolver { get; set; }
+
+        /// <summary>Maps an SRP username to its verifier (null for unknown users); enables the SRP suites.</summary>
+        public Func<byte[], SrpVerifier> SrpVerifierProvider { get; set; }
     }
 
     /// <summary>
@@ -135,7 +138,8 @@ namespace SharpDTLS.DTLS12
                 .FirstOrDefault(s => s != null && s.IsUsableWith(version)
                     && (s.ServerCertificateType == CertificateKeyType.None || (serverKey != null && Dtls12ClientConnection.KeyMatches(s.ServerCertificateType, serverKey)))
                     && (!s.IsStaticKeyAgreement || Dtls12ClientConnection.SignedWith(_settings.Certificate, s.RequiredCertificateSigner))
-                    && (!s.RequiresPsk || _settings.PskIdentityResolver != null))
+                    && (!s.RequiresPsk || _settings.PskIdentityResolver != null)
+                    && (!s.RequiresSrp || (_settings.SrpVerifierProvider != null && ch.Extension<SrpExtension>() != null)))
                 ?? throw new DtlsException(AlertDescription.HandshakeFailure, "No cipher suite in common.");
 
             _keyExchange = KeyExchanges.CreateServer(CipherSuite, new ServerKeyExchangeContext
@@ -144,6 +148,7 @@ namespace SharpDTLS.DTLS12
                 ServerPrivateKey = serverKey,
                 PskIdentityHint = _settings.PskIdentityHint,
                 PskResolver = _settings.PskIdentityResolver,
+                SrpVerifierProvider = _settings.SrpVerifierProvider,
             });
 
             // RFC 5746: secure renegotiation is signalled by the extension or the SCSV.
