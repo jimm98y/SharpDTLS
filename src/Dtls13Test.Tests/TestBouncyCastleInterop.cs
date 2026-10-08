@@ -101,7 +101,10 @@ namespace Dtls13Test.Tests
         protected override ProtocolVersion[] GetSupportedVersions() => _versions;
         protected override int[] GetSupportedCipherSuites() => _suites;
 
-        private Certificate Chain() => new Certificate(new[] { Crypto.CreateCertificate(_certificate) });
+        // TLS 1.3 certificates carry a (here empty) request context and per-entry extensions.
+        private Certificate Chain() => TlsUtilities.IsTlsV13(m_context)
+            ? new Certificate(Array.Empty<byte>(), new[] { new CertificateEntry(Crypto.CreateCertificate(_certificate), null) })
+            : new Certificate(new[] { Crypto.CreateCertificate(_certificate) });
 
         private TlsCredentialedSigner Signer(short signatureAlgorithm)
         {
@@ -129,6 +132,9 @@ namespace Dtls13Test.Tests
         // Static DH / ECDH suites authenticate with the certificate's key agreement key.
         public override TlsCredentials GetCredentials()
         {
+            // TLS 1.3 has no key exchange in the suite: the certificate key signs (the TLS 1.3 tests use EC keys).
+            if (TlsUtilities.IsTlsV13(m_context))
+                return GetECDsaSignerCredentials();
             int keyExchange = TlsUtilities.GetKeyExchangeAlgorithm(m_selectedCipherSuite);
             return keyExchange is Org.BouncyCastle.Tls.KeyExchangeAlgorithm.DH_DSS or Org.BouncyCastle.Tls.KeyExchangeAlgorithm.DH_RSA or Org.BouncyCastle.Tls.KeyExchangeAlgorithm.ECDH_ECDSA or Org.BouncyCastle.Tls.KeyExchangeAlgorithm.ECDH_RSA
                 ? new BcDefaultTlsCredentialedAgreement((BcTlsCrypto)Crypto, Chain(), _privateKey)

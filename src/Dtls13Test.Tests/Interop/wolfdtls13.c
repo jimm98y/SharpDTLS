@@ -29,6 +29,7 @@
  *                       certificate only after the handshake, when stdin says "REQCERT"; "PEER" prints "PEER:yes|no"
  *   -ca_names <pem>     server: name these CAs in the CertificateRequest; client: in the ClientHello
  *                       (certificate_authorities); prints "PEERCA:<n>", the number of CA names the peer sent
+ *   -tls                TLS 1.3 over TCP instead of DTLS 1.3 over UDP
  *   -resume             two connections: the client resumes the first one's session ticket, the server
  *                       accepts the second connection with the same context; both print "RESUMED" or
  *                       "NOT RESUMED" after the second handshake
@@ -114,7 +115,7 @@ int main(int argc, char **argv)
     int port = atoi(argv[2]);
     const char *cert = NULL, *key = NULL, *cipher = NULL, *verify = NULL, *group = NULL, *srtp = NULL, *exportLabel = NULL;
     int exportLength = 0;
-    int hrr = 0, resume = 0, pskOnly = 0, mfl = 0, ocsp = 0, rpk = 0, pha = 0, argi = 3;
+    int hrr = 0, resume = 0, pskOnly = 0, mfl = 0, ocsp = 0, rpk = 0, pha = 0, tls = 0, argi = 3;
     const char *rpkPin = NULL, *caNames = NULL;
     const char *pskHex = NULL, *host = NULL, *sni = NULL, *alpn = NULL, *cidHex = NULL;
 
@@ -143,6 +144,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[argi], "-ocsp")) ocsp = 1;
         else if (!strcmp(argv[argi], "-rpk")) rpk = 1;
         else if (!strcmp(argv[argi], "-pha")) pha = 1;
+        else if (!strcmp(argv[argi], "-tls")) tls = 1;
         else if (!strcmp(argv[argi], "-ca_names") && argi + 1 < argc) caNames = argv[++argi];
         else if (!strcmp(argv[argi], "-rpk_pin") && argi + 1 < argc) rpkPin = argv[++argi];
         else if (!strcmp(argv[argi], "-ocsp_resp") && argi + 1 < argc) ocspRespFile = argv[++argi];
@@ -151,7 +153,8 @@ int main(int argc, char **argv)
     }
 
     wolfSSL_Init();
-    WOLFSSL_CTX *ctx = wolfSSL_CTX_new(server ? wolfDTLSv1_3_server_method() : wolfDTLSv1_3_client_method());
+    WOLFSSL_CTX *ctx = wolfSSL_CTX_new(tls ? (server ? wolfTLSv1_3_server_method() : wolfTLSv1_3_client_method())
+                                           : (server ? wolfDTLSv1_3_server_method() : wolfDTLSv1_3_client_method()));
     if (!ctx) fail("CTX_new", NULL, 0);
 
     if (cert && strstr(cert, ".der")) {
@@ -202,8 +205,9 @@ int main(int argc, char **argv)
     int rounds = resume ? 2 : 1;
     int fd = -1, ret;
     WOLFSSL *ssl = NULL;
+    int listener = -1;
     for (int round = 0; round < rounds; round++) {
-    fd = socket(AF_INET, SOCK_DGRAM, 0);
+    fd = socket(AF_INET, tls ? SOCK_STREAM : SOCK_DGRAM, 0);
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
@@ -213,7 +217,19 @@ int main(int argc, char **argv)
     struct sockaddr_in peer;
     socklen_t peerLen = sizeof(peer);
 
-    if (server) {
+    if (server && tls) {
+        close(fd);
+        if (listener < 0) {
+            int one = 1;
+            listener = socket(AF_INET, SOCK_STREAM, 0);
+            setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+            if (bind(listener, (struct sockaddr *)&addr, sizeof(addr)) != 0 || listen(listener, 4) != 0) { perror("bind"); return 1; }
+            printf("ACCEPT\n");
+            fflush(stdout);
+        }
+        fd = accept(listener, (struct sockaddr *)&peer, &peerLen);
+        if (fd < 0) { perror("accept"); return 1; }
+    } else if (server) {
         int one = 1;
         setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
         if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) { perror("bind"); return 1; }
@@ -238,7 +254,7 @@ int main(int argc, char **argv)
         fail("check_domain_name", NULL, 0);
     if (!server && sni && wolfSSL_UseSNI(ssl, WOLFSSL_SNI_HOST_NAME, sni, (unsigned short)strlen(sni)) != WOLFSSL_SUCCESS)
         fail("UseSNI", NULL, 0);
-    if (cidHex) {
+    if (cidHex && !tls) {
         if (wolfSSL_dtls_cid_use(ssl) != WOLFSSL_SUCCESS)
             fail("cid_use", NULL, 0);
         if (strcmp(cidHex, "-") != 0) {
@@ -256,7 +272,7 @@ int main(int argc, char **argv)
             fail("UseALPN", NULL, 0);
     }
     /* the socket is connect()ed, so wolfSSL must use send/recv rather than sendto (EISCONN on macOS) */
-    if (wolfSSL_set_dtls_fd_connected(ssl, fd) != WOLFSSL_SUCCESS)
+    if ((tls ? wolfSSL_set_fd(ssl, fd) : wolfSSL_set_dtls_fd_connected(ssl, fd)) != WOLFSSL_SUCCESS)
         fail("set fd", NULL, 0);
 
     if (caNames) {
@@ -287,7 +303,7 @@ int main(int argc, char **argv)
     if (mfl && !server && wolfSSL_UseMaxFragment(ssl, (unsigned char)mfl) != WOLFSSL_SUCCESS)
         fail("UseMaxFragment", NULL, 0);
     /* post-quantum key shares make ClientHellos larger than one datagram */
-    if (server && wolfSSL_dtls13_allow_ch_frag(ssl, 1) != WOLFSSL_SUCCESS)
+    if (server && !tls && wolfSSL_dtls13_allow_ch_frag(ssl, 1) != WOLFSSL_SUCCESS)
         fail("allow ch frag", NULL, 0);
     if (server && hrr && wolfSSL_send_hrr_cookie(ssl, NULL, 0) != WOLFSSL_SUCCESS)
         fail("hrr cookie", NULL, 0);
@@ -305,7 +321,8 @@ int main(int argc, char **argv)
     if (ret != WOLFSSL_SUCCESS)
         fail(server ? "accept" : "connect", ssl, ret);
 
-    wolfSSL_dtls_set_using_nonblock(ssl, 1);
+    if (!tls)
+        wolfSSL_dtls_set_using_nonblock(ssl, 1);
     fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
     if (round > 0)
         printf("%s\n", wolfSSL_session_reused(ssl) ? "RESUMED" : "NOT RESUMED");
@@ -337,7 +354,7 @@ int main(int argc, char **argv)
             FD_SET(fd, &rfds);
             struct timeval wait = { 0, 100000 };
             if (select(fd + 1, &rfds, NULL, NULL, &wait) <= 0) {
-                wolfSSL_dtls_got_timeout(ssl);
+                if (!tls) wolfSSL_dtls_got_timeout(ssl);
                 if (!server && i >= 5) break; /* the ticket follows the handshake closely */
                 continue;
             }
@@ -396,7 +413,7 @@ int main(int argc, char **argv)
         int n = select(fd + 1, &fds, NULL, NULL, &tv);
         if (n < 0) break;
         if (n == 0) {
-            wolfSSL_dtls_got_timeout(ssl); /* drive retransmission of unacknowledged messages */
+            if (!tls) wolfSSL_dtls_got_timeout(ssl); /* drive retransmission of unacknowledged messages */
             continue;
         }
 
