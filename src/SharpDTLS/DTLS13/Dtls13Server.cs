@@ -71,6 +71,9 @@ namespace SharpDTLS.DTLS13
         /// </summary>
         public Func<string, ServerCredentials> CertificateSelector { get; set; }
 
+        /// <summary>Application protocols (ALPN, RFC 7301) in server preference order; null to ignore ALPN.</summary>
+        public IList<string> ApplicationProtocols { get; set; }
+
         /// <summary>Optional client certificate validation. Return false to abort with bad_certificate.</summary>
         public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ClientCertificateValidator { get; set; }
 
@@ -429,6 +432,8 @@ namespace SharpDTLS.DTLS13
                     ? (selected.KeyPair, selected.Certificate, selected.IntermediateCertificates)
                     : (_server.ServerKeyPair, _server.ServerCertificate, _server.IntermediateCertificates);
 
+                ApplicationProtocol = AlpnExtension.Select(_server.ApplicationProtocols, _clientHello.Extensions.OfType<AlpnExtension>().FirstOrDefault());
+
                 SelectPsk(record);
                 if (_psk == null && (_clientHello.PublicKey == null || _certificate == null))
                     throw new DtlsException(AlertDescription.HandshakeFailure,
@@ -534,7 +539,8 @@ namespace SharpDTLS.DTLS13
             if (!_clientHello.Extensions.OfType<EarlyDataExtension>().Any() || offered == null)
                 return false;
             if (_server.MaxEarlyDataSize == 0 || _ticketState == null || _ticketState.MaxEarlyDataSize == 0 || _pskIdentity != 0
-                || _helloRetried || _ticketState.CipherSuite != Session.CipherSuite.Id)
+                || _helloRetried || _ticketState.CipherSuite != Session.CipherSuite.Id
+                || _ticketState.ApplicationProtocol != ApplicationProtocol)
                 return false;
 
             uint clientAge = unchecked(offered.Identities[0].ObfuscatedAge - _ticketState.AgeAdd);
@@ -628,6 +634,8 @@ namespace SharpDTLS.DTLS13
             // Acknowledge a server_name that chose the certificate (RFC 6066 §3).
             if (_serverNameUsed && _psk == null)
                 extensions.Extensions.Add(new ServerNameExtension());
+            if (ApplicationProtocol != null)
+                extensions.Extensions.Add(new AlpnExtension(new[] { ApplicationProtocol }));
 
             return extensions;
         }
@@ -774,6 +782,7 @@ namespace SharpDTLS.DTLS13
             {
                 MaxEarlyDataSize = _server.MaxEarlyDataSize,
                 ServerName = ServerName,
+                ApplicationProtocol = ApplicationProtocol,
                 CipherSuite = suite.Id,
                 Psk = Dtls13CryptoUtils.CalculateResumptionPsk(Session.ResumptionMasterSecret, nonce, suite),
                 AgeAdd = ageAdd,

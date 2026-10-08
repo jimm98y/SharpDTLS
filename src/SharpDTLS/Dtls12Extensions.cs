@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 
 namespace SharpDTLS
@@ -210,6 +211,89 @@ namespace SharpDTLS
             destination[offset + 3] = (byte)body.Length;
             body.CopyTo(destination, offset + 4);
             return 4 + body.Length;
+        }
+    }
+
+    /// <summary>
+    /// application_layer_protocol_negotiation (RFC 7301): the client's protocols in preference order, or the one the
+    /// server selected.
+    /// </summary>
+    public class AlpnExtension : ITlsExtension
+    {
+        public const ushort Type = 0x0010;
+
+        public AlpnExtension() { }
+
+        public AlpnExtension(IEnumerable<string> protocols)
+        {
+            Protocols = protocols.ToList();
+            if (Protocols.Count == 0 || Protocols.Any(p => string.IsNullOrEmpty(p) || System.Text.Encoding.UTF8.GetByteCount(p) > 255))
+                throw new ArgumentException("ALPN protocol names must be 1 to 255 bytes.", nameof(protocols));
+        }
+
+        public List<string> Protocols { get; private set; } = new();
+
+        private byte[] Body()
+        {
+            var list = new TlsWriter();
+            foreach (string protocol in Protocols)
+                list.WriteOpaque8(System.Text.Encoding.UTF8.GetBytes(protocol));
+            return new TlsWriter().WriteOpaque16(list.ToArray()).ToArray();
+        }
+
+        public int CalculateLength() => 4 + Body().Length;
+
+        public int Read(int offset, byte[] source)
+        {
+            int length = (source[offset + 2] << 8) | source[offset + 3];
+            if (source.Length < offset + 4 + length)
+                throw new DtlsException(AlertDescription.DecodeError, "Invalid ALPN extension.");
+            var outer = new TlsReader(source.AsSpan(offset + 4, length).ToArray());
+            var list = new TlsReader(outer.ReadOpaque16());
+            outer.EnsureEnd();
+            while (list.Remaining > 0)
+            {
+                byte[] name = list.ReadOpaque8();
+                if (name.Length == 0)
+                    throw new DtlsException(AlertDescription.DecodeError, "Empty ALPN protocol name.");
+                Protocols.Add(System.Text.Encoding.UTF8.GetString(name));
+            }
+            if (Protocols.Count == 0)
+                throw new DtlsException(AlertDescription.DecodeError, "Empty ALPN protocol list.");
+            return 4 + length;
+        }
+
+        public int Write(int offset, byte[] destination)
+        {
+            byte[] body = Body();
+            destination[offset] = 0x00;
+            destination[offset + 1] = 0x10;
+            destination[offset + 2] = (byte)(body.Length >> 8);
+            destination[offset + 3] = (byte)body.Length;
+            body.CopyTo(destination, offset + 4);
+            return 4 + body.Length;
+        }
+
+        /// <summary>
+        /// The server's choice (RFC 7301 §3.2): its first protocol the client offers. Null when either side has no
+        /// list; no common protocol aborts with no_application_protocol.
+        /// </summary>
+        public static string Select(IList<string> serverPreference, AlpnExtension offered)
+        {
+            if (offered == null || serverPreference == null || serverPreference.Count == 0)
+                return null;
+            return serverPreference.FirstOrDefault(offered.Protocols.Contains)
+                ?? throw new DtlsException(AlertDescription.NoApplicationProtocol, "No application protocol in common.");
+        }
+
+        /// <summary>Checks the server's reply: exactly one protocol, one we offered (RFC 7301 §3.1).</summary>
+        public static string Accept(IList<string> offered, AlpnExtension reply)
+        {
+            if (reply == null)
+                return null;
+            if (offered == null || reply.Protocols.Count != 1 || !offered.Contains(reply.Protocols[0]))
+                throw new DtlsException(AlertDescription.IllegalParameter, "Server selected an application protocol that was not offered.");
+            return reply.Protocols[0];
         }
     }
 

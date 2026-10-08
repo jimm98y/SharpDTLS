@@ -10,9 +10,10 @@ namespace SharpDTLS.DTLS13
     public sealed class Dtls13SessionTicket
     {
         internal Dtls13SessionTicket(byte[] ticket, uint lifetimeSeconds, uint ageAdd, ushort cipherSuite, byte[] psk, byte[] serverCertificate,
-            uint maxEarlyDataSize = 0, string serverName = null)
+            uint maxEarlyDataSize = 0, string serverName = null, string applicationProtocol = null)
         {
             MaxEarlyDataSize = maxEarlyDataSize;
+            ApplicationProtocol = applicationProtocol;
             ServerName = serverName;
             Ticket = ticket;
             LifetimeSeconds = lifetimeSeconds;
@@ -38,6 +39,9 @@ namespace SharpDTLS.DTLS13
 
         /// <summary>The server_name of the connection that issued the ticket; it is offered only for the same name.</summary>
         public string ServerName { get; }
+
+        /// <summary>The ALPN protocol of the issuing connection; 0-RTT data must use the same one (RFC 8446 §4.2.10).</summary>
+        public string ApplicationProtocol { get; }
 
         /// <summary>How much 0-RTT data the server accepts with this ticket (0: none).</summary>
         public uint MaxEarlyDataSize { get; }
@@ -90,6 +94,7 @@ namespace SharpDTLS.DTLS13
         public byte[] ClientCertificate { get; init; }
         public uint MaxEarlyDataSize { get; init; }
         public string ServerName { get; init; }
+        public string ApplicationProtocol { get; init; }
 
         public byte[] Seal(SessionTicketKeys keys)
             => keys.Seal(new TlsWriter()
@@ -101,6 +106,7 @@ namespace SharpDTLS.DTLS13
                 .WriteOpaque8(Psk)
                 .WriteOpaque24(ClientCertificate ?? Array.Empty<byte>())
                 .WriteOpaque16(System.Text.Encoding.ASCII.GetBytes(ServerName ?? ""))
+                .WriteOpaque8(System.Text.Encoding.UTF8.GetBytes(ApplicationProtocol ?? ""))
                 .ToArray());
 
         /// <summary>The state in a ticket, or null when it is unknown, forged, from DTLS 1.0/1.2 or expired.</summary>
@@ -120,6 +126,7 @@ namespace SharpDTLS.DTLS13
                 byte[] psk = r.ReadOpaque8();
                 byte[] certificate = r.ReadOpaque24();
                 string serverName = System.Text.Encoding.ASCII.GetString(r.ReadOpaque16());
+                string applicationProtocol = System.Text.Encoding.UTF8.GetString(r.ReadOpaque8());
                 r.EnsureEnd();
                 if (DateTime.UtcNow - issuedUtc >= keys.Lifetime || !Dtls13CipherSuite.IsSupported(cipherSuite))
                     return null;
@@ -127,6 +134,7 @@ namespace SharpDTLS.DTLS13
                 {
                     CipherSuite = cipherSuite, AgeAdd = ageAdd, IssuedUtc = issuedUtc, Psk = psk, MaxEarlyDataSize = maxEarlyDataSize,
                     ServerName = serverName.Length == 0 ? null : serverName,
+                    ApplicationProtocol = applicationProtocol.Length == 0 ? null : applicationProtocol,
                     ClientCertificate = certificate.Length == 0 ? null : certificate,
                 };
             }

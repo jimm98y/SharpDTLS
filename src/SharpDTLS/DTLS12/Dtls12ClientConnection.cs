@@ -130,6 +130,9 @@ namespace SharpDTLS.DTLS12
         /// </summary>
         public string ServerName { get; set; }
 
+        /// <summary>Application protocols to offer with ALPN (RFC 7301), in preference order; null to not offer any.</summary>
+        public IList<string> ApplicationProtocols { get; set; }
+
         /// <summary>Advertise RFC 5077 session tickets (and present the ticket of <see cref="ResumptionSession"/>).</summary>
         public bool UseSessionTickets { get; set; } = true;
 
@@ -213,6 +216,8 @@ namespace SharpDTLS.DTLS12
                 ch.Extensions.Add(new UseSrtpExtension(SrtpProtectionProfiles));
             if (ServerName != null)
                 ch.Extensions.Add(new ServerNameExtension(ServerName));
+            if (ApplicationProtocols is { Count: > 0 })
+                ch.Extensions.Add(new AlpnExtension(ApplicationProtocols));
             if (UseSessionTickets)
                 ch.Extensions.Add(new SessionTicketExtension(presentTicket && _offeredSession != null ? _offeredSession.Ticket : null));
             if (offeredSuites.Any(s => s.RequiresSrp))
@@ -339,6 +344,7 @@ namespace SharpDTLS.DTLS12
 
             if (sh.Extension<ServerNameExtension>() != null && ServerName == null)
                 throw new DtlsException(AlertDescription.UnsupportedExtension, "Unsolicited server_name extension.");
+            ApplicationProtocol = AlpnExtension.Accept(ApplicationProtocols, sh.Extension<AlpnExtension>());
 
             // An empty SessionTicket extension announces a NewSessionTicket before the server's ChangeCipherSpec.
             _ticketExpected = sh.Extension<SessionTicketExtension>() != null;

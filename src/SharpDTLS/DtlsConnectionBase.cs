@@ -48,6 +48,9 @@ namespace SharpDTLS
         /// <summary>The SRTP protection profile negotiated via use_srtp (RFC 5764), or null.</summary>
         public ushort? SelectedSrtpProtectionProfile { get; protected set; }
 
+        /// <summary>The application protocol negotiated with ALPN (RFC 7301), or null.</summary>
+        public string ApplicationProtocol { get; protected set; }
+
         public event EventHandler<byte[]> ApplicationDataReceived;
         public event EventHandler<AlertDescription> AlertReceived;
         public event EventHandler<Exception> Failed;

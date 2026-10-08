@@ -62,6 +62,9 @@ namespace SharpDTLS.DTLS12
         /// </summary>
         public Func<string, ServerCredentials> CertificateSelector { get; set; }
 
+        /// <summary>Application protocols (ALPN, RFC 7301) in server preference order; null to ignore ALPN.</summary>
+        public IList<string> ApplicationProtocols { get; set; }
+
         /// <summary>Keys for RFC 5077 session tickets (random per server by default); null disables tickets.</summary>
         public SessionTicketKeys TicketKeys { get; set; } = new SessionTicketKeys();
     }
@@ -187,6 +190,9 @@ namespace SharpDTLS.DTLS12
                 ? (selected.KeyPair, selected.Certificate, selected.IntermediateCertificates)
                 : (_settings.KeyPair, _settings.Certificate, _settings.IntermediateCertificates);
 
+            // ALPN is negotiated per connection, also when resuming (RFC 7301 §3.1).
+            ApplicationProtocol = AlpnExtension.Select(_settings.ApplicationProtocols, ch.Extension<AlpnExtension>());
+
             if (TryResume(ch, version))
                 return;
 
@@ -300,6 +306,8 @@ namespace SharpDTLS.DTLS12
             // Acknowledge a server_name we acted on, except when resuming (RFC 6066 §3).
             if (_serverNameUsed && !IsResumed)
                 sh.Extensions.Add(new ServerNameExtension());
+            if (ApplicationProtocol != null)
+                sh.Extensions.Add(new AlpnExtension(new[] { ApplicationProtocol }));
             SendHandshake(HandshakeType.ServerHello, sh.Encode());
 
             if (IsResumed)

@@ -48,6 +48,9 @@ namespace SharpDTLS.DTLS13
         /// </summary>
         public string ServerName { get; set; }
 
+        /// <summary>Application protocols to offer with ALPN (RFC 7301), in preference order; null to not offer any.</summary>
+        public IList<string> ApplicationProtocols { get; set; }
+
         /// <summary>A ticket from an earlier connection to resume with (PSK resumption, RFC 8446 §2.2).</summary>
         public Dtls13SessionTicket ResumptionTicket { get; set; }
 
@@ -156,6 +159,8 @@ namespace SharpDTLS.DTLS13
 
             if (ServerName != null)
                 clientHello.Extensions.Add(new ServerNameExtension(ServerName));
+            if (ApplicationProtocols is { Count: > 0 })
+                clientHello.Extensions.Add(new AlpnExtension(ApplicationProtocols));
             if (SrtpProtectionProfiles != null && SrtpProtectionProfiles.Length > 0)
                 clientHello.Extensions.Add(new UseSrtpExtension(SrtpProtectionProfiles));
             if (cookie != null)
@@ -207,7 +212,8 @@ namespace SharpDTLS.DTLS13
             // (the server must select it), and never after a HelloRetryRequest (RFC 8446 §4.2.10).
             var first = _offeredPsks[0];
             _earlyDataOffered = EarlyData != null && first.Ticket != null && !_receivedHelloRetryRequest
-                                && first.Ticket.MaxEarlyDataSize >= EarlyData.Length && CipherSuites.Contains(first.Ticket.CipherSuite);
+                                && first.Ticket.MaxEarlyDataSize >= EarlyData.Length && CipherSuites.Contains(first.Ticket.CipherSuite)
+                                && (first.Ticket.ApplicationProtocol == null || (ApplicationProtocols?.Contains(first.Ticket.ApplicationProtocol) ?? false));
             if (_earlyDataOffered)
                 clientHello.Extensions.Add(new EarlyDataExtension());
 
@@ -383,6 +389,9 @@ namespace SharpDTLS.DTLS13
 
                     if (encryptedExtensions.Extensions.OfType<ServerNameExtension>().Any() && ServerName == null)
                         throw new DtlsException(AlertDescription.UnsupportedExtension, "Unsolicited server_name extension.");
+                    ApplicationProtocol = AlpnExtension.Accept(ApplicationProtocols, encryptedExtensions.Extensions.OfType<AlpnExtension>().FirstOrDefault());
+                    if (EarlyDataAccepted && ApplicationProtocol != _offeredPsks[0].Ticket.ApplicationProtocol)
+                        throw new DtlsException(AlertDescription.IllegalParameter, "Early data accepted with another application protocol.");
 
                     var srtp = encryptedExtensions.Extensions.OfType<UseSrtpExtension>().FirstOrDefault();
                     if (srtp != null)
@@ -504,7 +513,7 @@ namespace SharpDTLS.DTLS13
             var suite = Session.CipherSuite;
             byte[] psk = Dtls13CryptoUtils.CalculateResumptionPsk(Session.ResumptionMasterSecret, nst.TicketNonce ?? Array.Empty<byte>(), suite);
             SessionTicket = new Dtls13SessionTicket(nst.Ticket, Math.Min(nst.TicketLifetime, 604800u), nst.TicketAgeAdd, suite.Id, psk,
-                Session.PeerCertificate, nst.MaxEarlyDataSize, ServerName);
+                Session.PeerCertificate, nst.MaxEarlyDataSize, ServerName, ApplicationProtocol);
         }
 
         private void SendClientCertificate()

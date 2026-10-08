@@ -110,6 +110,7 @@ namespace SharpDTLS.DTLS13.Messages
                 ITlsExtension matching = extType switch
                 {
                     ServerNameExtension.Type => new ServerNameExtension(),
+                    AlpnExtension.Type => new AlpnExtension(),
                     0x0033 => new ClientKeyShareExtension(),
                     0x002b => new ClientSupportedVersions(),
                     0x000d => new ClientSignatureAlgorithms(),
