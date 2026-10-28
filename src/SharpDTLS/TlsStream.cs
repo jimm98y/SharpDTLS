@@ -100,12 +100,17 @@ namespace SharpDTLS
         public override long Length => throw new NotSupportedException();
         public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
 
-        public override int Read(byte[] buffer, int offset, int count) => ReadAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+        public override int Read(byte[] buffer, int offset, int count) => ReadCoreAsync(buffer.AsMemory(offset, count), default).GetAwaiter().GetResult();
 
         public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
-            => ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+            => ReadCoreAsync(buffer.AsMemory(offset, count), cancellationToken);
 
-        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+#if !NETSTANDARD2_0
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+            => new ValueTask<int>(ReadCoreAsync(buffer, cancellationToken));
+#endif
+
+        private async Task<int> ReadCoreAsync(Memory<byte> buffer, CancellationToken cancellationToken)
         {
             if (buffer.Length == 0)
                 return 0;
@@ -139,9 +144,19 @@ namespace SharpDTLS
             }
         }
 
-        public override void Write(byte[] buffer, int offset, int count) => Write(buffer.AsSpan(offset, count));
+        public override void Write(byte[] buffer, int offset, int count) => WriteCore(buffer.AsSpan(offset, count));
 
-        public override void Write(ReadOnlySpan<byte> buffer)
+#if !NETSTANDARD2_0
+        public override void Write(ReadOnlySpan<byte> buffer) => WriteCore(buffer);
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            WriteCore(buffer.Span);
+            return ValueTask.CompletedTask;
+        }
+#endif
+
+        private void WriteCore(ReadOnlySpan<byte> buffer)
         {
             try
             {
@@ -163,12 +178,6 @@ namespace SharpDTLS
         {
             Write(buffer, offset, count);
             return Task.CompletedTask;
-        }
-
-        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
-        {
-            Write(buffer.Span);
-            return ValueTask.CompletedTask;
         }
 
         public override void Flush() { }

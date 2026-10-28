@@ -30,7 +30,7 @@ namespace SharpDTLS
             {
                 _trustedRoots = new X509Certificate2Collection();
                 foreach (var root in trustedRoots)
-                    _trustedRoots.Add(X509CertificateLoader.LoadCertificate(root.GetEncoded()));
+                    _trustedRoots.Add(Load(root.GetEncoded()));
             }
         }
 
@@ -42,6 +42,13 @@ namespace SharpDTLS
 
         /// <summary>The time the chain must be valid at; null for now.</summary>
         public DateTime? VerificationTime { get; set; }
+
+        /// <summary>
+        /// Replaces the built-in host name check (RFC 6125: subject alternative names, wildcards, optionally the Common
+        /// Name): gets the server certificate and the expected host name, and returns whether they match. The chain is
+        /// validated as usual either way.
+        /// </summary>
+        public Func<BcX509Certificate, string, bool> HostNameValidator { get; set; }
 
         /// <summary>
         /// A server certificate validator: the chain must lead to a trusted root, allow serverAuth and match
@@ -67,26 +74,63 @@ namespace SharpDTLS
             using var x509Chain = new X509Chain();
             var policy = x509Chain.ChainPolicy;
             policy.RevocationMode = RevocationMode;
+#if !NETSTANDARD2_0
             policy.DisableCertificateDownloads = true;
+#endif
             policy.VerificationTime = VerificationTime ?? DateTime.Now;
             policy.ApplicationPolicy.Add(new Oid(usage));
             foreach (byte[] intermediate in chain.Skip(1))
                 policy.ExtraStore.Add(Load(intermediate));
             if (_trustedRoots != null)
             {
+#if NETSTANDARD2_0
+                // No custom root trust here: build with the roots as extra certificates, then require one of them at the top.
+                policy.ExtraStore.AddRange(_trustedRoots);
+                policy.VerificationFlags |= X509VerificationFlags.AllowUnknownCertificateAuthority;
+#else
                 policy.TrustMode = X509ChainTrustMode.CustomRootTrust;
                 policy.CustomTrustStore.AddRange(_trustedRoots);
+#endif
             }
 
-            if (!x509Chain.Build(leaf))
+            if (!BuildChain(x509Chain, leaf, out var problems))
             {
-                var problems = x509Chain.ChainStatus.Select(s => s.Status).Aggregate(X509ChainStatusFlags.NoError, (a, b) => a | b);
                 string detail = string.Join("; ", x509Chain.ChainStatus.Select(s => s.StatusInformation.Trim()).Where(s => s.Length > 0).Distinct());
                 throw new DtlsException(Alert(problems), $"Certificate chain is not valid: {problems}. {detail}");
             }
 
-            if (hostName != null && !leaf.MatchesHostname(hostName, allowWildcards: true, allowCommonName: AllowCommonNameFallback))
+            if (hostName != null && !MatchesHostName(leaf, chain[0], hostName))
                 throw new DtlsException(AlertDescription.BadCertificate, $"Certificate does not match {hostName}.");
+        }
+
+        private bool BuildChain(X509Chain x509Chain, X509Certificate2 leaf, out X509ChainStatusFlags problems)
+        {
+            bool built = x509Chain.Build(leaf);
+            problems = x509Chain.ChainStatus.Select(s => s.Status).Aggregate(X509ChainStatusFlags.NoError, (a, b) => a | b);
+#if NETSTANDARD2_0
+            if (_trustedRoots != null)
+            {
+                // Allowed unknown authority: the chain must still end at one of our roots, and nothing else may be wrong.
+                var top = x509Chain.ChainElements[x509Chain.ChainElements.Count - 1].Certificate;
+                bool trusted = _trustedRoots.Cast<X509Certificate2>().Any(r => r.RawData.AsSpan().SequenceEqual(top.RawData));
+                problems &= ~X509ChainStatusFlags.UntrustedRoot;
+                if (!trusted)
+                    problems |= X509ChainStatusFlags.UntrustedRoot;
+                return problems == X509ChainStatusFlags.NoError;
+            }
+#endif
+            return built;
+        }
+
+        private bool MatchesHostName(X509Certificate2 leaf, byte[] der, string hostName)
+        {
+            if (HostNameValidator != null)
+                return HostNameValidator(new BcX509Certificate(der), hostName);
+#if NETSTANDARD2_0
+            return HostNameMatcher.Matches(der, hostName, AllowCommonNameFallback);
+#else
+            return leaf.MatchesHostname(hostName, allowWildcards: true, allowCommonName: AllowCommonNameFallback);
+#endif
         }
 
         private static AlertDescription Alert(X509ChainStatusFlags problems)
@@ -106,7 +150,11 @@ namespace SharpDTLS
         {
             try
             {
+#if NET9_0_OR_GREATER
                 return X509CertificateLoader.LoadCertificate(der);
+#else
+                return new X509Certificate2(der);
+#endif
             }
             catch (CryptographicException ex)
             {

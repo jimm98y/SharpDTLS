@@ -28,13 +28,16 @@ namespace SharpDTLS.Protocol12
 
         /// <summary>The negotiated (EC)DH group, or 0.</summary>
         ushort Group { get; }
+    }
 
-        /// <summary>
-        /// Fixed (EC)DH client authentication (RFC 5246 §7.4.7.2, RFC 8422 §3): the ClientKeyExchange was
-        /// empty and the client's certificate key is its key agreement key.
-        /// </summary>
-        byte[] ProcessFixedClientKeyExchange(AsymmetricKeyParameter clientPublicKey)
-            => throw new DtlsException(AlertDescription.UnexpectedMessage, "Fixed (EC)DH client authentication needs a static (EC)DH suite.");
+    /// <summary>
+    /// A static (EC)DH server key exchange, which also accepts fixed (EC)DH client authentication
+    /// (RFC 5246 §7.4.7.2, RFC 8422 §3).
+    /// </summary>
+    internal interface IFixedDhServerKeyExchange : IServerKeyExchange
+    {
+        /// <summary>The ClientKeyExchange was empty and the client's certificate key is its key agreement key.</summary>
+        byte[] ProcessFixedClientKeyExchange(AsymmetricKeyParameter clientPublicKey);
     }
 
     internal enum ServerKeyExchangeRequirement
@@ -58,46 +61,49 @@ namespace SharpDTLS.Protocol12
         byte[] CreateClientKeyExchange(out byte[] preMasterSecret);
 
         ushort Group { get; }
+    }
 
+    /// <summary>A static (EC)DH client key exchange, which can also authenticate with fixed (EC)DH.</summary>
+    internal interface IFixedDhClientKeyExchange : IClientKeyExchange
+    {
         /// <summary>Whether <paramref name="clientKey"/> can be used for fixed (EC)DH client authentication.</summary>
-        bool SupportsFixedClientKey(AsymmetricKeyParameter clientKey) => false;
+        bool SupportsFixedClientKey(AsymmetricKeyParameter clientKey);
 
         /// <summary>Fixed (EC)DH: the premaster secret from the client's static key; the ClientKeyExchange is empty.</summary>
-        byte[] CreateFixedClientKeyExchange(AsymmetricKeyParameter clientPrivateKey, out byte[] preMasterSecret)
-            => throw new DtlsException(AlertDescription.InternalError, "Fixed (EC)DH client authentication needs a static (EC)DH suite.");
+        byte[] CreateFixedClientKeyExchange(AsymmetricKeyParameter clientPrivateKey, out byte[] preMasterSecret);
     }
 
     internal sealed class ServerKeyExchangeContext
     {
-        public ClientHelloMessage ClientHello { get; init; }
-        public AsymmetricKeyParameter ServerPrivateKey { get; init; }
-        public byte[] PskIdentityHint { get; init; }
-        public Func<byte[], byte[]> PskResolver { get; init; }
-        public Func<byte[], SrpVerifier> SrpVerifierProvider { get; init; }
-        public Func<string, PwdCredential> PwdCredentialProvider { get; init; }
-        public ECPrivateKeyParameters PwdProtectionKey { get; init; }
+        public ClientHelloMessage ClientHello { get; set; }
+        public AsymmetricKeyParameter ServerPrivateKey { get; set; }
+        public byte[] PskIdentityHint { get; set; }
+        public Func<byte[], byte[]> PskResolver { get; set; }
+        public Func<byte[], SrpVerifier> SrpVerifierProvider { get; set; }
+        public Func<string, PwdCredential> PwdCredentialProvider { get; set; }
+        public ECPrivateKeyParameters PwdProtectionKey { get; set; }
 
         /// <summary>ClientHello.random | ServerHello.random, once both are known (TLS-PWD hunting and pecking).</summary>
-        public Func<byte[]> PwdContext { get; init; }
+        public Func<byte[]> PwdContext { get; set; }
     }
 
     internal sealed class ClientKeyExchangeContext
     {
-        public ushort ClientHelloVersion { get; init; }
-        public AsymmetricKeyParameter ServerPublicKey { get; init; }
-        public int MinimumDhPrimeBits { get; init; }
+        public ushort ClientHelloVersion { get; set; }
+        public AsymmetricKeyParameter ServerPublicKey { get; set; }
+        public int MinimumDhPrimeBits { get; set; }
 
         /// <summary>Maps the server's identity hint (possibly empty) to the PSK identity and key.</summary>
-        public Func<byte[], (byte[] Identity, byte[] Key)> PskProvider { get; init; }
+        public Func<byte[], (byte[] Identity, byte[] Key)> PskProvider { get; set; }
 
-        public byte[] SrpIdentity { get; init; }
-        public byte[] SrpPassword { get; init; }
+        public byte[] SrpIdentity { get; set; }
+        public byte[] SrpPassword { get; set; }
 
-        public string PwdUsername { get; init; }
-        public string PwdPassword { get; init; }
+        public string PwdUsername { get; set; }
+        public string PwdPassword { get; set; }
 
         /// <summary>ClientHello.random | ServerHello.random (TLS-PWD hunting and pecking).</summary>
-        public Func<byte[]> PwdContext { get; init; }
+        public Func<byte[]> PwdContext { get; set; }
     }
 
     internal static class KeyExchanges
@@ -543,7 +549,7 @@ namespace SharpDTLS.Protocol12
     // ── Static (EC)DH: the server's key agreement key is in its certificate ─────────────────
 
     /// <summary>DH_DSS / DH_RSA server: Z = Yc^x mod p with the certificate's DH key (RFC 5246 §8.1.2).</summary>
-    internal sealed class StaticDhServerKeyExchange : IServerKeyExchange
+    internal sealed class StaticDhServerKeyExchange : IFixedDhServerKeyExchange
     {
         private readonly DHPrivateKeyParameters _key;
 
@@ -573,7 +579,7 @@ namespace SharpDTLS.Protocol12
         }
     }
 
-    internal sealed class StaticDhClientKeyExchange : IClientKeyExchange
+    internal sealed class StaticDhClientKeyExchange : IFixedDhClientKeyExchange
     {
         private readonly DHPublicKeyParameters _serverKey;
 
@@ -640,7 +646,7 @@ namespace SharpDTLS.Protocol12
     }
 
     /// <summary>ECDH_ECDSA / ECDH_RSA server: the certificate's EC key is the server's ECDH key (RFC 8422 §2.1).</summary>
-    internal sealed class StaticEcdhServerKeyExchange : IServerKeyExchange
+    internal sealed class StaticEcdhServerKeyExchange : IFixedDhServerKeyExchange
     {
         private readonly ECPrivateKeyParameters _key;
 
@@ -670,7 +676,7 @@ namespace SharpDTLS.Protocol12
         }
     }
 
-    internal sealed class StaticEcdhClientKeyExchange : IClientKeyExchange
+    internal sealed class StaticEcdhClientKeyExchange : IFixedDhClientKeyExchange
     {
         private readonly ECPublicKeyParameters _serverKey;
 

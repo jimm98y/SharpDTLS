@@ -32,8 +32,8 @@ namespace Dtls13Test.Tests
             public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
             public override void Flush() => inner.Flush();
             public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, Math.Min(count, chunk));
-            public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
-                => inner.ReadAsync(buffer.Slice(0, Math.Min(buffer.Length, chunk)), cancellationToken);
+            public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+                => inner.ReadAsync(buffer, offset, Math.Min(count, chunk), cancellationToken);
             public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
             public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
             public override void SetLength(long value) => throw new NotSupportedException();

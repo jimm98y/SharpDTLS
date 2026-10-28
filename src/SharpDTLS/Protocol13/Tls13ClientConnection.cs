@@ -44,8 +44,14 @@ namespace SharpDTLS.Protocol13
         private bool _earlyDataOffered;
 
         /// <summary>A PSK offered in pre_shared_key: a resumption ticket or the external PSK.</summary>
-        private sealed record OfferedPsk(byte[] Identity, uint ObfuscatedAge, byte[] Key, Dtls13CipherSuite HashSuite,
-            Dtls13SessionTicket Ticket);
+        private sealed class OfferedPsk(byte[] identity, uint obfuscatedAge, byte[] key, Dtls13CipherSuite hashSuite, Dtls13SessionTicket ticket)
+        {
+            public byte[] Identity { get; } = identity;
+            public uint ObfuscatedAge { get; } = obfuscatedAge;
+            public byte[] Key { get; } = key;
+            public Dtls13CipherSuite HashSuite { get; } = hashSuite;
+            public Dtls13SessionTicket Ticket { get; } = ticket;
+        }
 
         public event EventHandler<EventArgs> HandshakeFinished;
 
@@ -964,6 +970,13 @@ namespace SharpDTLS.Protocol13
     /// last sent (12-byte header), the records to process (the ServerHello first), and where the epoch-0 record and
     /// message sequence numbers stand.
     /// </summary>
-    internal sealed record LegacyDatagramHandoff(byte[] ClientHello, IReadOnlyList<byte[]> Records, int NextRecordSequence,
-        int NextSendMessageSeq, int ServerHelloMessageSeq);
+    internal sealed class LegacyDatagramHandoff(byte[] clientHello, IReadOnlyList<byte[]> records, int nextRecordSequence,
+        int nextSendMessageSeq, int serverHelloMessageSeq)
+    {
+        public byte[] ClientHello { get; } = clientHello;
+        public IReadOnlyList<byte[]> Records { get; } = records;
+        public int NextRecordSequence { get; } = nextRecordSequence;
+        public int NextSendMessageSeq { get; } = nextSendMessageSeq;
+        public int ServerHelloMessageSeq { get; } = serverHelloMessageSeq;
+    }
 }

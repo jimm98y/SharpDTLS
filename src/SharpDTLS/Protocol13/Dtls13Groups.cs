@@ -69,9 +69,9 @@ namespace SharpDTLS.Protocol13
         /// <summary>The client's private half of a key share.</summary>
         internal sealed class ClientKeyShare
         {
-            public ushort Group { get; init; }
-            public byte[] Share { get; init; }
-            internal Func<byte[], byte[]> Complete { get; init; }
+            public ushort Group { get; set; }
+            public byte[] Share { get; set; }
+            internal Func<byte[], byte[]> Complete { get; set; }
         }
 
         /// <summary>Generates the client's key share for <paramref name="group"/>.</summary>
@@ -112,7 +112,7 @@ namespace SharpDTLS.Protocol13
                         Complete = serverShare =>
                         {
                             Expect(serverShare, 1088 + 32);
-                            return Concat(decapsulate(serverShare[..1088]), agree(serverShare[1088..]));
+                            return Concat(decapsulate(serverShare.AsSpan(0, 1088).ToArray()), agree(serverShare.AsSpan(1088).ToArray()));
                         },
                     };
                 }
@@ -135,7 +135,7 @@ namespace SharpDTLS.Protocol13
                         Complete = serverShare =>
                         {
                             Expect(serverShare, pointLength + ciphertextLength);
-                            return Concat(agree(serverShare[..pointLength]), decapsulate(serverShare[pointLength..]));
+                            return Concat(agree(serverShare.AsSpan(0, pointLength).ToArray()), decapsulate(serverShare.AsSpan(pointLength).ToArray()));
                         },
                     };
                 }
@@ -157,8 +157,8 @@ namespace SharpDTLS.Protocol13
                 case X25519MlKem768:
                 {
                     Expect(clientShare, 1184 + 32);
-                    var (ciphertext, kemSecret) = Encapsulate(Org.BouncyCastle.Crypto.Parameters.MLKemParameters.ml_kem_768, clientShare[..1184]);
-                    var (ecdh, ecdhSecret) = RespondClassical(X25519, clientShare[1184..]);
+                    var (ciphertext, kemSecret) = Encapsulate(Org.BouncyCastle.Crypto.Parameters.MLKemParameters.ml_kem_768, clientShare.AsSpan(0, 1184).ToArray());
+                    var (ecdh, ecdhSecret) = RespondClassical(X25519, clientShare.AsSpan(1184).ToArray());
                     return (Concat(ciphertext, ecdh), Concat(kemSecret, ecdhSecret));
                 }
                 case SecP256r1MlKem768:
@@ -171,8 +171,8 @@ namespace SharpDTLS.Protocol13
                     int pointLength = group == SecP256r1MlKem768 ? 65 : 97;
                     int keyLength = group == SecP256r1MlKem768 ? 1184 : 1568;
                     Expect(clientShare, pointLength + keyLength);
-                    var (ecdh, ecdhSecret) = RespondClassical(curve, clientShare[..pointLength]);
-                    var (ciphertext, kemSecret) = Encapsulate(parameters, clientShare[pointLength..]);
+                    var (ecdh, ecdhSecret) = RespondClassical(curve, clientShare.AsSpan(0, pointLength).ToArray());
+                    var (ciphertext, kemSecret) = Encapsulate(parameters, clientShare.AsSpan(pointLength).ToArray());
                     return (Concat(ecdh, ciphertext), Concat(ecdhSecret, kemSecret));
                 }
                 default:
@@ -312,7 +312,7 @@ namespace SharpDTLS.Protocol13
                 decapsulator.Init(pair.Private);
                 Expect(ciphertext, decapsulator.EncapsulationLength);
                 byte[] secret = new byte[decapsulator.SecretLength];
-                decapsulator.Decapsulate(ciphertext, secret);
+                decapsulator.Decapsulate(ciphertext, 0, ciphertext.Length, secret, 0, secret.Length);
                 return secret;
             });
         }
@@ -332,7 +332,7 @@ namespace SharpDTLS.Protocol13
             encapsulator.Init(new ParametersWithRandom(publicKey, new SecureRandom()));
             byte[] ciphertext = new byte[encapsulator.EncapsulationLength];
             byte[] secret = new byte[encapsulator.SecretLength];
-            encapsulator.Encapsulate(ciphertext, secret);
+            encapsulator.Encapsulate(ciphertext, 0, ciphertext.Length, secret, 0, secret.Length);
             return (ciphertext, secret);
         }
 

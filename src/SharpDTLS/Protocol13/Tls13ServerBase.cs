@@ -150,10 +150,10 @@ namespace SharpDTLS.Protocol13
         /// </summary>
         internal sealed class ClientHelloDecision
         {
-            public HelloRetryRequest HelloRetryRequest { get; init; }
-            public ushort SuiteId { get; init; }
-            public ushort ShareGroup { get; init; }
-            public HelloRetryState Retry { get; init; }
+            public HelloRetryRequest HelloRetryRequest { get; set; }
+            public ushort SuiteId { get; set; }
+            public ushort ShareGroup { get; set; }
+            public HelloRetryState Retry { get; set; }
         }
 
         internal ClientHelloDecision DecideClientHello(ClientHelloDatagram clientHello, byte[] record, System.Net.EndPoint endpoint, bool alwaysRetry)

@@ -565,9 +565,9 @@ namespace SharpDTLS.Protocol12
 
                     // An empty ClientKeyExchange with a key agreement certificate is fixed (EC)DH client
                     // authentication: no CertificateVerify follows (RFC 5246 §7.4.8, RFC 8422 §3).
-                    bool fixedKeyAgreement = body.Length == 0 && _clientCertificate != null && CipherSuite.IsStaticKeyAgreement;
+                    bool fixedKeyAgreement = body.Length == 0 && _clientCertificate != null && _keyExchange is IFixedDhServerKeyExchange;
                     DeriveKeys(fixedKeyAgreement
-                        ? _keyExchange.ProcessFixedClientKeyExchange(_clientCertificate.GetPublicKey())
+                        ? ((IFixedDhServerKeyExchange)_keyExchange).ProcessFixedClientKeyExchange(_clientCertificate.GetPublicKey())
                         : _keyExchange.ProcessClientKeyExchange(body));
                     _state = _clientPublicKey != null && !fixedKeyAgreement ? State.WaitCertificateVerify : State.WaitFinished;
                     break;

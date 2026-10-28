@@ -56,6 +56,21 @@ namespace Dtls13Test.Tests
         }
 
         [TestMethod]
+        public void HostNameValidator_ReplacesTheNameCheckButNotTheChain()
+        {
+            var leaf = Pki.Leaf(new[] { "server.test" }).Cert;
+            string seen = null;
+            var validator = new CertificateValidator(new[] { Pki.Root.Cert })
+            {
+                HostNameValidator = (certificate, hostName) => { seen = hostName; return hostName == "pinned.example"; },
+            };
+            validator.Validate(Chain(leaf), ServerAuth, "pinned.example");
+            Assert.AreEqual("pinned.example", seen);
+            AssertRejected(AlertDescription.BadCertificate, () => validator.Validate(Chain(leaf), ServerAuth, "server.test"));
+            AssertRejected(AlertDescription.UnknownCa, () => validator.Validate(Chain(leaf, withIntermediate: false), ServerAuth, "pinned.example"));
+        }
+
+        [TestMethod]
         public void CommonNameOnly_NeedsTheFallback()
         {
             var leaf = Pki.Leaf(commonName: "legacy.test").Cert;

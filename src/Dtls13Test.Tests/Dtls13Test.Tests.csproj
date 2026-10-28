@@ -1,18 +1,24 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFrameworks>net10.0;net481</TargetFrameworks>
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>disable</Nullable>
+    <!-- SharpDTLS's own copy is visible through InternalsVisibleTo -->
+    <MeziantouPolyfill_ExcludedPolyfills>P:System.Threading.Tasks.Task.IsCompletedSuccessfully</MeziantouPolyfill_ExcludedPolyfills>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="MSTest" Version="4.0.1" />
+    <PackageReference Include="Meziantou.Polyfill" Version="1.0.165" Condition="'$(TargetFramework)' == 'net481'">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Dtls13Test\Dtls13Test.csproj" />
+    <ProjectReference Include="..\SharpDTLS\SharpDTLS.csproj" />
   </ItemGroup>
 
   <ItemGroup>

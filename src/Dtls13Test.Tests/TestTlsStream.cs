@@ -26,7 +26,7 @@ namespace Dtls13Test.Tests
             var serverSide = Task.Run(async () =>
             {
                 var tcp = await listener.AcceptTcpClientAsync();
-                await using var tls = await TlsStream.AcceptAsync(server, tcp.GetStream());
+                using var tls = await TlsStream.AcceptAsync(server, tcp.GetStream());
                 byte[] buffer = new byte[5000];
                 long total = 0;
                 int n;
@@ -42,7 +42,7 @@ namespace Dtls13Test.Tests
             using (var tcp = new TcpClient())
             {
                 await tcp.ConnectAsync((IPEndPoint)listener.LocalEndpoint);
-                await using var tls = await TlsStream.ConnectAsync(tcp.GetStream()).WaitAsync(Timeout);
+                using var tls = await TlsStream.ConnectAsync(tcp.GetStream()).WaitAsync(Timeout);
                 Assert.AreEqual(TlsVersion.Tls12, tls.NegotiatedVersion); // a TLS 1.2 server answers the TLS 1.3 + 1.2 offer
                 await tls.WriteAsync(payload);
                 byte[] echoed = new byte[payload.Length];
@@ -79,7 +79,7 @@ namespace Dtls13Test.Tests
             var serverSide = Task.Run(async () =>
             {
                 var tcp = await listener.AcceptTcpClientAsync();
-                await using var tls = await TlsStream.AcceptAsync(server, tcp.GetStream());
+                using var tls = await TlsStream.AcceptAsync(server, tcp.GetStream());
                 byte[] line = new byte[4];
                 await tls.ReadExactlyAsync(line);
                 await tls.WriteAsync(line);
@@ -87,7 +87,7 @@ namespace Dtls13Test.Tests
             });
             using var client = new TcpClient();
             await client.ConnectAsync((IPEndPoint)listener.LocalEndpoint);
-            await using var tls = await TlsStream.ConnectAsync(client.GetStream()).WaitAsync(Timeout);
+            using var tls = await TlsStream.ConnectAsync(client.GetStream()).WaitAsync(Timeout);
             Assert.AreEqual(TlsVersion.Tls13, tls.NegotiatedVersion);
             await tls.WriteAsync(Encoding.ASCII.GetBytes("ping"));
             byte[] echoed = new byte[4];
@@ -113,7 +113,7 @@ namespace Dtls13Test.Tests
 
             using var tcp = new TcpClient();
             await tcp.ConnectAsync(IPAddress.Loopback, port);
-            await using var tls = await TlsStream.ConnectAsync(tcp.GetStream()).WaitAsync(Timeout);
+            using var tls = await TlsStream.ConnectAsync(tcp.GetStream()).WaitAsync(Timeout);
             await tls.WriteAsync(Encoding.ASCII.GetBytes("GET / HTTP/1.0\r\n\r\n"));
             using var reader = new StreamReader(tls, Encoding.ASCII);
             string response = await reader.ReadToEndAsync().WaitAsync(Timeout);

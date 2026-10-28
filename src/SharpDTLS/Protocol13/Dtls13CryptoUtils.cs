@@ -355,25 +355,24 @@ namespace SharpDTLS.Protocol13
             int contextLength = context.Length;
             int expandedLabelLength = prefix.Length + labelLength;
 
-            int hkdfLabelLength = 2 + (1 + expandedLabelLength) + (1 + contextLength);
-            Span<byte> hkdfLabel = hkdfLabelLength <= 512
-                ? stackalloc byte[hkdfLabelLength]
-                : new byte[hkdfLabelLength];
+            byte[] hkdfLabel = new byte[2 + (1 + expandedLabelLength) + (1 + contextLength)];
 
             // uint16 length
             TlsUtilities.CheckUint16(length);
-            TlsUtilities.WriteUint16(length, hkdfLabel);
+            TlsUtilities.WriteUint16(length, hkdfLabel, 0);
 
             // opaque label<7..255>
             TlsUtilities.CheckUint8(expandedLabelLength);
-            TlsUtilities.WriteUint8(expandedLabelLength, hkdfLabel[2..]);
-            prefix.CopyTo(hkdfLabel[3..]);
+            TlsUtilities.WriteUint8(expandedLabelLength, hkdfLabel, 2);
+            prefix.CopyTo(hkdfLabel, 3);
             int labelPos = 2 + (1 + prefix.Length);
             for (int i = 0; i < labelLength; ++i)
                 hkdfLabel[labelPos + i] = (byte)label[i];
 
             // context
-            TlsUtilities.WriteOpaque8(context, hkdfLabel.Slice(2 + (1 + expandedLabelLength)));
+            TlsUtilities.CheckUint8(contextLength);
+            hkdfLabel[2 + (1 + expandedLabelLength)] = (byte)contextLength;
+            context.CopyTo(hkdfLabel.AsSpan(2 + (1 + expandedLabelLength) + 1));
 
             return secret.HkdfExpand(cryptoHashAlgorithm, hkdfLabel, length);
         }

@@ -63,14 +63,14 @@ namespace SharpDTLS.Protocol13
     {
         private const byte StateVersion = 0x13;
 
-        public ushort CipherSuite { get; init; }
-        public byte[] Psk { get; init; }
-        public uint AgeAdd { get; init; }
-        public DateTime IssuedUtc { get; init; }
-        public byte[] ClientCertificate { get; init; }
-        public uint MaxEarlyDataSize { get; init; }
-        public string ServerName { get; init; }
-        public string ApplicationProtocol { get; init; }
+        public ushort CipherSuite { get; set; }
+        public byte[] Psk { get; set; }
+        public uint AgeAdd { get; set; }
+        public DateTime IssuedUtc { get; set; }
+        public byte[] ClientCertificate { get; set; }
+        public uint MaxEarlyDataSize { get; set; }
+        public string ServerName { get; set; }
+        public string ApplicationProtocol { get; set; }
 
         public byte[] Seal(SessionTicketKeys keys)
             => keys.Seal(new TlsWriter()

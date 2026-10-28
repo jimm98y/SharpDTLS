@@ -25,7 +25,7 @@ namespace SharpDTLS
 
             public bool Equals(Key other) => HsType == other.HsType && MsgSeq == other.MsgSeq;
             public override bool Equals(object obj) => obj is Key k && Equals(k);
-            public override int GetHashCode() => HashCode.Combine(HsType, MsgSeq);
+            public override int GetHashCode() => (HsType << 16) ^ MsgSeq;
         }
 
         private sealed class FragmentBuffer

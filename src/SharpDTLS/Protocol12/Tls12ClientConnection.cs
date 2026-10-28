@@ -700,7 +700,7 @@ namespace SharpDTLS.Protocol12
             else if (_certificateRequest != null && !rawPublicKey && clientCertificate != null && keyPair != null)
             {
                 var key = keyPair.Private;
-                fixedKeyAgreement = CipherSuite.IsStaticKeyAgreement && _keyExchange.SupportsFixedClientKey(key)
+                fixedKeyAgreement = _keyExchange is IFixedDhClientKeyExchange fixedDh && fixedDh.SupportsFixedClientKey(key)
                     && FixedTypeAccepted(_certificateRequest, clientCertificate);
                 authenticate = !fixedKeyAgreement && CertificateTypeAccepted(_certificateRequest, key)
                     && (!IsDtls12 || Dtls12Signatures.SelectScheme(key, _certificateRequest.SignatureAlgorithms) != null);
@@ -725,7 +725,7 @@ namespace SharpDTLS.Protocol12
 
             byte[] preMasterSecret;
             byte[] clientKeyExchange = fixedKeyAgreement
-                ? _keyExchange.CreateFixedClientKeyExchange(keyPair.Private, out preMasterSecret)
+                ? ((IFixedDhClientKeyExchange)_keyExchange).CreateFixedClientKeyExchange(keyPair.Private, out preMasterSecret)
                 : _keyExchange.CreateClientKeyExchange(out preMasterSecret);
             SendHandshake(HandshakeType.ClientKeyExchange, clientKeyExchange);
             DeriveKeys(preMasterSecret);

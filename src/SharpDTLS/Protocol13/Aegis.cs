@@ -30,7 +30,7 @@ namespace SharpDTLS.Protocol13
             for (int offset = 0; offset < msg.Length; offset += 32)
             {
                 int n = Math.Min(32, msg.Length - offset);
-                Array.Clear(block);
+                Array.Clear(block, 0, block.Length);
                 msg.AsSpan(offset, n).CopyTo(block);
                 var t0 = Load(block, 0);
                 var t1 = Load(block, 16);
@@ -58,7 +58,7 @@ namespace SharpDTLS.Protocol13
             for (int offset = 0; offset < length; offset += 32)
             {
                 int n = Math.Min(32, length - offset);
-                Array.Clear(block);
+                Array.Clear(block, 0, block.Length);
                 ctAndTag.AsSpan(offset, n).CopyTo(block);
                 var (z0, z1) = Keystream128L(s);
                 Store(Load(block, 0) ^ z0, block, 0);
@@ -120,7 +120,7 @@ namespace SharpDTLS.Protocol13
             for (int offset = 0; offset < msg.Length; offset += 16)
             {
                 int n = Math.Min(16, msg.Length - offset);
-                Array.Clear(block);
+                Array.Clear(block, 0, block.Length);
                 msg.AsSpan(offset, n).CopyTo(block);
                 var x = Load(block, 0);
                 Store(x ^ Keystream256(s), block, 0);
@@ -145,7 +145,7 @@ namespace SharpDTLS.Protocol13
             for (int offset = 0; offset < length; offset += 16)
             {
                 int n = Math.Min(16, length - offset);
-                Array.Clear(block);
+                Array.Clear(block, 0, block.Length);
                 ctAndTag.AsSpan(offset, n).CopyTo(block);
                 Store(Load(block, 0) ^ Keystream256(s), block, 0);
                 block.AsSpan(n).Clear();
@@ -210,7 +210,7 @@ namespace SharpDTLS.Protocol13
             byte[] block = new byte[rate];
             for (int offset = 0; offset < ad.Length; offset += rate)
             {
-                Array.Clear(block);
+                Array.Clear(block, 0, block.Length);
                 ad.AsSpan(offset, Math.Min(rate, ad.Length - offset)).CopyTo(block);
                 absorb(block);
             }

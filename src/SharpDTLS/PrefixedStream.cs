@@ -20,22 +20,26 @@ namespace SharpDTLS
         public override void SetLength(long value) => throw new NotSupportedException();
         public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
 
-        public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+        public override int Read(byte[] buffer, int offset, int count)
+            => _offset < prefix.Length ? ReadPrefix(buffer.AsSpan(offset, count)) : inner.Read(buffer, offset, count);
 
-        public override int Read(Span<byte> buffer)
-        {
-            if (_offset < prefix.Length)
-            {
-                int n = Math.Min(buffer.Length, prefix.Length - _offset);
-                prefix.AsSpan(_offset, n).CopyTo(buffer);
-                _offset += n;
-                return n;
-            }
-            return inner.Read(buffer);
-        }
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            => _offset < prefix.Length ? Task.FromResult(ReadPrefix(buffer.AsSpan(offset, count))) : inner.ReadAsync(buffer, offset, count, cancellationToken);
+
+#if !NETSTANDARD2_0
+        public override int Read(Span<byte> buffer) => _offset < prefix.Length ? ReadPrefix(buffer) : inner.Read(buffer);
 
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
-            => _offset < prefix.Length ? new ValueTask<int>(Read(buffer.Span)) : inner.ReadAsync(buffer, cancellationToken);
+            => _offset < prefix.Length ? new ValueTask<int>(ReadPrefix(buffer.Span)) : inner.ReadAsync(buffer, cancellationToken);
+#endif
+
+        private int ReadPrefix(Span<byte> buffer)
+        {
+            int n = Math.Min(buffer.Length, prefix.Length - _offset);
+            prefix.AsSpan(_offset, n).CopyTo(buffer);
+            _offset += n;
+            return n;
+        }
 
         protected override void Dispose(bool disposing)
         {

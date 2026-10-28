@@ -7,7 +7,8 @@ using System.Linq;
 namespace SharpDTLS.Protocol13
 {
     /// <summary>
-    /// TLS certificate compression (RFC 8879) for DTLS 1.3: zlib and Brotli (zstd is not available in .NET). Decompression
+    /// TLS certificate compression (RFC 8879) for DTLS 1.3: zlib and, except on netstandard2.0, Brotli (zstd is not
+    /// available in .NET). Decompression
     /// is bounded by the declared length, itself capped at the largest handshake message accepted.
     /// </summary>
     internal static class CertificateCompression
@@ -17,7 +18,11 @@ namespace SharpDTLS.Protocol13
         public const ushort Zstd = 3;
 
         /// <summary>The implemented algorithms, in default preference order.</summary>
+#if NETSTANDARD2_0
+        public static IReadOnlyList<ushort> Supported { get; } = new[] { Zlib };
+#else
         public static IReadOnlyList<ushort> Supported { get; } = new[] { Brotli, Zlib };
+#endif
 
         /// <summary>The largest uncompressed Certificate accepted.</summary>
         public const int MaxUncompressedLength = HandshakeReassembler.MaxMessageLength;
@@ -51,7 +56,9 @@ namespace SharpDTLS.Protocol13
             using (Stream compressor = algorithm switch
             {
                 Zlib => new ZLibStream(output, CompressionLevel.Optimal, leaveOpen: true),
+#if !NETSTANDARD2_0
                 Brotli => new BrotliStream(output, CompressionLevel.Optimal, leaveOpen: true),
+#endif
                 _ => throw new ArgumentOutOfRangeException(nameof(algorithm)),
             })
             {
@@ -74,7 +81,9 @@ namespace SharpDTLS.Protocol13
                 using Stream decompressor = algorithm switch
                 {
                     Zlib => new ZLibStream(input, CompressionMode.Decompress),
+#if !NETSTANDARD2_0
                     Brotli => new BrotliStream(input, CompressionMode.Decompress),
+#endif
                     _ => throw new DtlsException(AlertDescription.IllegalParameter, $"Unknown certificate compression algorithm {algorithm}."),
                 };
                 byte[] result = new byte[uncompressedLength];
