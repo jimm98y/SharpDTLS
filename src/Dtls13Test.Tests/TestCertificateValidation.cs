@@ -97,7 +97,6 @@ namespace Dtls13Test.Tests
             // RFC 5480 §2.1.1: explicit curve parameters are not allowed, and platform validators reject them.
             foreach (var certificate in new[]
             {
-                SharpDTLS.Protocol10.Dtls10CryptoUtils.GenerateSelfSignedEcCertificate().certificate,
                 Dtls12CryptoUtils.GenerateSelfSignedEcCertificate().certificate,
                 Dtls13CryptoUtils.GenerateSelfSignedEcCertificate().certificate,
             })

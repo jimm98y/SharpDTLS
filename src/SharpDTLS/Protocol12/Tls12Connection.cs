@@ -175,7 +175,7 @@ namespace SharpDTLS.Protocol12
         protected byte[] Prf(byte[] secret, string label, byte[] seed, int length)
             => IsDtls12
                 ? Dtls12CryptoUtils.PRF(secret, label, seed, length, CipherSuite.Prf == PrfHashAlgorithm.Sha384)
-                : Dtls10CryptoUtils.PRF(secret, label, seed, length);
+                : Tls10Prf.PRF(secret, label, seed, length);
 
         /// <summary>
         /// Computes the master secret (with RFC 7627 when negotiated; call after ClientKeyExchange is in the
@@ -222,7 +222,7 @@ namespace SharpDTLS.Protocol12
             if (!IsDtls12)
             {
                 scheme = null;
-                return Dtls10Signatures.Sign(privateKey, content);
+                return Tls10Signatures.Sign(privateKey, content);
             }
 
             scheme = Dtls12Signatures.SelectScheme(privateKey, peerSchemes)
@@ -233,7 +233,7 @@ namespace SharpDTLS.Protocol12
         protected bool Verify(AsymmetricKeyParameter publicKey, byte[] content, ushort? scheme, byte[] signature, IEnumerable<ushort> acceptedSchemes)
         {
             if (!IsDtls12)
-                return Dtls10Signatures.Verify(publicKey, content, signature);
+                return Tls10Signatures.Verify(publicKey, content, signature);
 
             if (scheme == null || !acceptedSchemes.Contains(scheme.Value))
                 throw new DtlsException(AlertDescription.IllegalParameter, $"Signature scheme 0x{scheme:X4} was not offered.");

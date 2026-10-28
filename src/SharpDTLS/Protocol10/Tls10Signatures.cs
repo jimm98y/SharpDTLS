@@ -13,7 +13,7 @@ namespace SharpDTLS.Protocol10
     /// RSA signs MD5(data) || SHA1(data) with PKCS#1 v1.5 padding and no DigestInfo; DSA and ECDSA use SHA-1.
     /// There is no SignatureAndHashAlgorithm field on the wire.
     /// </summary>
-    public static class Dtls10Signatures
+    public static class Tls10Signatures
     {
         public static byte[] Sign(AsymmetricKeyParameter privateKey, byte[] content)
         {

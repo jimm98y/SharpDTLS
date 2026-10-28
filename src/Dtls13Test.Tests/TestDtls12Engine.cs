@@ -1,6 +1,5 @@
 using SharpDTLS;
 using SharpDTLS.Protocol12;
-using SharpDTLS.Protocol10.DTLS10;
 using SharpDTLS.Protocol12.DTLS12;
 using System;
 using System.Collections.Generic;
@@ -60,7 +59,7 @@ namespace Dtls13Test.Tests
         public void VersionNegotiation_Dtls12ClientAcceptingDtls10_TalksToDtls10Server()
         {
             var pair = new ScriptedTransportPair();
-            var server = new Dtls10Server(pair.Server);
+            var server = new Dtls12Server(pair.Server) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10 };
             var client = new Dtls12Client(pair.Client) { MinimumVersion = DtlsVersion.Dtls10 };
 
             Handshake(client, server, client.BeginHandshake);
@@ -74,7 +73,7 @@ namespace Dtls13Test.Tests
         {
             var pair = new ScriptedTransportPair();
             var server = new Dtls12Server(pair.Server) { MinimumVersion = DtlsVersion.Dtls10 };
-            var client = new Dtls10Client(pair.Client);
+            var client = new Dtls12Client(pair.Client) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10 };
 
             Handshake(client, server, client.BeginHandshake);
 
@@ -87,7 +86,7 @@ namespace Dtls13Test.Tests
             // RFC 7507: a DTLS 1.0 retry marked as a fallback reaches a server that supports DTLS 1.2.
             var pair = new ScriptedTransportPair();
             var server = new Dtls12Server(pair.Server) { MinimumVersion = DtlsVersion.Dtls10 };
-            var client = new Dtls10Client(pair.Client) { IsFallback = true };
+            var client = new Dtls12Client(pair.Client) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10, IsFallback = true };
             var failed = new TaskCompletionSource<Exception>();
             client.Failed += (_, ex) => failed.TrySetResult(ex);
 
@@ -101,8 +100,8 @@ namespace Dtls13Test.Tests
         public void FallbackScsv_AtServerMaximum_IsAccepted()
         {
             var pair = new ScriptedTransportPair();
-            var server = new Dtls10Server(pair.Server);
-            var client = new Dtls10Client(pair.Client) { IsFallback = true };
+            var server = new Dtls12Server(pair.Server) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10 };
+            var client = new Dtls12Client(pair.Client) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10, IsFallback = true };
 
             Handshake(client, server, client.BeginHandshake);
 
@@ -114,7 +113,7 @@ namespace Dtls13Test.Tests
         {
             var pair = new ScriptedTransportPair();
             var server = new Dtls12Server(pair.Server);
-            var client = new Dtls10Client(pair.Client);
+            var client = new Dtls12Client(pair.Client) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10 };
             var failed = new TaskCompletionSource<Exception>();
             client.Failed += (_, ex) => failed.TrySetResult(ex);
 

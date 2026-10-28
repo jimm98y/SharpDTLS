@@ -1,6 +1,5 @@
 using SharpDTLS;
 using SharpDTLS.Protocol12;
-using SharpDTLS.Protocol10.DTLS10;
 using SharpDTLS.Protocol12.DTLS12;
 using SharpDTLS.Protocol13;
 using SharpDTLS.Protocol13.DTLS13;
@@ -60,7 +59,7 @@ namespace Dtls13Test.Tests
 
             if (version == "-dtls1")
             {
-                var client = new Dtls10Client(transport) { SrtpProtectionProfiles = new[] { profile } };
+                var client = new Dtls12Client(transport) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10, SrtpProtectionProfiles = new[] { profile } };
                 client.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
                 client.Failed += (_, ex) => handshake.TrySetException(ex);
                 getKeys = client.GetSrtpKeys;
@@ -99,7 +98,7 @@ namespace Dtls13Test.Tests
 
             if (version == "-dtls1")
             {
-                var server = new Dtls10Server(transport);
+                var server = new Dtls12Server(transport) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10 };
                 server.ApplicationDataReceived += (_, e) => received.TrySetResult(e.RemoteEndPoint);
                 getKeys = server.GetSrtpKeys;
             }

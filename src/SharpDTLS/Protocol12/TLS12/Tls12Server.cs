@@ -26,8 +26,8 @@ namespace SharpDTLS.Protocol12.TLS12
     /// <summary>
     /// TLS 1.2 server: <see cref="Start"/> listens on TCP, or <see cref="Accept"/> serves any connected stream. Each
     /// connection runs the DTLS 1.0/1.2 server handshake over TLS framing with the shared settings.
-    /// Set <see cref="Tls12ServerBase.MinimumVersion"/> to also accept TLS 1.0 or 1.1 clients;
-    /// <see cref="SharpDTLS.Protocol10.TLS10.Tls10Server"/> and <see cref="SharpDTLS.Protocol10.TLS11.Tls11Server"/> speak only those.
+    /// Set <see cref="Tls12ServerBase.MinimumVersion"/> to also accept TLS 1.0 or 1.1 clients,
+    /// and <see cref="Tls12ServerBase.MaximumVersion"/> to speak only those.
     /// </summary>
     public class Tls12Server : Tls12ServerBase, IDisposable
     {

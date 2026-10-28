@@ -2,16 +2,14 @@ using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.X509;
+using SharpDTLS;
 using SharpDTLS.Protocol12;
-using SharpDTLS.Protocol10.DTLS10;
 using SharpDTLS.Protocol12.DTLS12;
 using SharpDTLS.Protocol13.DTLS13;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using CertReq10 = SharpDTLS.Protocol10.Messages.CertificateRequestDatagram;
 using CertReq12 = SharpDTLS.Protocol12.Messages.CertificateRequestDatagram;
-using CertVerify10 = SharpDTLS.Protocol10.Messages.CertificateVerifyDatagram;
 using CertVerify12 = SharpDTLS.Protocol12.Messages.CertificateVerifyDatagram;
 
 namespace Dtls13Test.Tests
@@ -23,28 +21,11 @@ namespace Dtls13Test.Tests
             => SharpDTLS.Protocol12.Dtls12CryptoUtils.GenerateSelfSignedCertificate();
     }
 
-    // ── DTLS 1.0 / 1.2 message round-trip ────────────────────────────────────────
+    // ── DTLS 1.2 message round-trip ────────────────────────────────────────
 
     [TestClass]
     public sealed class TestCertificateRequestRoundTrip
     {
-        [TestMethod]
-        public void Dtls10_CertificateRequest_RoundTrip()
-        {
-            var cr = new CertReq10 { RecordSequenceNumber = 3, MessageSequenceNumber = 2 };
-            byte[] bytes = cr.ToBytes();
-
-            Assert.AreEqual(0x16, bytes[0], "record type");
-            Assert.AreEqual(0xFE, bytes[1]); Assert.AreEqual(0xFF, bytes[2]); // DTLS 1.0
-            Assert.AreEqual(0x0D, bytes[13], "handshake type");
-
-            var cr2 = new CertReq10();
-            cr2.FromBytes(bytes);
-            Assert.AreEqual(3,  cr2.RecordSequenceNumber);
-            Assert.AreEqual(2,  cr2.MessageSequenceNumber);
-            Assert.AreEqual(Convert.ToHexString(bytes), Convert.ToHexString(cr2.ToBytes()));
-        }
-
         [TestMethod]
         public void Dtls12_CertificateRequest_RoundTrip()
         {
@@ -66,25 +47,6 @@ namespace Dtls13Test.Tests
     [TestClass]
     public sealed class TestCertificateVerifyRoundTrip
     {
-        [TestMethod]
-        public void Dtls10_CertificateVerify_RoundTrip()
-        {
-            var sig = new byte[] { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08 };
-            var cv = new CertVerify10(sig) { RecordSequenceNumber = 7, MessageSequenceNumber = 5 };
-            byte[] bytes = cv.ToBytes();
-
-            Assert.AreEqual(0x16, bytes[0]);
-            Assert.AreEqual(0xFE, bytes[1]); Assert.AreEqual(0xFF, bytes[2]); // DTLS 1.0
-            Assert.AreEqual(0x0F, bytes[13], "CertificateVerify type");
-
-            var cv2 = new CertVerify10();
-            cv2.FromBytes(bytes);
-            Assert.AreEqual(7, cv2.RecordSequenceNumber);
-            Assert.AreEqual(5, cv2.MessageSequenceNumber);
-            Assert.AreEqual(Convert.ToHexString(sig), Convert.ToHexString(cv2.Signature));
-            Assert.AreEqual(Convert.ToHexString(bytes), Convert.ToHexString(cv2.ToBytes()));
-        }
-
         [TestMethod]
         public void Dtls12_CertificateVerify_HashAndSigAlgFields_Preserved()
         {
@@ -142,13 +104,17 @@ namespace Dtls13Test.Tests
             var (serverTransport, clientTransport) = MockTransportPair.Create();
             var (clientKp, clientCert)             = CertHelper.GenerateEc();
 
-            var server = new Dtls10Server(serverTransport)
+            var server = new Dtls12Server(serverTransport)
             {
+                MinimumVersion = DtlsVersion.Dtls10,
+                MaximumVersion = DtlsVersion.Dtls10,
                 ShouldSendHelloVerify   = false,
                 RequireClientCertificate = true,
             };
-            var client = new Dtls10Client(clientTransport)
+            var client = new Dtls12Client(clientTransport)
             {
+                MinimumVersion = DtlsVersion.Dtls10,
+                MaximumVersion = DtlsVersion.Dtls10,
                 ClientCertificateKeyPair = clientKp,
                 ClientCertificate        = clientCert,
             };
@@ -171,8 +137,8 @@ namespace Dtls13Test.Tests
         {
             var (serverTransport, clientTransport) = MockTransportPair.Create();
 
-            var server = new Dtls10Server(serverTransport) { ShouldSendHelloVerify = false };
-            var client = new Dtls10Client(clientTransport);
+            var server = new Dtls12Server(serverTransport) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10, ShouldSendHelloVerify = false };
+            var client = new Dtls12Client(clientTransport) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10 };
 
             bool serverDone = false, clientDone = false;
             var tcs = new TaskCompletionSource<bool>();
@@ -190,13 +156,17 @@ namespace Dtls13Test.Tests
             var (serverTransport, clientTransport) = MockTransportPair.Create();
             var (clientKp, clientCert)             = CertHelper.GenerateEc();
 
-            var server = new Dtls10Server(serverTransport)
+            var server = new Dtls12Server(serverTransport)
             {
+                MinimumVersion = DtlsVersion.Dtls10,
+                MaximumVersion = DtlsVersion.Dtls10,
                 ShouldSendHelloVerify    = false,
                 RequireClientCertificate = true,
             };
-            var client = new Dtls10Client(clientTransport)
+            var client = new Dtls12Client(clientTransport)
             {
+                MinimumVersion = DtlsVersion.Dtls10,
+                MaximumVersion = DtlsVersion.Dtls10,
                 ClientCertificateKeyPair = clientKp,
                 ClientCertificate        = clientCert,
             };

@@ -1,6 +1,5 @@
 using SharpDTLS;
 using SharpDTLS.Protocol12;
-using SharpDTLS.Protocol10.DTLS10;
 using SharpDTLS.Protocol12.DTLS12;
 using SharpDTLS.Protocol13;
 using SharpDTLS.Protocol13.DTLS13;
@@ -120,7 +119,7 @@ namespace Dtls13Test.Tests
         public void Client_ReachesDtls10_OnlyWhenAllowed()
         {
             using var e = new Endpoints();
-            var server = new Dtls10Server(e.Server);
+            var server = new Dtls12Server(e.Server) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10 };
             server.ApplicationDataReceived += (_, d) => server.SendApplicationData(d.RemoteEndPoint, Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(d.Data)));
 
             var (client, error) = Connect(e.NewClient(), c => c.MinimumVersion = DtlsVersion.Dtls10);

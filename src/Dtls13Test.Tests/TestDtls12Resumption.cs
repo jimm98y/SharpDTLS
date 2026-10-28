@@ -1,6 +1,5 @@
 using SharpDTLS;
 using SharpDTLS.Protocol12;
-using SharpDTLS.Protocol10.DTLS10;
 using SharpDTLS.Protocol12.DTLS12;
 using System;
 using System.Collections.Generic;
@@ -42,10 +41,10 @@ namespace Dtls13Test.Tests
             }
             else
             {
-                var server = new Dtls10Server(r.Pair.Server) { SessionCache = cache, TicketKeys = ticketKeys, InitialRetransmitTimeout = timeout, CipherSuites = suites };
+                var server = new Dtls12Server(r.Pair.Server) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10, SessionCache = cache, TicketKeys = ticketKeys, InitialRetransmitTimeout = timeout, CipherSuites = suites };
                 server.ApplicationDataReceived += (_, e) => { lock (r.ServerReceived) r.ServerReceived.Add(Encoding.UTF8.GetString(e.Data)); };
                 r.Server = server;
-                r.Client = new Dtls10Client(r.Pair.Client) { ResumptionSession = resume, InitialRetransmitTimeout = timeout, CipherSuites = suites, UseSessionTickets = ticketKeys != null };
+                r.Client = new Dtls12Client(r.Pair.Client) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10, ResumptionSession = resume, InitialRetransmitTimeout = timeout, CipherSuites = suites, UseSessionTickets = ticketKeys != null };
             }
             r.Client.ApplicationDataReceived += (_, data) => { lock (r.ClientReceived) r.ClientReceived.Add(Encoding.UTF8.GetString(data)); };
 

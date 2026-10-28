@@ -2,9 +2,7 @@ using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.OpenSsl;
 using Org.BouncyCastle.X509;
 using SharpDTLS;
-using SharpDTLS.Protocol10;
 using SharpDTLS.Protocol12;
-using SharpDTLS.Protocol10.DTLS10;
 using SharpDTLS.Protocol12.DTLS12;
 using SharpDTLS.UDP;
 using System;
@@ -391,7 +389,7 @@ namespace Dtls13Test.Tests
             Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), "s_server did not start:\n" + server.Output);
 
             using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
-            var client = new SharpDTLS.Protocol10.DTLS10.Dtls10Client(transport) { IsFallback = true };
+            var client = new Dtls12Client(transport) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10, IsFallback = true };
             var failed = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.Failed += (_, ex) => failed.TrySetResult(ex);
             client.HandshakeFinished += (_, _) => failed.TrySetResult(null);
@@ -439,7 +437,7 @@ namespace Dtls13Test.Tests
         private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
 
         private static (AsymmetricCipherKeyPair, X509Certificate) Credentials(bool ec)
-            => ec ? SharpDTLS.Protocol13.Dtls13CryptoUtils.GenerateSelfSignedEcCertificate() : Dtls10CryptoUtils.GenerateSelfSignedCertificate();
+            => ec ? SharpDTLS.Protocol13.Dtls13CryptoUtils.GenerateSelfSignedEcCertificate() : SharpDTLS.Protocol12.Dtls12CryptoUtils.GenerateSelfSignedCertificate();
 
         // OpenSSL 3 only allows DTLS 1.0 (SHA-1 / MD5 based) at security level 0.
         [DataRow("ECDHE-RSA-AES128-SHA", false, "X25519")]
@@ -458,7 +456,7 @@ namespace Dtls13Test.Tests
             Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), "s_server did not start:\n" + server.Output);
 
             using var clientTransport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
-            var client = new Dtls10Client(clientTransport);
+            var client = new Dtls12Client(clientTransport) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10 };
             var handshake = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
@@ -489,7 +487,7 @@ namespace Dtls13Test.Tests
 
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
             int port = transport.LocalEndpoint.Port;
-            var server = new Dtls10Server(transport, kp, cert);
+            var server = new Dtls12Server(transport, kp, cert) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10 };
 
             var handshake = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var received = new TaskCompletionSource<(EndPoint, string)>(TaskCreationOptions.RunContinuationsAsynchronously);

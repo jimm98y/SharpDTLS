@@ -1,6 +1,4 @@
 using SharpDTLS;
-using SharpDTLS.Protocol10.TLS10;
-using SharpDTLS.Protocol10.TLS11;
 using SharpDTLS.Protocol12.TLS12;
 using System;
 using System.Net;
@@ -10,7 +8,7 @@ using System.Threading.Tasks;
 
 namespace Dtls13Test.Tests
 {
-    /// <summary>The fixed-version TLS 1.0 and 1.1 clients and servers (<see cref="Tls10Client"/>, <see cref="Tls11Server"/>...).</summary>
+    /// <summary>The TLS 1.2 client and server limited to TLS 1.0 or 1.1.</summary>
     [TestClass]
     public sealed class TestTls10
     {
@@ -23,9 +21,9 @@ namespace Dtls13Test.Tests
             return server;
         }
 
-        private static Tls12Server NewServer(ushort version) => version == TlsVersion.Tls10 ? new Tls10Server() : new Tls11Server();
+        private static Tls12Server NewServer(ushort version) => new Tls12Server { MinimumVersion = version, MaximumVersion = version };
 
-        private static Tls12Client NewClient(ushort version, NetworkStream stream) => version == TlsVersion.Tls10 ? new Tls10Client(stream) : new Tls11Client(stream);
+        private static Tls12Client NewClient(ushort version, NetworkStream stream) => new Tls12Client(stream) { MinimumVersion = version, MaximumVersion = version };
 
         private static Exception Handshake(Tls12Client client, Action begin)
         {

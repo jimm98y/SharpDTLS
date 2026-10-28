@@ -1,4 +1,4 @@
-using SharpDTLS.Protocol10.DTLS10;
+using SharpDTLS;
 using SharpDTLS.Protocol12.DTLS12;
 using System;
 using System.Collections.Generic;
@@ -48,8 +48,8 @@ namespace Dtls13Test.Tests
             }
             else
             {
-                var server = new Dtls10Server(e.Pair.Server) { InitialRetransmitTimeout = timeout };
-                var client = new Dtls10Client(e.Pair.Client) { InitialRetransmitTimeout = timeout };
+                var server = new Dtls12Server(e.Pair.Server) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10, InitialRetransmitTimeout = timeout };
+                var client = new Dtls12Client(e.Pair.Client) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10, InitialRetransmitTimeout = timeout };
                 server.HandshakeFinished += (_, _) => e.ServerDone.TrySetResult(true);
                 server.ApplicationDataReceived += (_, a) => { lock (e.ServerReceived) e.ServerReceived.Add(Encoding.UTF8.GetString(a.Data)); };
                 client.HandshakeFinished += (_, _) => e.ClientDone.TrySetResult(true);
