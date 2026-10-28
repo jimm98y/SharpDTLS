@@ -9,10 +9,9 @@ using System.Collections.Generic;
 namespace SharpDTLS
 {
     /// <summary>
-    /// A DTLS client for every version: one ClientHello offers DTLS 1.3 (<see cref="Dtls13"/>) and DTLS 1.2 and below
-    /// (<see cref="Dtls12"/>), and the server's choice decides which engine continues. Each engine's own settings are
-    /// configured on it (the shared ones also through this class). A DTLS 1.2 ServerHello carrying the RFC 9147 §5.3
-    /// downgrade sentinel is rejected.
+    /// A DTLS client for every version: one ClientHello offers DTLS 1.3 and DTLS 1.2 and below, and the server's choice
+    /// decides which version continues. A DTLS 1.2 ServerHello carrying the RFC 9147 §5.3 downgrade sentinel is
+    /// rejected.
     /// </summary>
     public sealed class DtlsClient
     {
@@ -39,6 +38,7 @@ namespace SharpDTLS
                 engine.ApplicationDataReceived += (_, data) => ApplicationDataReceived?.Invoke(this, data);
                 engine.Failed += (sender, ex) => { if (sender == _active) Failed?.Invoke(this, ex); };
                 engine.Closed += (sender, _) => { if (sender == _active) Closed?.Invoke(this, EventArgs.Empty); };
+                engine.AlertReceived += (_, alert) => AlertReceived?.Invoke(this, alert);
             }
             Dtls12.HandshakeFinished += (_, _) => HandshakeFinished?.Invoke(this, EventArgs.Empty);
             Dtls13.HandshakeFinished += (_, _) => HandshakeFinished?.Invoke(this, EventArgs.Empty);
@@ -46,11 +46,11 @@ namespace SharpDTLS
 
         public IClientTransport ClientTransport { get; }
 
-        /// <summary>The DTLS 1.0-1.2 engine and its settings (suites, resumption, PSK/SRP...).</summary>
-        public Dtls12Client Dtls12 { get; }
+        /// <summary>The DTLS 1.0-1.2 engine.</summary>
+        internal Dtls12Client Dtls12 { get; }
 
-        /// <summary>The DTLS 1.3 engine and its settings (suites, groups, tickets...).</summary>
-        public Dtls13Client Dtls13 { get; }
+        /// <summary>The DTLS 1.3 engine.</summary>
+        internal Dtls13Client Dtls13 { get; }
 
         /// <summary>The oldest version offered; DTLS 1.2 by default (RFC 8996 deprecates DTLS 1.0).</summary>
         public ushort MinimumVersion { get; set; } = DtlsVersion.Dtls12;
@@ -135,6 +135,7 @@ namespace SharpDTLS
         public event EventHandler<byte[]> ApplicationDataReceived;
         public event EventHandler<Exception> Failed;
         public event EventHandler Closed;
+        public event EventHandler<AlertDescription> AlertReceived;
 
         public void BeginHandshake()
         {

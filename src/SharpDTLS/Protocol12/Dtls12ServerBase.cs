@@ -151,6 +151,7 @@ namespace SharpDTLS.Protocol12
                 ConnectionDataReceived?.Invoke(connection, data);
             };
             connection.AlertReceived += (_, alert) => OnAlert(connection, alert);
+            OnConnectionCreated(connection);
             connection.PeerAddressConfirmed += (_, change) =>
             {
                 _connections.TryRemove(new KeyValuePair<string, Tls12ServerConnection>(change.Old.ToString(), connection));

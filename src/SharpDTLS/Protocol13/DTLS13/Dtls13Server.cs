@@ -183,6 +183,7 @@ namespace SharpDTLS.Protocol13.DTLS13
                 return;
             }
 
+            OnConnectionCreated(connection);
             connection.Start(record, clientHello, Dtls13CipherSuite.Get(decision.SuiteId), decision.Retry, decision.ShareGroup);
             if (connection.ConnectionId != null && !connection.IsClosed)
                 _connectionsById[Convert.ToHexString(connection.ConnectionId)] = connection;

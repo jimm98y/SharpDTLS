@@ -29,10 +29,8 @@ namespace SharpDTLS
     }
 
     /// <summary>
-    /// A TLS server for every version: each connection's ClientHello decides between the TLS 1.3 engine
-    /// (<see cref="Tls13"/>) and the TLS 1.0-1.2 engine (<see cref="Tls12"/>), whose settings are configured there (the
-    /// shared ones also through this class). A TLS 1.2 handshake carries the RFC 8446 downgrade sentinel while TLS 1.3
-    /// is enabled.
+    /// A TLS server for every version: each connection's ClientHello decides between TLS 1.3 and TLS 1.0-1.2. A TLS 1.2
+    /// handshake carries the RFC 8446 downgrade sentinel while TLS 1.3 is enabled.
     /// </summary>
     public class TlsServer : IDisposable
     {
@@ -53,6 +51,8 @@ namespace SharpDTLS
             Tls13.ApplicationDataReceived += (_, e) => ApplicationDataReceived?.Invoke(this, new TlsDataReceivedEventArgs(e.Connection, e.Data));
             Tls12.ConnectionClosed += (_, c) => ConnectionClosed?.Invoke(this, c);
             Tls13.ConnectionClosed += (_, c) => ConnectionClosed?.Invoke(this, c);
+            Tls12.ConnectionCreated += OnConnectionCreated;
+            Tls13.ConnectionCreated += OnConnectionCreated;
         }
 
         private TlsServer((AsymmetricCipherKeyPair keyPair, X509Certificate certificate) credentials)
@@ -60,11 +60,11 @@ namespace SharpDTLS
         {
         }
 
-        /// <summary>The TLS 1.0-1.2 engine and its settings (suites, resumption, PSK/SRP...).</summary>
-        public Tls12Server Tls12 { get; }
+        /// <summary>The TLS 1.0-1.2 engine.</summary>
+        internal Tls12Server Tls12 { get; }
 
-        /// <summary>The TLS 1.3 engine and its settings (suites, groups, tickets...).</summary>
-        public Tls13Server Tls13 { get; }
+        /// <summary>The TLS 1.3 engine.</summary>
+        internal Tls13Server Tls13 { get; }
 
         /// <summary>The oldest version accepted; TLS 1.2 by default (RFC 8996 deprecates 1.0 and 1.1).</summary>
         public ushort MinimumVersion { get => Tls12.MinimumVersion; set => Tls12.MinimumVersion = value; }
@@ -107,9 +107,30 @@ namespace SharpDTLS
             set { Tls12.ClientCertificateValidator = value; Tls13.ClientCertificateValidator = value; }
         }
 
+        /// <summary>
+        /// Keys for session tickets (random per server by default); share them between servers to let them resume each
+        /// other's sessions, or set null to disable tickets.
+        /// </summary>
+        public SessionTicketKeys TicketKeys
+        {
+            get => Tls13.TicketKeys;
+            set { Tls12.TicketKeys = value; Tls13.TicketKeys = value; }
+        }
+
+        /// <summary>Resumable TLS 1.0-1.2 sessions by session ID; null disables session ID resumption.</summary>
+        public IDtls12SessionCache SessionCache
+        {
+            get => Tls12.SessionCache;
+            set => Tls12.SessionCache = value;
+        }
+
         public event EventHandler<TlsConnectionBase> HandshakeFinished;
         public event EventHandler<TlsDataReceivedEventArgs> ApplicationDataReceived;
         public event EventHandler<TlsConnectionBase> ConnectionClosed;
+        public event EventHandler<TlsAlertEventArgs> AlertReceived;
+
+        private void OnConnectionCreated(TlsConnectionBase connection)
+            => connection.AlertReceived += (_, alert) => AlertReceived?.Invoke(this, new TlsAlertEventArgs(connection, alert));
 
         public IReadOnlyCollection<TlsConnectionBase> Connections
             => Tls12.Connections.Cast<TlsConnectionBase>().Concat(Tls13.Connections).ToList();

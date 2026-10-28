@@ -95,6 +95,7 @@ namespace SharpDTLS.Protocol13.TLS13
             var connection = new Tls13ServerConnection(this, remoteEndPoint ?? new IPEndPoint(IPAddress.Loopback, 0),
                 record => TlsStreamPump.Write(stream, record));
             _connections[connection] = stream;
+            OnConnectionCreated(connection);
             TlsStreamPump.Start(stream, connection);
             return connection;
         }

@@ -245,5 +245,10 @@ namespace SharpDTLS.Protocol13
         internal abstract void OnEarlyData(Tls13ServerConnection connection, byte[] data);
         internal abstract void OnKeyUpdate(KeyUpdateDatagram keyUpdate);
         internal abstract void OnConnectionClosed(Tls13ServerConnection connection);
+
+        /// <summary>A new connection, before it processes anything; for the version-negotiating servers.</summary>
+        internal event Action<Tls13ServerConnection> ConnectionCreated;
+
+        internal void OnConnectionCreated(Tls13ServerConnection connection) => ConnectionCreated?.Invoke(connection);
     }
 }

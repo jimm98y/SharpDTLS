@@ -198,6 +198,38 @@ namespace Dtls13Test.Tests
             Assert.IsTrue(second.Tls12.IsResumed);
         }
 
+        [DataRow(TlsVersion.Tls12)]
+        [DataRow(TlsVersion.Tls13)]
+        [TestMethod]
+        public void Alerts_AreRaisedByTheWrappers_WhateverTheVersion(ushort version)
+        {
+            using var server = EchoServer(s => s.MaximumVersion = version);
+            var serverAlert = new TaskCompletionSource<TlsAlertEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
+            server.AlertReceived += (_, a) => serverAlert.TrySetResult(a);
+
+            // client → server
+            var (client, error) = Connect(server.LocalEndpoint);
+            Assert.IsNull(error, error?.ToString());
+            Assert.AreEqual(version, client.NegotiatedVersion);
+            TlsConnectionBase first = null;
+            Assert.IsTrue(SpinWait.SpinUntil(() => (first = server.Connections.FirstOrDefault(c => c.IsHandshakeComplete)) != null, Timeout));
+            client.Close();
+            Assert.IsTrue(serverAlert.Task.Wait(Timeout), "the server raised no alert");
+            Assert.AreEqual(AlertDescription.CloseNotify, serverAlert.Task.Result.Description);
+            Assert.AreSame(first, serverAlert.Task.Result.Connection);
+
+            // server → client
+            var clientAlert = new TaskCompletionSource<AlertDescription>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var (second, secondError) = Connect(server.LocalEndpoint, c => c.AlertReceived += (_, a) => clientAlert.TrySetResult(a));
+            Assert.IsNull(secondError, secondError?.ToString());
+            TlsConnectionBase serverSide = null;
+            Assert.IsTrue(SpinWait.SpinUntil(() => (serverSide = server.Connections.FirstOrDefault(c => c != first && c.IsHandshakeComplete)) != null, Timeout));
+            serverSide.Close();
+            Assert.IsTrue(clientAlert.Task.Wait(Timeout), "the client raised no alert");
+            Assert.AreEqual(AlertDescription.CloseNotify, clientAlert.Task.Result);
+            GC.KeepAlive(second);
+        }
+
         [DataRow("", "TLSv1.3", TlsVersion.Tls13)]
         [DataRow("-tls1_2", "TLSv1.2", TlsVersion.Tls12)]
         [DataRow("-tls1_1 -cipher ALL@SECLEVEL=0", "TLSv1.1", TlsVersion.Tls11)]

@@ -13,10 +13,8 @@ using System.Threading.Tasks;
 namespace SharpDTLS
 {
     /// <summary>
-    /// A TLS client for every version: one ClientHello offers TLS 1.3 (<see cref="Tls13"/>) and TLS 1.2 and below
-    /// (<see cref="Tls12"/>), and the server's choice decides which engine continues. Each engine's own settings are
-    /// configured on it (the shared ones also through this class). A TLS 1.2 ServerHello carrying the RFC 8446 downgrade
-    /// sentinel is rejected.
+    /// A TLS client for every version: one ClientHello offers TLS 1.3 and TLS 1.2 and below, and the server's choice
+    /// decides which version continues. A TLS 1.2 ServerHello carrying the RFC 8446 downgrade sentinel is rejected.
     /// </summary>
     public sealed class TlsClient
     {
@@ -45,16 +43,17 @@ namespace SharpDTLS
                         _stream.Dispose();
                     Closed?.Invoke(this, EventArgs.Empty);
                 };
+                engine.AlertReceived += (_, alert) => AlertReceived?.Invoke(this, alert);
             }
             Tls12.HandshakeFinished += (_, _) => HandshakeFinished?.Invoke(this, EventArgs.Empty);
             Tls13.HandshakeFinished += (_, _) => HandshakeFinished?.Invoke(this, EventArgs.Empty);
         }
 
-        /// <summary>The TLS 1.0-1.2 engine and its settings (suites, resumption, PSK/SRP...).</summary>
-        public Tls12Client Tls12 { get; }
+        /// <summary>The TLS 1.0-1.2 engine.</summary>
+        internal Tls12Client Tls12 { get; }
 
-        /// <summary>The TLS 1.3 engine and its settings (suites, groups, tickets...).</summary>
-        public Tls13Client Tls13 { get; }
+        /// <summary>The TLS 1.3 engine.</summary>
+        internal Tls13Client Tls13 { get; }
 
         /// <summary>The oldest version offered; TLS 1.2 by default (RFC 8996 deprecates 1.0 and 1.1).</summary>
         public ushort MinimumVersion { get; set; } = TlsVersion.Tls12;
@@ -116,6 +115,7 @@ namespace SharpDTLS
         public event EventHandler<byte[]> ApplicationDataReceived;
         public event EventHandler<Exception> Failed;
         public event EventHandler Closed;
+        public event EventHandler<AlertDescription> AlertReceived;
 
         public void BeginHandshake()
         {

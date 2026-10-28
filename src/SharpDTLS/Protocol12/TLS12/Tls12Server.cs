@@ -101,6 +101,7 @@ namespace SharpDTLS.Protocol12.TLS12
                     s.Dispose();
                 ConnectionClosed?.Invoke(this, connection);
             };
+            OnConnectionCreated(connection);
             TlsStreamPump.Start(stream, connection);
             return connection;
         }

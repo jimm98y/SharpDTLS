@@ -111,5 +111,10 @@ namespace SharpDTLS.Protocol12
 
         /// <summary>Private key for recovering pwd_protect usernames (RFC 8492 §4.3.2); null accepts only pwd_clear.</summary>
         public Org.BouncyCastle.Crypto.Parameters.ECPrivateKeyParameters PwdProtectionKey { get => Settings.PwdProtectionKey; set => Settings.PwdProtectionKey = value; }
+
+        /// <summary>A new connection, before it processes anything; for the version-negotiating servers.</summary>
+        internal event Action<Tls12ServerConnection> ConnectionCreated;
+
+        internal void OnConnectionCreated(Tls12ServerConnection connection) => ConnectionCreated?.Invoke(connection);
     }
 }

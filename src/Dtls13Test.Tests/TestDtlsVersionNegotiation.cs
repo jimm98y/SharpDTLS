@@ -338,6 +338,38 @@ namespace Dtls13Test.Tests
             Assert.IsTrue(server.WaitForOutput("RECV:hello over DTLS 1.3", Timeout), server.Output);
         }
 
+        [DataRow(DtlsVersion.Dtls12)]
+        [DataRow(DtlsVersion.Dtls13)]
+        [TestMethod]
+        public void Alerts_AreRaisedByTheWrappers_WhateverTheVersion(ushort version)
+        {
+            using var e = new Endpoints();
+            var server = EchoServer(e.Server, s => s.MaximumVersion = version);
+            var serverAlert = new TaskCompletionSource<TlsAlertEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
+            server.AlertReceived += (_, a) => serverAlert.TrySetResult(a);
+
+            // client → server
+            var (client, error) = Connect(e.NewClient());
+            Assert.IsNull(error, error?.ToString());
+            Assert.AreEqual(version, client.NegotiatedVersion);
+            var first = WaitForConnection(server);
+            client.Close();
+            Assert.IsTrue(serverAlert.Task.Wait(Timeout), "the server raised no alert");
+            Assert.AreEqual(AlertDescription.CloseNotify, serverAlert.Task.Result.Description);
+            Assert.AreSame(first, serverAlert.Task.Result.Connection);
+
+            // server → client
+            var clientAlert = new TaskCompletionSource<AlertDescription>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var (second, secondError) = Connect(e.NewClient(), c => c.AlertReceived += (_, a) => clientAlert.TrySetResult(a));
+            Assert.IsNull(secondError, secondError?.ToString());
+            TlsConnectionBase serverSide = null;
+            Assert.IsTrue(SpinWait.SpinUntil(() => (serverSide = server.Connections.FirstOrDefault(c => c != first && c.IsHandshakeComplete)) != null, Timeout));
+            serverSide.Close();
+            Assert.IsTrue(clientAlert.Task.Wait(Timeout), "the client raised no alert");
+            Assert.AreEqual(AlertDescription.CloseNotify, clientAlert.Task.Result);
+            GC.KeepAlive(second);
+        }
+
         [TestCategory("Interop")]
         [TestMethod]
         public void Server_ServesWolfSslDtls13Client()

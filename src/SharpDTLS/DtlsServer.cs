@@ -30,10 +30,9 @@ namespace SharpDTLS
     }
 
     /// <summary>
-    /// A DTLS server for every version on one transport: each client's ClientHello decides between the DTLS 1.3 engine
-    /// (<see cref="Dtls13"/>) and the DTLS 1.0-1.2 engine (<see cref="Dtls12"/>), whose settings are configured there
-    /// (the shared ones also through this class); its later datagrams go to the same engine. A DTLS 1.2 handshake
-    /// carries the RFC 9147 §5.3 downgrade sentinel while DTLS 1.3 is enabled.
+    /// A DTLS server for every version on one transport: each client's ClientHello decides between DTLS 1.3 and DTLS
+    /// 1.0-1.2, and its later datagrams stay with that version. A DTLS 1.2 handshake carries the RFC 9147 §5.3
+    /// downgrade sentinel while DTLS 1.3 is enabled.
     /// </summary>
     public class DtlsServer
     {
@@ -60,6 +59,8 @@ namespace SharpDTLS
             Dtls13.ApplicationDataReceived += (_, e) => ApplicationDataReceived?.Invoke(this, new DtlsDataReceivedEventArgs(e.RemoteEndPoint, e.Connection, e.Data));
             Dtls12.ConnectionEnded += c => ConnectionClosed?.Invoke(this, c);
             Dtls13.ConnectionClosed += (_, e) => ConnectionClosed?.Invoke(this, e.Connection);
+            Dtls12.ConnectionCreated += OnConnectionCreated;
+            Dtls13.ConnectionCreated += OnConnectionCreated;
 
             serverTransport.OnDataReceived += OnDataReceived;
         }
@@ -71,11 +72,11 @@ namespace SharpDTLS
 
         public IServerTransport ServerTransport { get; }
 
-        /// <summary>The DTLS 1.0-1.2 engine and its settings (suites, resumption, PSK/SRP...).</summary>
-        public Dtls12Server Dtls12 { get; }
+        /// <summary>The DTLS 1.0-1.2 engine.</summary>
+        internal Dtls12Server Dtls12 { get; }
 
-        /// <summary>The DTLS 1.3 engine and its settings (suites, groups, tickets...).</summary>
-        public Dtls13Server Dtls13 { get; }
+        /// <summary>The DTLS 1.3 engine.</summary>
+        internal Dtls13Server Dtls13 { get; }
 
         /// <summary>The oldest version accepted; DTLS 1.2 by default (RFC 8996 deprecates DTLS 1.0).</summary>
         public ushort MinimumVersion { get => Dtls12.MinimumVersion; set => Dtls12.MinimumVersion = value; }
@@ -132,9 +133,30 @@ namespace SharpDTLS
             set { Dtls12.ClientCertificateValidator = value; Dtls13.ClientCertificateValidator = value; }
         }
 
+        /// <summary>
+        /// Keys for session tickets (random per server by default); share them between servers to let them resume each
+        /// other's sessions, or set null to disable tickets.
+        /// </summary>
+        public SessionTicketKeys TicketKeys
+        {
+            get => Dtls13.TicketKeys;
+            set { Dtls12.TicketKeys = value; Dtls13.TicketKeys = value; }
+        }
+
+        /// <summary>Resumable DTLS 1.0-1.2 sessions by session ID; null disables session ID resumption.</summary>
+        public IDtls12SessionCache SessionCache
+        {
+            get => Dtls12.SessionCache;
+            set => Dtls12.SessionCache = value;
+        }
+
         public event EventHandler<TlsConnectionBase> HandshakeFinished;
         public event EventHandler<DtlsDataReceivedEventArgs> ApplicationDataReceived;
         public event EventHandler<TlsConnectionBase> ConnectionClosed;
+        public event EventHandler<TlsAlertEventArgs> AlertReceived;
+
+        private void OnConnectionCreated(TlsConnectionBase connection)
+            => connection.AlertReceived += (_, alert) => AlertReceived?.Invoke(this, new TlsAlertEventArgs(connection, alert));
 
         public IReadOnlyCollection<TlsConnectionBase> Connections
             => Dtls12.Connections.Cast<TlsConnectionBase>().Concat(Dtls13.Connections).ToList();
