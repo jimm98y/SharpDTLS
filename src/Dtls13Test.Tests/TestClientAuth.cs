@@ -2,18 +2,17 @@ using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.X509;
-using SharpDTLS.DTLS10;
-using SharpDTLS.DTLS10.Messages;
-using SharpDTLS.DTLS12;
-using SharpDTLS.DTLS13;
-using SharpDTLS.DTLS13.Messages;
+using SharpDTLS.Protocol12;
+using SharpDTLS.Protocol10.DTLS10;
+using SharpDTLS.Protocol12.DTLS12;
+using SharpDTLS.Protocol13.DTLS13;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using CertReq10 = SharpDTLS.DTLS10.Messages.CertificateRequestDatagram;
-using CertReq12 = SharpDTLS.DTLS12.Messages.CertificateRequestDatagram;
-using CertVerify10 = SharpDTLS.DTLS10.Messages.CertificateVerifyDatagram;
-using CertVerify12 = SharpDTLS.DTLS12.Messages.CertificateVerifyDatagram;
+using CertReq10 = SharpDTLS.Protocol10.Messages.CertificateRequestDatagram;
+using CertReq12 = SharpDTLS.Protocol12.Messages.CertificateRequestDatagram;
+using CertVerify10 = SharpDTLS.Protocol10.Messages.CertificateVerifyDatagram;
+using CertVerify12 = SharpDTLS.Protocol12.Messages.CertificateVerifyDatagram;
 
 namespace Dtls13Test.Tests
 {
@@ -21,7 +20,7 @@ namespace Dtls13Test.Tests
     file static class CertHelper
     {
         public static (AsymmetricCipherKeyPair kp, X509Certificate cert) GenerateEc()
-            => SharpDTLS.DTLS12.Dtls12CryptoUtils.GenerateSelfSignedCertificate();
+            => SharpDTLS.Protocol12.Dtls12CryptoUtils.GenerateSelfSignedCertificate();
     }
 
     // ── DTLS 1.0 / 1.2 message round-trip ────────────────────────────────────────
@@ -114,7 +113,7 @@ namespace Dtls13Test.Tests
         [TestMethod]
         public void Dtls13_CertificateRequest_IncludesSignatureAlgorithmsExtension()
         {
-            var cr = new SharpDTLS.DTLS13.Messages.CertificateRequestDatagram();
+            var cr = new SharpDTLS.Protocol13.Messages.CertificateRequestDatagram();
             byte[] bytes = cr.ToBytes();
 
             // extension type = 0x000D, extension data = 0x0006, list len = 0x0004

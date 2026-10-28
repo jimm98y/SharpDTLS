@@ -1,7 +1,9 @@
 using Org.BouncyCastle.Asn1.X509;
 using SharpDTLS;
-using SharpDTLS.DTLS12;
-using SharpDTLS.DTLS13;
+using SharpDTLS.Protocol12;
+using SharpDTLS.Protocol12.DTLS12;
+using SharpDTLS.Protocol13;
+using SharpDTLS.Protocol13.DTLS13;
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -95,7 +97,7 @@ namespace Dtls13Test.Tests
             // RFC 5480 §2.1.1: explicit curve parameters are not allowed, and platform validators reject them.
             foreach (var certificate in new[]
             {
-                SharpDTLS.DTLS10.Dtls10CryptoUtils.GenerateSelfSignedEcCertificate().certificate,
+                SharpDTLS.Protocol10.Dtls10CryptoUtils.GenerateSelfSignedEcCertificate().certificate,
                 Dtls12CryptoUtils.GenerateSelfSignedEcCertificate().certificate,
                 Dtls13CryptoUtils.GenerateSelfSignedEcCertificate().certificate,
             })

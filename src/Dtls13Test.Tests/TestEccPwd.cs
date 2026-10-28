@@ -2,7 +2,8 @@ using Org.BouncyCastle.Math;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Utilities;
 using SharpDTLS;
-using SharpDTLS.DTLS12;
+using SharpDTLS.Protocol12;
+using SharpDTLS.Protocol12.DTLS12;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -164,7 +165,7 @@ namespace Dtls13Test.Tests
 
             Assert.AreEqual("fred", EccPwd.RecoverUsername(name, serverKey));
             Assert.IsGreaterThanOrEqualTo(128 + 16, name.Length, "usernames are padded to 128 octets");
-            Assert.IsFalse(Encoding.ASCII.GetString(name).Contains("fred"));
+            Assert.DoesNotContain("fred", Encoding.ASCII.GetString(name));
 
             byte[] tampered = (byte[])name.Clone();
             tampered[^1] ^= 1;

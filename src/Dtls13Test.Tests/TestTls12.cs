@@ -1,6 +1,5 @@
 using SharpDTLS;
-using SharpDTLS.DTLS12;
-using SharpDTLS.TLS12;
+using SharpDTLS.Protocol12.TLS12;
 using System;
 using System.Collections.Generic;
 using System.Linq;

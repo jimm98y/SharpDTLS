@@ -1,6 +1,5 @@
-using SharpDTLS;
-using SharpDTLS.DTLS12;
-using SharpDTLS.DTLS12.Messages;
+using SharpDTLS.Protocol12;
+using SharpDTLS.Protocol12.Messages;
 using System;
 using System.Collections.Generic;
 

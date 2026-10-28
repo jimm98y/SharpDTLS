@@ -1,8 +1,9 @@
+using Org.BouncyCastle.X509;
 using System;
-using System.Net;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Net;
 using System.Threading;
 
 namespace SharpDTLS
@@ -49,6 +50,41 @@ namespace SharpDTLS
 
         /// <summary>The SRTP protection profile negotiated via use_srtp (RFC 5764), or null.</summary>
         public ushort? SelectedSrtpProtectionProfile { get; protected set; }
+
+        /// <summary>
+        /// The SRTP Master Key Identifier both sides use (RFC 5764 §4.1.1): empty when no MKI is in use,
+        /// null when use_srtp was not negotiated.
+        /// </summary>
+        public byte[] SelectedSrtpMki { get; protected set; }
+
+        // ── Negotiated parameters, the same for every version ───────────────────────────────
+
+        /// <summary>The negotiated protocol version (e.g. <see cref="DtlsVersion.Dtls12"/>), or 0 before ServerHello.</summary>
+        public ushort NegotiatedVersion { get; protected set; }
+
+        /// <summary>The negotiated cipher suite id, or 0 before ServerHello.</summary>
+        public abstract ushort NegotiatedCipherSuite { get; }
+
+        /// <summary>ClientHello.random, or null before ClientHello.</summary>
+        public byte[] ClientRandom { get; protected set; }
+
+        /// <summary>ServerHello.random, or null before ServerHello.</summary>
+        public byte[] ServerRandom { get; protected set; }
+
+        /// <summary>
+        /// Whether the session keys are bound to the handshake transcript: extended_master_secret (RFC 7627) before
+        /// (D)TLS 1.3, always for (D)TLS 1.3 (RFC 8446 §7.1).
+        /// </summary>
+        public virtual bool IsExtendedMasterSecret => true;
+
+        /// <summary>Whether the handshake resumed an earlier session.</summary>
+        public abstract bool IsResumed { get; }
+
+        /// <summary>The X.509 certificate this side authenticated with, or null.</summary>
+        public X509Certificate LocalCertificate { get; protected set; }
+
+        /// <summary>The X.509 certificate the peer authenticated with (or the one of a resumed session), or null.</summary>
+        public abstract X509Certificate PeerCertificate { get; }
 
         /// <summary>The application protocol negotiated with ALPN (RFC 7301), or null.</summary>
         public string ApplicationProtocol { get; protected set; }
@@ -145,7 +181,7 @@ namespace SharpDTLS
             if (SelectedSrtpProtectionProfile == null)
                 return null;
             ushort profile = SelectedSrtpProtectionProfile.Value;
-            return DtlsSrtp.Split(profile, ExportKeyingMaterial(DtlsSrtp.ExporterLabel, null, DtlsSrtp.KeyingMaterialLength(profile)));
+            return DtlsSrtp.Split(profile, ExportKeyingMaterial(DtlsSrtp.ExporterLabel, null, DtlsSrtp.KeyingMaterialLength(profile)), SelectedSrtpMki);
         }
 
         /// <summary>Sends close_notify and closes the connection.</summary>

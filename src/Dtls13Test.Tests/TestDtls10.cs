@@ -1,5 +1,5 @@
-using SharpDTLS.DTLS10;
-using Dtls10Messages = SharpDTLS.DTLS10.Messages;
+using Dtls10Messages = SharpDTLS.Protocol10.Messages;
+using SharpDTLS.Protocol10;
 using System;
 using System.Collections.Generic;
 
@@ -215,7 +215,7 @@ namespace Dtls13Test.Tests
             var seed   = new byte[32]; seed[0]   = 0xCD;
 
             byte[] prf10 = Dtls10CryptoUtils.PRF(secret, "master secret", seed, 48);
-            byte[] prf12 = SharpDTLS.DTLS12.Dtls12CryptoUtils.PRF(secret, "master secret", seed, 48);
+            byte[] prf12 = SharpDTLS.Protocol12.Dtls12CryptoUtils.PRF(secret, "master secret", seed, 48);
 
             Assert.AreNotEqual(Convert.ToHexString(prf10), Convert.ToHexString(prf12));
         }

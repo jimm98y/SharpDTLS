@@ -7,7 +7,8 @@ using Org.BouncyCastle.Math;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.X509;
 using SharpDTLS;
-using SharpDTLS.DTLS12;
+using SharpDTLS.Protocol12;
+using SharpDTLS.Protocol12.DTLS12;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -41,7 +42,7 @@ namespace Dtls13Test.Tests
         public static PwdCredential ResolvePwd(string username) => username == PwdUsername ? _pwdCredential.Value : null;
 
         private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _rsa = new(() => Dtls12CryptoUtils.GenerateSelfSignedCertificate());
-        private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _ecdsa = new(() => SharpDTLS.DTLS13.Dtls13CryptoUtils.GenerateSelfSignedEcCertificate());
+        private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _ecdsa = new(() => SharpDTLS.Protocol13.Dtls13CryptoUtils.GenerateSelfSignedEcCertificate());
         private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _dsa = new(GenerateDsa);
         private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _dhRsa = new(() => GenerateDh(_rsa.Value.Item1.Private, "SHA256WITHRSA"));
         private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _dhDss = new(() => GenerateDh(_dsa.Value.Item1.Private, "SHA256WITHDSA"));

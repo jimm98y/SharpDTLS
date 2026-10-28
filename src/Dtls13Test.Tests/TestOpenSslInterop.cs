@@ -2,9 +2,11 @@ using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.OpenSsl;
 using Org.BouncyCastle.X509;
 using SharpDTLS;
-using SharpDTLS.DTLS10;
-using SharpDTLS.DTLS12;
-using SharpSRTP.UDP;
+using SharpDTLS.Protocol10;
+using SharpDTLS.Protocol12;
+using SharpDTLS.Protocol10.DTLS10;
+using SharpDTLS.Protocol12.DTLS12;
+using SharpDTLS.UDP;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -155,7 +157,7 @@ namespace Dtls13Test.Tests
         private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
 
         private static (AsymmetricCipherKeyPair, X509Certificate) Credentials(bool ec)
-            => ec ? SharpDTLS.DTLS13.Dtls13CryptoUtils.GenerateSelfSignedEcCertificate() : Dtls12CryptoUtils.GenerateSelfSignedCertificate();
+            => ec ? SharpDTLS.Protocol13.Dtls13CryptoUtils.GenerateSelfSignedEcCertificate() : Dtls12CryptoUtils.GenerateSelfSignedCertificate();
 
         [DataRow("ECDHE-RSA-AES128-GCM-SHA256", false, "X25519")]
         [DataRow("ECDHE-RSA-AES256-GCM-SHA384", false, "P-256")]
@@ -389,7 +391,7 @@ namespace Dtls13Test.Tests
             Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), "s_server did not start:\n" + server.Output);
 
             using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
-            var client = new SharpDTLS.DTLS10.Dtls10Client(transport) { IsFallback = true };
+            var client = new SharpDTLS.Protocol10.DTLS10.Dtls10Client(transport) { IsFallback = true };
             var failed = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.Failed += (_, ex) => failed.TrySetResult(ex);
             client.HandshakeFinished += (_, _) => failed.TrySetResult(null);
@@ -437,7 +439,7 @@ namespace Dtls13Test.Tests
         private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
 
         private static (AsymmetricCipherKeyPair, X509Certificate) Credentials(bool ec)
-            => ec ? SharpDTLS.DTLS13.Dtls13CryptoUtils.GenerateSelfSignedEcCertificate() : Dtls10CryptoUtils.GenerateSelfSignedCertificate();
+            => ec ? SharpDTLS.Protocol13.Dtls13CryptoUtils.GenerateSelfSignedEcCertificate() : Dtls10CryptoUtils.GenerateSelfSignedCertificate();
 
         // OpenSSL 3 only allows DTLS 1.0 (SHA-1 / MD5 based) at security level 0.
         [DataRow("ECDHE-RSA-AES128-SHA", false, "X25519")]

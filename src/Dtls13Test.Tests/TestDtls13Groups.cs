@@ -1,6 +1,7 @@
 using SharpDTLS;
-using SharpDTLS.DTLS13;
-using SharpSRTP.UDP;
+using SharpDTLS.Protocol13;
+using SharpDTLS.Protocol13.DTLS13;
+using SharpDTLS.UDP;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -39,7 +40,7 @@ namespace Dtls13Test.Tests
 
         private static int HelloRetryRequests(ScriptedTransportPair pair)
             => pair.ServerSent.Count(d => d[0] == 0x16 && d.Length > 59 && d[13] == 0x02
-                                         && d.AsSpan(27, 32).SequenceEqual(SharpDTLS.DTLS13.Messages.HelloRetryRequest.HelloRetryRequestRandom));
+                                         && d.AsSpan(27, 32).SequenceEqual(SharpDTLS.Protocol13.Messages.HelloRetryRequest.HelloRetryRequestRandom));
 
         [DynamicData(nameof(AllGroups))]
         [TestMethod]

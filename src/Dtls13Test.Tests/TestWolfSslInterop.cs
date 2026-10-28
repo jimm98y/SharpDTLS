@@ -1,7 +1,8 @@
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.X509;
-using SharpDTLS.DTLS13;
-using SharpSRTP.UDP;
+using SharpDTLS.Protocol13;
+using SharpDTLS.Protocol13.DTLS13;
+using SharpDTLS.UDP;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;

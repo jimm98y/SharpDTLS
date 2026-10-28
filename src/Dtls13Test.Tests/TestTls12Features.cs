@@ -1,7 +1,7 @@
 using Org.BouncyCastle.Asn1.X509;
 using SharpDTLS;
-using SharpDTLS.DTLS12;
-using SharpDTLS.TLS12;
+using SharpDTLS.Protocol12;
+using SharpDTLS.Protocol12.TLS12;
 using System;
 using System.IO;
 using System.Linq;
@@ -88,7 +88,7 @@ namespace Dtls13Test.Tests
         {
             var listener = new TcpListener(IPAddress.Loopback, 0);
             listener.Start();
-            _ = Task.Run(async () => { using var tcp = await listener.AcceptTcpClientAsync(); await tcp.GetStream().ReadAsync(new byte[100]); });
+            _ = Task.Run(async () => { using var tcp = await listener.AcceptTcpClientAsync(); await tcp.GetStream().ReadAtLeastAsync(new byte[100], 1, throwOnEndOfStream: false); });
             try
             {
                 var tcp = new TcpClient();

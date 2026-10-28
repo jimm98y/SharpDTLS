@@ -1,6 +1,6 @@
 using SharpDTLS;
-using SharpDTLS.DTLS12;
-using SharpSRTP.UDP;
+using SharpDTLS.Protocol12.DTLS12;
+using SharpDTLS.UDP;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;

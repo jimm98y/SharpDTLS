@@ -1,5 +1,5 @@
 using SharpDTLS;
-using SharpDTLS.TLS12;
+using SharpDTLS.Protocol12.TLS12;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -104,7 +104,7 @@ namespace Dtls13Test.Tests
                 server.PskIdentityHint = TestCredentials.PskHint;
                 psk = $" -psk {Convert.ToHexString(TestCredentials.PskKey)} -psk_identity {Encoding.ASCII.GetString(TestCredentials.PskIdentity)}";
             }
-            var received = new TaskCompletionSource<(SharpDTLS.DTLS12.Tls12ServerConnection, string)>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var received = new TaskCompletionSource<(SharpDTLS.Protocol12.Tls12ServerConnection, string)>(TaskCreationOptions.RunContinuationsAsynchronously);
             server.ApplicationDataReceived += (_, e) => received.TrySetResult((e.Connection, Encoding.UTF8.GetString(e.Data)));
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
 

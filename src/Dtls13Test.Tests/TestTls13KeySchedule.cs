@@ -1,4 +1,4 @@
-using SharpDTLS.DTLS13;
+using SharpDTLS.Protocol13;
 using System;
 
 namespace Dtls13Test.Tests
@@ -56,7 +56,7 @@ namespace Dtls13Test.Tests
 
 namespace Dtls13Test.Tests
 {
-    using SharpDTLS.DTLS13.Messages;
+    using SharpDTLS.Protocol13.Messages;
     using System.Linq;
 
     /// <summary>ClientHello, ServerHello and HelloRetryRequest in TLS form (RFC 8446 §4.1).</summary>
@@ -82,7 +82,7 @@ namespace Dtls13Test.Tests
             Assert.HasCount(32, parsed.LegacySessionId);
             CollectionAssert.AreEqual(ch.CipherSuites, parsed.CipherSuites);
             CollectionAssert.AreEqual(new[] { ClientSupportedVersions.Tls13 }, parsed.Extensions.OfType<ClientSupportedVersions>().Single().Versions);
-            Assert.AreEqual(ch.Extensions.Count, parsed.Extensions.Count);
+            Assert.HasCount(ch.Extensions.Count, parsed.Extensions);
         }
 
         [TestMethod]

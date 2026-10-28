@@ -1,8 +1,8 @@
 using Org.BouncyCastle.Asn1.X509;
 using SharpDTLS;
-using SharpDTLS.DTLS12;
-using SharpDTLS.DTLS13;
-using SharpSRTP.UDP;
+using SharpDTLS.Protocol12.DTLS12;
+using SharpDTLS.Protocol13.DTLS13;
+using SharpDTLS.UDP;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -69,7 +69,7 @@ namespace Dtls13Test.Tests
                 var error = Handshake(client, s => client.HandshakeFinished += (_, _) => s(), client.BeginHandshake);
                 Assert.IsNull(error, error?.ToString());
                 Assert.AreEqual(expected.Certificate, client.ServerCertificate);
-                Assert.AreEqual(1, seen.CertificateAuthorities.Count);
+                Assert.HasCount(1, seen.CertificateAuthorities);
                 Assert.IsTrue(seen.CertificateAuthorities[0].Equivalent(trusted.Root.Cert.SubjectDN));
                 CollectionAssert.AreEqual(new ushort[] { 0x0403 }, seen.SignatureAlgorithmsCert.ToArray());
                 Assert.IsNotNull(seen.SignatureAlgorithms);
@@ -103,7 +103,6 @@ namespace Dtls13Test.Tests
             CertificateSelectionContext seen = null;
             Func<CertificateSelectionContext, CertificateCredentials> selector = context => { seen = context; return new[] { fromA, fromB }.First(context.IsIssuedByAcceptedAuthority); };
             var validator = new CertificateValidator(new[] { B.Root.Cert }).ForClient();
-            TlsConnectionBase client;
             Func<Org.BouncyCastle.X509.X509Certificate> received;
             Exception error;
             if (version == 12)

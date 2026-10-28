@@ -1,5 +1,5 @@
-﻿using SharpDTLS.DTLS13;
-using SharpDTLS.DTLS13.Messages;
+﻿using SharpDTLS.Protocol13;
+using SharpDTLS.Protocol13.Messages;
 using System;
 using System.Diagnostics;
 
