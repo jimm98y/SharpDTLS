@@ -1,7 +1,6 @@
 using SharpDTLS;
-using SharpDTLS.DTLS12;
-using SharpDTLS.DTLS13;
-using SharpDTLS.TLS13;
+using SharpDTLS.Protocol12;
+using SharpDTLS.Protocol13;
 using System;
 using System.Linq;
 using System.Net;
@@ -58,7 +57,7 @@ namespace Dtls13Test.Tests
 
             var tcp = new System.Net.Sockets.TcpClient();
             tcp.Connect(server.LocalEndpoint);
-            var old = new SharpDTLS.TLS12.Tls12Client(tcp.GetStream()) { MinimumVersion = TlsVersion.Tls11, MaximumVersion = TlsVersion.Tls11 };
+            var old = new SharpDTLS.Protocol12.TLS12.Tls12Client(tcp.GetStream()) { MinimumVersion = TlsVersion.Tls11, MaximumVersion = TlsVersion.Tls11 };
             var failed = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
             old.Failed += (_, ex) => failed.TrySetResult(ex);
             old.BeginHandshake();
@@ -96,8 +95,7 @@ namespace Dtls13Test.Tests
 namespace Dtls13Test.Tests
 {
     using SharpDTLS;
-    using SharpDTLS.TLS12;
-    using SharpDTLS.TLS13;
+    using SharpDTLS.Protocol12.TLS12;
     using System;
     using System.Net;
     using System.Net.Sockets;

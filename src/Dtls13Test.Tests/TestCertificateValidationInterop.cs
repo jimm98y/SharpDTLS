@@ -1,8 +1,8 @@
 using Org.BouncyCastle.X509;
 using SharpDTLS;
-using SharpDTLS.DTLS12;
-using SharpDTLS.DTLS13;
-using SharpSRTP.UDP;
+using SharpDTLS.Protocol12.DTLS12;
+using SharpDTLS.Protocol13.DTLS13;
+using SharpDTLS.UDP;
 using System;
 using System.IO;
 using System.Linq;

@@ -2,7 +2,7 @@ using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Tls;
 using Org.BouncyCastle.Tls.Crypto.Impl.BC;
 using SharpDTLS;
-using SharpDTLS.TLS12;
+using SharpDTLS.Protocol12.TLS12;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -12,6 +12,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using CipherSuites = SharpDTLS.CipherSuites;
+using TlsClient = Org.BouncyCastle.Tls.TlsClient;
+using TlsServer = Org.BouncyCastle.Tls.TlsServer;
 
 namespace Dtls13Test.Tests
 {
@@ -147,7 +149,7 @@ namespace Dtls13Test.Tests
                 server.SrpVerifierProvider = TestCredentials.ResolveSrp;
             if (suite.RequiresPsk)
                 (server.PskIdentityResolver, server.PskIdentityHint) = (TestCredentials.ResolvePsk, TestCredentials.PskHint);
-            SharpDTLS.DTLS12.Tls12ServerConnection connection = null;
+            SharpDTLS.Protocol12.Tls12ServerConnection connection = null;
             var request = new StringBuilder();
             server.ApplicationDataReceived += (_, e) =>
             {

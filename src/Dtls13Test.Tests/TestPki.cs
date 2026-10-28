@@ -1,4 +1,5 @@
 using Org.BouncyCastle.Asn1;
+using Org.BouncyCastle.Asn1.Oiw;
 using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.Asn1.X9;
 using Org.BouncyCastle.Crypto;
@@ -59,7 +60,7 @@ namespace Dtls13Test.Tests
             var issuer = fromRoot ? Root : Intermediate;
             var signer = responder ?? issuer;
             var generator = new BasicOcspRespGenerator(signer.Key.Public);
-            generator.AddResponse(new CertificateID(CertificateID.HashSha1, issuer.Cert, leaf.SerialNumber), status,
+            generator.AddResponse(new CertificateID(new AlgorithmIdentifier(OiwObjectIdentifiers.IdSha1, DerNull.Instance), issuer.Cert, leaf.SerialNumber), status,
                 thisUpdate ?? DateTime.UtcNow.AddHours(-1), nextUpdate ?? DateTime.UtcNow.AddDays(1), null);
             var basic = generator.Generate(new Asn1SignatureFactory("SHA256WITHECDSA", signer.Key.Private, new SecureRandom()),
                 responder.HasValue ? new[] { responder.Value.Cert } : null, DateTime.UtcNow);

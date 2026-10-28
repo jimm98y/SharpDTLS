@@ -192,7 +192,7 @@ namespace SharpDTLS
                     return CipherSuiteStatus.Signaling;
                 if (IsProhibited)
                     return CipherSuiteStatus.Prohibited;
-                if (DTLS13.Dtls13CipherSuite.IsSupported(Id))
+                if (Protocol13.Dtls13CipherSuite.IsSupported(Id))
                     return CipherSuiteStatus.Dtls13;
                 if (KeyExchange == KeyExchangeAlgorithm.KRB5)
                     return CipherSuiteStatus.Unsupported;
@@ -337,7 +337,7 @@ namespace SharpDTLS
         /// <summary>Implemented by the DTLS 1.0/1.2 engine.</summary>
         Implemented,
 
-        /// <summary>A TLS 1.3 suite, implemented by the DTLS 1.3 engine (<see cref="DTLS13.Dtls13CipherSuite"/>).</summary>
+        /// <summary>A TLS 1.3 suite, implemented by the DTLS 1.3 engine (<see cref="Protocol13.Dtls13CipherSuite"/>).</summary>
         Dtls13,
 
         /// <summary>IANA marks the suite DTLS-OK = N (stream ciphers cannot be used over datagrams).</summary>

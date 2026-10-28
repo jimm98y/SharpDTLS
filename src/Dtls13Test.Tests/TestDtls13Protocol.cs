@@ -1,7 +1,8 @@
 using SharpDTLS;
-using SharpDTLS.DTLS13;
-using SharpDTLS.DTLS13.Messages;
-using SharpSRTP.UDP;
+using SharpDTLS.Protocol13;
+using SharpDTLS.Protocol13.DTLS13;
+using SharpDTLS.Protocol13.Messages;
+using SharpDTLS.UDP;
 using System;
 using System.Collections.Generic;
 using System.Linq;

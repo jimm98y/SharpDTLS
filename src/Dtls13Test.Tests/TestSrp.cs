@@ -1,6 +1,7 @@
 using Org.BouncyCastle.Crypto.Parameters;
 using SharpDTLS;
-using SharpDTLS.DTLS12;
+using SharpDTLS.Protocol12;
+using SharpDTLS.Protocol12.DTLS12;
 using System;
 using System.Collections.Generic;
 using System.Linq;

@@ -1,5 +1,6 @@
 using SharpDTLS;
-using SharpDTLS.DTLS13;
+using SharpDTLS.Protocol13;
+using SharpDTLS.Protocol13.DTLS13;
 using System;
 using System.Collections.Generic;
 using System.Linq;

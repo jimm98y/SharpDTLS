@@ -1,6 +1,6 @@
-using SharpDTLS;
-using SharpDTLS.DTLS12;
-using SharpDTLS.DTLS13;
+using SharpDTLS.Protocol12.DTLS12;
+using SharpDTLS.Protocol13;
+using SharpDTLS.Protocol13.DTLS13;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -209,8 +209,8 @@ namespace Dtls13Test.Tests
         [TestMethod]
         public void CidUpdateMessages_RoundTrip()
         {
-            var message = new SharpDTLS.DTLS13.Messages.NewConnectionIdDatagram(new[] { new byte[] { 1, 2 }, new byte[] { 3 } }, 1) { SequenceNumber = 7 };
-            var parsed = new SharpDTLS.DTLS13.Messages.NewConnectionIdDatagram();
+            var message = new SharpDTLS.Protocol13.Messages.NewConnectionIdDatagram(new[] { new byte[] { 1, 2 }, new byte[] { 3 } }, 1) { SequenceNumber = 7 };
+            var parsed = new SharpDTLS.Protocol13.Messages.NewConnectionIdDatagram();
             parsed.FromBytes(message.ToBytes());
             Assert.AreEqual(7, parsed.SequenceNumber);
             Assert.AreEqual((byte)1, parsed.Usage);
@@ -218,8 +218,8 @@ namespace Dtls13Test.Tests
             CollectionAssert.AreEqual(new byte[] { 1, 2 }, parsed.ConnectionIds[0]);
             Assert.AreEqual(10, message.ToBytes()[0], "new_connection_id(10)");
 
-            var request = new SharpDTLS.DTLS13.Messages.RequestConnectionIdDatagram(5);
-            var parsedRequest = new SharpDTLS.DTLS13.Messages.RequestConnectionIdDatagram();
+            var request = new SharpDTLS.Protocol13.Messages.RequestConnectionIdDatagram(5);
+            var parsedRequest = new SharpDTLS.Protocol13.Messages.RequestConnectionIdDatagram();
             parsedRequest.FromBytes(request.ToBytes());
             Assert.AreEqual((byte)5, parsedRequest.Count);
             Assert.AreEqual(9, request.ToBytes()[0], "request_connection_id(9)");

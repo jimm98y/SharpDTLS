@@ -1,9 +1,8 @@
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Tls;
 using Org.BouncyCastle.Tls.Crypto.Impl.BC;
-using SharpDTLS;
-using SharpDTLS.DTLS13;
-using SharpDTLS.TLS13;
+using SharpDTLS.Protocol13;
+using SharpDTLS.Protocol13.TLS13;
 using System;
 using System.Collections.Generic;
 using System.Linq;

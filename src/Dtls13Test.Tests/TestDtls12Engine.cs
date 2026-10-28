@@ -1,7 +1,7 @@
 using SharpDTLS;
-using SharpDTLS.DTLS10;
-using SharpDTLS.DTLS12;
-using SharpSRTP.UDP;
+using SharpDTLS.Protocol12;
+using SharpDTLS.Protocol10.DTLS10;
+using SharpDTLS.Protocol12.DTLS12;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -38,7 +38,7 @@ namespace Dtls13Test.Tests
             var pair = new ScriptedTransportPair();
             var info = CipherSuites.Get(suite);
             var credentials = info.ServerCertificateType == CertificateKeyType.Ecdsa
-                ? SharpDTLS.DTLS13.Dtls13CryptoUtils.GenerateSelfSignedEcCertificate()
+                ? SharpDTLS.Protocol13.Dtls13CryptoUtils.GenerateSelfSignedEcCertificate()
                 : Dtls12CryptoUtils.GenerateSelfSignedCertificate();
             var server = new Dtls12Server(pair.Server, credentials.keyPair, credentials.certificate);
             var client = new Dtls12Client(pair.Client) { CipherSuites = new List<ushort> { suite } };

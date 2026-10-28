@@ -1,4 +1,4 @@
-using SharpDTLS;
+using SharpDTLS.Protocol12;
 using System;
 
 namespace Dtls13Test.Tests
