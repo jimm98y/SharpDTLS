@@ -19,15 +19,23 @@ using System.Threading.Tasks;
 namespace Dtls13Test.Tests
 {
     /// <summary>
-    /// Runs an OpenSSL command-line process and collects its output.
+    /// Runs an OpenSSL command-line process (or the wolfSSL harness) and collects its output.
     /// </summary>
     internal sealed class OpenSslProcess : IDisposable
     {
         private readonly Process _process;
+        private readonly PseudoConsoleProcess _console;
         private readonly StringBuilder _output = new();
 
         public OpenSslProcess(string arguments, string workingDirectory, string fileName = null)
         {
+            if (fileName == null && OperatingSystem.IsWindows())
+            {
+                // OpenSSL's apps would block reading a piped stdin on Windows; a console stdin they poll instead.
+                _console = new PseudoConsoleProcess(OpenSsl.Path, arguments, workingDirectory, line => { lock (_output) _output.AppendLine(line); });
+                return;
+            }
+
             _process = new Process
             {
                 StartInfo = new ProcessStartInfo(fileName ?? OpenSsl.Path, arguments)
@@ -71,11 +79,14 @@ namespace Dtls13Test.Tests
             {
                 if (Output.Contains(text))
                     return true;
-                if (_process.HasExited)
+                if (_console?.HasExited ?? _process.HasExited)
                 {
-                    // The parameterless overload also waits for the async stdout/stderr readers to reach EOF,
-                    // so the final lines (e.g. a bind error) are in Output before it is checked.
-                    _process.WaitForExit();
+                    // Both also wait for the output readers to reach EOF, so the final lines (e.g. a bind error) are
+                    // in Output before it is checked.
+                    if (_console != null)
+                        _console.WaitForExit();
+                    else
+                        _process.WaitForExit();
                     return Output.Contains(text);
                 }
                 Thread.Sleep(20);
@@ -85,12 +96,22 @@ namespace Dtls13Test.Tests
 
         public void WriteLine(string line)
         {
+            if (_console != null)
+            {
+                _console.WriteLine(line);
+                return;
+            }
             _process.StandardInput.Write(line + "\n");
             _process.StandardInput.Flush();
         }
 
         public void Dispose()
         {
+            if (_console != null)
+            {
+                _console.Dispose();
+                return;
+            }
             try { if (!_process.HasExited) _process.Kill(entireProcessTree: true); } catch { }
             _process.Dispose();
         }
@@ -98,8 +119,14 @@ namespace Dtls13Test.Tests
 
     internal static class OpenSsl
     {
+        // The OPENSSL environment variable, then Homebrew, the usual Unix paths and the Shining Light installers on Windows.
         private static readonly Lazy<string> _path = new(() =>
-            new[] { "/opt/homebrew/bin/openssl", "/usr/local/bin/openssl", "/usr/bin/openssl" }.FirstOrDefault(File.Exists));
+            new[]
+            {
+                Environment.GetEnvironmentVariable("OPENSSL"),
+                "/opt/homebrew/bin/openssl", "/usr/local/bin/openssl", "/usr/bin/openssl",
+                @"C:\Program Files\OpenSSL-Win64-ARM\bin\openssl.exe", @"C:\Program Files\OpenSSL-Win64\bin\openssl.exe",
+            }.FirstOrDefault(File.Exists));
 
         public static string Path => _path.Value;
 

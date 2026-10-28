@@ -32,17 +32,41 @@ namespace Dtls13Test.Tests
 
         private static string Build()
         {
-            string config = new[] { "/opt/homebrew/bin/wolfssl-config", "/usr/local/bin/wolfssl-config", "/usr/bin/wolfssl-config" }.FirstOrDefault(File.Exists);
             string source = Path.Combine(AppContext.BaseDirectory, "Interop", "wolfdtls13.c");
-            if (config == null || !File.Exists(source))
+            if (!File.Exists(source))
                 return null;
+            return OperatingSystem.IsWindows() ? BuildOnWindows(source) : BuildWithConfig(source);
+        }
 
-            string flags = Run(config, "--cflags --libs").Trim();
+        /// <summary>Compiles with cc and the flags of wolfssl-config (Homebrew or a Unix install).</summary>
+        private static string BuildWithConfig(string source)
+        {
+            string config = new[] { "/opt/homebrew/bin/wolfssl-config", "/usr/local/bin/wolfssl-config", "/usr/bin/wolfssl-config" }.FirstOrDefault(File.Exists);
+            string flags = config == null ? null : Run(config, "--cflags --libs");
             if (flags == null)
                 return null;
 
             string output = Path.Combine(OpenSsl.NewTempDirectory(), "wolfdtls13");
-            Run("/usr/bin/cc", $"-O1 -o {output} {source} {flags}");
+            Run("/usr/bin/cc", $"-O1 -o {output} {source} {flags.Trim()}");
+            return File.Exists(output) ? output : null;
+        }
+
+        /// <summary>
+        /// Compiles against a static wolfSSL in WOLFSSL_ROOT (by default %LOCALAPPDATA%\wolfssl, laid out as its
+        /// make install leaves it) with a MinGW-w64 C compiler: CC, else cc.exe on the PATH (e.g. llvm-mingw).
+        /// </summary>
+        private static string BuildOnWindows(string source)
+        {
+            string root = Environment.GetEnvironmentVariable("WOLFSSL_ROOT")
+                ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "wolfssl");
+            string library = Path.Combine(root, "lib", "libwolfssl.a");
+            string cc = Environment.GetEnvironmentVariable("CC")
+                ?? Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator).Select(d => Path.Combine(d, "cc.exe")).FirstOrDefault(File.Exists);
+            if (!File.Exists(library) || cc == null)
+                return null;
+
+            string output = Path.Combine(OpenSsl.NewTempDirectory(), "wolfdtls13.exe");
+            Run(cc, $"-O1 -o \"{output}\" \"{source}\" -I\"{Path.Combine(root, "include")}\" \"{library}\" -lws2_32 -lcrypt32 -ladvapi32");
             return File.Exists(output) ? output : null;
         }
 

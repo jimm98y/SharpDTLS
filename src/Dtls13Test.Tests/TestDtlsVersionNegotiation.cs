@@ -292,7 +292,7 @@ namespace Dtls13Test.Tests
             var (key, cert) = TestCredentials.For(CertificateKeyType.Ecdsa);
             string certPath = OpenSsl.WritePem(dir, "cert.pem", cert);
             string keyPath = OpenSsl.WritePem(dir, "key.pem", key.Private);
-            using var server = OpenSslProcess.StartServer(p => $"s_server -dtls -accept 127.0.0.1:{p} -cert {certPath} -key {keyPath}", dir, Timeout, out int port);
+            using var server = OpenSslProcess.StartServer(p => $"s_server -dtls1_2 -accept 127.0.0.1:{p} -cert {certPath} -key {keyPath}", dir, Timeout, out int port);
             Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), server.Output);
 
             using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
@@ -310,7 +310,7 @@ namespace Dtls13Test.Tests
             OpenSsl.RequireOpenSsl();
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
             var server = EchoServer(transport);
-            using var client = new OpenSslProcess($"s_client -dtls -connect 127.0.0.1:{transport.LocalEndpoint.Port}", OpenSsl.NewTempDirectory());
+            using var client = new OpenSslProcess($"s_client -dtls1_2 -connect 127.0.0.1:{transport.LocalEndpoint.Port}", OpenSsl.NewTempDirectory());
             Assert.IsTrue(SpinWait.SpinUntil(() => server.Connections.Any(c => c.IsHandshakeComplete), Timeout), client.Output);
             Assert.IsInstanceOfType<Tls12ServerConnection>(server.Connections.Single());
             client.WriteLine("ping");

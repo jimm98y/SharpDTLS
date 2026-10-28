@@ -41,15 +41,86 @@
 #include <wolfssl/options.h>
 #include <wolfssl/ssl.h>
 
-#include <arpa/inet.h>
-#include <fcntl.h>
-#include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <mstcpip.h>
+#include <windows.h>
+#define close closesocket
+#ifndef SIO_UDP_CONNRESET
+#define SIO_UDP_CONNRESET _WSAIOW(IOC_VENDOR, 12) /* not in the MinGW headers */
+#endif
+
+/* Windows cannot select() on stdin: a thread forwards it over a loopback UDP socket the main loop selects on. */
+static SOCKET stdinRx = INVALID_SOCKET, stdinTx = INVALID_SOCKET;
+
+static DWORD WINAPI stdin_thread(LPVOID arg)
+{
+    (void)arg;
+    char chunk[512];
+    DWORD got;
+    while (ReadFile(GetStdHandle(STD_INPUT_HANDLE), chunk, sizeof(chunk), &got, NULL) && got > 0)
+        send(stdinTx, chunk, (int)got, 0);
+    send(stdinTx, chunk, 0, 0); /* an empty datagram marks the end of stdin */
+    return 0;
+}
+
+static void platform_init(void)
+{
+    WSADATA wsa;
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+    struct sockaddr_in loopback;
+    int len = sizeof(loopback);
+    memset(&loopback, 0, sizeof(loopback));
+    loopback.sin_family = AF_INET;
+    loopback.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    stdinRx = socket(AF_INET, SOCK_DGRAM, 0);
+    stdinTx = socket(AF_INET, SOCK_DGRAM, 0);
+    bind(stdinRx, (struct sockaddr *)&loopback, sizeof(loopback));
+    getsockname(stdinRx, (struct sockaddr *)&loopback, &len);
+    connect(stdinTx, (struct sockaddr *)&loopback, sizeof(loopback));
+    CreateThread(NULL, 0, stdin_thread, NULL, 0, NULL);
+}
+
+static int stdin_fd(void) { return (int)stdinRx; }
+static int stdin_read(char *buf, size_t len) { return recv(stdinRx, buf, (int)len, 0); }
+
+/* A connected UDP socket would otherwise fail every recv after an ICMP port unreachable. */
+static void udp_ignore_unreachable(int fd)
+{
+    BOOL off = FALSE;
+    DWORD bytes;
+    WSAIoctl((SOCKET)fd, SIO_UDP_CONNRESET, &off, sizeof(off), NULL, 0, &bytes, NULL, NULL);
+}
+
+static void set_nonblocking(int fd)
+{
+    u_long on = 1;
+    ioctlsocket((SOCKET)fd, FIONBIO, &on);
+}
+
+/* Peeking at a datagram into a smaller buffer reports WSAEMSGSIZE, but the sender address is filled in. */
+static int peek_ok(int ret) { return ret >= 0 || WSAGetLastError() == WSAEMSGSIZE; }
+#else
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <netinet/in.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
+static void platform_init(void) { }
+static int stdin_fd(void) { return STDIN_FILENO; }
+/* read() rather than stdio: several lines may arrive at once and select() only sees the fd */
+static int stdin_read(char *buf, size_t len) { return (int)read(STDIN_FILENO, buf, len); }
+static void udp_ignore_unreachable(int fd) { (void)fd; }
+static void set_nonblocking(int fd) { fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK); }
+static int peek_ok(int ret) { return ret >= 0; }
+#endif
 
 static unsigned char pskKey[64];
 static unsigned int pskKeyLen;
@@ -152,6 +223,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[argi], "-export") && argi + 2 < argc) { exportLabel = argv[++argi]; exportLength = atoi(argv[++argi]); }
     }
 
+    platform_init();
     wolfSSL_Init();
     WOLFSSL_CTX *ctx = wolfSSL_CTX_new(tls ? (server ? wolfTLSv1_3_server_method() : wolfTLSv1_3_client_method())
                                            : (server ? wolfDTLSv1_3_server_method() : wolfDTLSv1_3_client_method()));
@@ -208,6 +280,8 @@ int main(int argc, char **argv)
     int listener = -1;
     for (int round = 0; round < rounds; round++) {
     fd = socket(AF_INET, tls ? SOCK_STREAM : SOCK_DGRAM, 0);
+    if (!tls)
+        udp_ignore_unreachable(fd);
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
@@ -222,7 +296,7 @@ int main(int argc, char **argv)
         if (listener < 0) {
             int one = 1;
             listener = socket(AF_INET, SOCK_STREAM, 0);
-            setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+            setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, (const char *)&one, sizeof(one));
             if (bind(listener, (struct sockaddr *)&addr, sizeof(addr)) != 0 || listen(listener, 4) != 0) { perror("bind"); return 1; }
             printf("ACCEPT\n");
             fflush(stdout);
@@ -231,7 +305,7 @@ int main(int argc, char **argv)
         if (fd < 0) { perror("accept"); return 1; }
     } else if (server) {
         int one = 1;
-        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&one, sizeof(one));
         if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) { perror("bind"); return 1; }
         if (round == 0) {
             printf("ACCEPT\n");
@@ -239,7 +313,7 @@ int main(int argc, char **argv)
         }
 
         char probe[1];
-        if (recvfrom(fd, probe, sizeof(probe), MSG_PEEK, (struct sockaddr *)&peer, &peerLen) < 0) { perror("recvfrom"); return 1; }
+        if (!peek_ok(recvfrom(fd, probe, sizeof(probe), MSG_PEEK, (struct sockaddr *)&peer, &peerLen))) { perror("recvfrom"); return 1; }
         if (connect(fd, (struct sockaddr *)&peer, peerLen) != 0) { perror("connect"); return 1; }
     } else {
         peer = addr;
@@ -323,7 +397,7 @@ int main(int argc, char **argv)
 
     if (!tls)
         wolfSSL_dtls_set_using_nonblock(ssl, 1);
-    fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
+    set_nonblocking(fd);
     if (round > 0)
         printf("%s\n", wolfSSL_session_reused(ssl) ? "RESUMED" : "NOT RESUMED");
     printf("CONNECTED %s\n", wolfSSL_get_cipher_name(ssl));
@@ -406,20 +480,19 @@ int main(int argc, char **argv)
     for (;;) {
         fd_set fds;
         FD_ZERO(&fds);
-        FD_SET(STDIN_FILENO, &fds);
+        FD_SET(stdin_fd(), &fds);
         FD_SET(fd, &fds);
         struct timeval tv = { 1, 0 };
 
-        int n = select(fd + 1, &fds, NULL, NULL, &tv);
+        int n = select((fd > stdin_fd() ? fd : stdin_fd()) + 1, &fds, NULL, NULL, &tv);
         if (n < 0) break;
         if (n == 0) {
             if (!tls) wolfSSL_dtls_got_timeout(ssl); /* drive retransmission of unacknowledged messages */
             continue;
         }
 
-        if (FD_ISSET(STDIN_FILENO, &fds)) {
-            /* read() rather than stdio: several lines may arrive at once and select() only sees the fd */
-            ssize_t got = read(STDIN_FILENO, line + lineLen, sizeof(line) - 1 - lineLen);
+        if (FD_ISSET(stdin_fd(), &fds)) {
+            int got = stdin_read(line + lineLen, sizeof(line) - 1 - lineLen);
             if (got <= 0) break;
             lineLen += (size_t)got;
 
