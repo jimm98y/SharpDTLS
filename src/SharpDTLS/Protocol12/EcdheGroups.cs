@@ -14,7 +14,7 @@ namespace SharpDTLS.Protocol12
     /// (EC)DHE named groups (RFC 8422, RFC 8446 §4.2.7). Private keys are opaque byte arrays:
     /// the raw scalar for X25519, the big-endian scalar for NIST curves.
     /// </summary>
-    public static class EcdheGroups
+    internal static class EcdheGroups
     {
         public const ushort Secp256r1 = 0x0017;
         public const ushort Secp384r1 = 0x0018;

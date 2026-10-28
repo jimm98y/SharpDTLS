@@ -14,7 +14,7 @@ namespace SharpDTLS.Protocol12
     /// DTLS 1.0/1.2 server: answers new clients statelessly with HelloVerifyRequest (RFC 6347 §4.2.1)
     /// and keeps one <see cref="Tls12ServerConnection"/> per remote endpoint, each with its own lock.
     /// </summary>
-    public abstract class Dtls12ServerBase : Tls12ServerBase
+    internal abstract class Dtls12ServerBase : Tls12ServerBase
     {
         private readonly ConcurrentDictionary<string, Tls12ServerConnection> _connections = new();
         private readonly ConcurrentDictionary<string, Tls12ServerConnection> _connectionsById = new();
@@ -38,7 +38,7 @@ namespace SharpDTLS.Protocol12
 
         /// <summary>
         /// Negotiate connection IDs (RFC 9146) with clients that offer them, routing their records by CID so a client
-        /// can change address (see <see cref="Tls12ServerConnection.PeerAddressChanged"/>).
+        /// can change address (see <see cref="TlsConnectionBase.PeerAddressChanged"/>).
         /// </summary>
         public bool UseConnectionIds { get => Settings.UseConnectionIds; set => Settings.UseConnectionIds = value; }
 

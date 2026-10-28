@@ -1,5 +1,6 @@
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.X509;
+using SharpDTLS;
 using SharpDTLS.Protocol13;
 using SharpDTLS.Protocol13.DTLS13;
 using SharpDTLS.UDP;
@@ -260,7 +261,7 @@ namespace Dtls13Test.Tests
                 CipherSuites = new List<ushort> { suite },
                 AllowPskOnlyKeyExchange = pskOnly,
                 ExternalPskResolver = id => Encoding.ASCII.GetString(id) == PskIdentity
-                    ? new Dtls13ExternalPsk(id, Convert.FromHexString(PskHex), suite) : null,
+                    ? new TlsExternalPsk(id, Convert.FromHexString(PskHex), suite) : null,
             };
             var received = new List<string>();
             server.ApplicationDataReceived += (_, e) => { lock (received) received.Add(Encoding.UTF8.GetString(e.Data)); };
@@ -301,7 +302,7 @@ namespace Dtls13Test.Tests
             var client = Handshake(new Dtls13Client(transport)
             {
                 CipherSuites = new List<ushort> { suite },
-                ExternalPsk = new Dtls13ExternalPsk(Encoding.ASCII.GetBytes(PskIdentity), Convert.FromHexString(PskHex), suite),
+                ExternalPsk = new TlsExternalPsk(Encoding.ASCII.GetBytes(PskIdentity), Convert.FromHexString(PskHex), suite),
                 PskKeyExchangeModes = pskOnly ? new[] { PskKeyExchangeModesExtension.PskKe } : new[] { PskKeyExchangeModesExtension.PskDheKe },
             }, server);
             Assert.IsTrue(client.IsExternalPsk, "wolfSSL did not accept the PSK:\n" + server.Output);

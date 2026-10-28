@@ -6,7 +6,7 @@ namespace SharpDTLS.Protocol12.Messages
 {
     // DTLS 1.2 ServerKeyExchange for ECDHE_RSA cipher suites.
     // Body: ECCurveType(1) + NamedCurve(2) + point_length(1) + point(N) + hash_alg(1) + sig_alg(1) + sig_length(2) + sig
-    public class ServerKeyExchangeDatagram : IDatagram
+    internal class ServerKeyExchangeDatagram : IDatagram
     {
         public ushort MessageSequenceNumber { get; set; } = 3;
         public int RecordSequenceNumber { get; set; }

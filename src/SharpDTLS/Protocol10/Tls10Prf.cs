@@ -11,7 +11,7 @@ namespace SharpDTLS.Protocol10
     /// The TLS 1.0/1.1 PRF (RFC 2246 §5, RFC 4346 §5) and what is derived with it: master secret, extended master
     /// secret, Finished verify_data and exported keying material. DTLS 1.0 uses it unchanged.
     /// </summary>
-    public static class Tls10Prf
+    internal static class Tls10Prf
     {
         // TLS 1.0 PRF = P_MD5(S1, label+seed) XOR P_SHA1(S2, label+seed)
         // S1 = first ceil(len/2) bytes of secret, S2 = last ceil(len/2) bytes

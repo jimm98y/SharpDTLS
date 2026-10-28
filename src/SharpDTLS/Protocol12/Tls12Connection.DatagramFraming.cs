@@ -6,7 +6,7 @@ using System.Linq;
 
 namespace SharpDTLS.Protocol12
 {
-    public abstract partial class Tls12Connection
+    internal abstract partial class Tls12Connection
     {
         /// <summary>
         /// DTLS framing (RFC 6347): explicit epochs and sequence numbers with replay windows, records of the next

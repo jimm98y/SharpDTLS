@@ -6,7 +6,7 @@ namespace SharpDTLS.Protocol12.Messages
 {
     // DTLS 1.2 ClientKeyExchange for ECDHE: transmits the client's ECDHE public key.
     // Body: point_length(1) + point_data(N)
-    public class ClientKeyExchangeDatagram : IDatagram
+    internal class ClientKeyExchangeDatagram : IDatagram
     {
         public ushort MessageSequenceNumber { get; set; } = 2;
         public int RecordSequenceNumber { get; set; }

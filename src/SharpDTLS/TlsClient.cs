@@ -1,11 +1,8 @@
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.X509;
 using SharpDTLS.Protocol12;
 using SharpDTLS.Protocol12.TLS12;
 using SharpDTLS.Protocol13;
 using SharpDTLS.Protocol13.TLS13;
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
@@ -16,16 +13,15 @@ namespace SharpDTLS
     /// A TLS client for every version: one ClientHello offers TLS 1.3 and TLS 1.2 and below, and the server's choice
     /// decides which version continues. A TLS 1.2 ServerHello carrying the RFC 8446 downgrade sentinel is rejected.
     /// </summary>
-    public sealed class TlsClient
+    public sealed class TlsClient : TlsClientBase
     {
         private readonly Stream _stream;
         private TlsConnectionBase _active;
 
         public TlsClient(Stream stream, bool leaveStreamOpen = false)
+            : base(new Tls12Client(record => TlsStreamPump.Write(stream, record)), new Tls13Client(record => TlsStreamPump.Write(stream, record)))
         {
             _stream = stream;
-            Tls12 = new Tls12Client(record => TlsStreamPump.Write(stream, record));
-            Tls13 = new Tls13Client(record => TlsStreamPump.Write(stream, record));
             Tls13.LegacyServerHello += pending =>
             {
                 _active = Tls12;
@@ -47,13 +43,14 @@ namespace SharpDTLS
             }
             Tls12.HandshakeFinished += (_, _) => HandshakeFinished?.Invoke(this, EventArgs.Empty);
             Tls13.HandshakeFinished += (_, _) => HandshakeFinished?.Invoke(this, EventArgs.Empty);
+            WireSessionEvents();
         }
 
         /// <summary>The TLS 1.0-1.2 engine.</summary>
-        internal Tls12Client Tls12 { get; }
+        internal Tls12Client Tls12 => (Tls12Client)Engine12;
 
         /// <summary>The TLS 1.3 engine.</summary>
-        internal Tls13Client Tls13 { get; }
+        internal Tls13Client Tls13 => (Tls13Client)Engine13;
 
         /// <summary>The oldest version offered; TLS 1.2 by default (RFC 8996 deprecates 1.0 and 1.1).</summary>
         public ushort MinimumVersion { get; set; } = TlsVersion.Tls12;
@@ -71,45 +68,6 @@ namespace SharpDTLS
         public bool IsHandshakeComplete => _active?.IsHandshakeComplete == true;
         public string ApplicationProtocol => _active?.ApplicationProtocol;
         public int MaxApplicationDataSize => _active?.MaxApplicationDataSize ?? TlsConnectionBase.MaxRecordPayload;
-
-        // ── Settings shared by both engines ──────────────────────────────────────────────────
-
-        /// <summary>The server's host name, sent in server_name.</summary>
-        public string ServerName
-        {
-            get => Tls13.ServerName;
-            set { Tls12.ServerName = value; Tls13.ServerName = value; }
-        }
-
-        public IList<string> ApplicationProtocols
-        {
-            get => Tls13.ApplicationProtocols;
-            set { Tls12.ApplicationProtocols = value; Tls13.ApplicationProtocols = value; }
-        }
-
-        public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ServerCertificateValidator
-        {
-            get => Tls13.ServerCertificateValidator;
-            set { Tls12.ServerCertificateValidator = value; Tls13.ServerCertificateValidator = value; }
-        }
-
-        public AsymmetricCipherKeyPair ClientCertificateKeyPair
-        {
-            get => Tls13.ClientCertificateKeyPair;
-            set { Tls12.ClientCertificateKeyPair = value; Tls13.ClientCertificateKeyPair = value; }
-        }
-
-        public X509Certificate ClientCertificate
-        {
-            get => Tls13.ClientCertificate;
-            set { Tls12.ClientCertificate = value; Tls13.ClientCertificate = value; }
-        }
-
-        public IList<X509Certificate> ClientIntermediateCertificates
-        {
-            get => Tls13.ClientIntermediateCertificates;
-            set { Tls12.ClientIntermediateCertificates = value; Tls13.ClientIntermediateCertificates = value; }
-        }
 
         public event EventHandler HandshakeFinished;
         public event EventHandler<byte[]> ApplicationDataReceived;

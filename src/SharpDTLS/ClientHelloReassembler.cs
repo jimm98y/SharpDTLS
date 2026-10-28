@@ -10,7 +10,7 @@ namespace SharpDTLS
     /// records; servers must reassemble it before they can answer. Memory use is bounded: few pending
     /// endpoints, a size cap per message, and entries expire.
     /// </summary>
-    public sealed class ClientHelloReassembler
+    internal sealed class ClientHelloReassembler
     {
         private const int MaxPendingEndpoints = 64;
         private const int MaxClientHelloLength = 16 * 1024;

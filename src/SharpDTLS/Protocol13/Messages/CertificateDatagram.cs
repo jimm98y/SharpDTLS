@@ -8,7 +8,7 @@ namespace SharpDTLS.Protocol13.Messages
     /// <summary>
     /// TLS 1.3 Certificate message (RFC 8446 §4.4.2) with X.509 entries.
     /// </summary>
-    public class CertificateDatagram : IHandshakeDatagram
+    internal class CertificateDatagram : IHandshakeDatagram
     {
         public int SequenceNumber { get; set; } = 2;
         public byte[] RequestContext { get; set; } = Array.Empty<byte>();

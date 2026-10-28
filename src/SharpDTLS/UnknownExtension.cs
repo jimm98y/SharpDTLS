@@ -6,7 +6,7 @@ namespace SharpDTLS
     /// An extension this implementation does not interpret. Unknown extensions MUST be ignored
     /// (RFC 8446 §4.2), so the raw bytes are only kept for round-tripping.
     /// </summary>
-    public class UnknownExtension : ITlsExtension
+    internal class UnknownExtension : ITlsExtension
     {
         public ushort ExtensionType { get; private set; }
         public byte[] Data { get; private set; } = Array.Empty<byte>();

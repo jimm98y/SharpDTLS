@@ -10,7 +10,7 @@ namespace SharpDTLS.Protocol12
     /// TLS 1.2 SignatureAndHashAlgorithm handling (RFC 5246 §7.4.1.4.1, RFC 8446 §4.2.3 code points).
     /// The scheme is written as (hash &lt;&lt; 8) | signature.
     /// </summary>
-    public static class Dtls12Signatures
+    internal static class Dtls12Signatures
     {
         public const ushort RsaPkcs1Sha256 = 0x0401;
         public const ushort RsaPkcs1Sha384 = 0x0501;

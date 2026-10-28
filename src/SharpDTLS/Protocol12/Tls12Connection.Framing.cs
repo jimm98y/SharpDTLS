@@ -2,7 +2,7 @@ using System;
 
 namespace SharpDTLS.Protocol12
 {
-    public abstract partial class Tls12Connection
+    internal abstract partial class Tls12Connection
     {
         /// <summary>
         /// The record layer and handshake message transport under the (D)TLS 1.0-1.2 handshake: record protection

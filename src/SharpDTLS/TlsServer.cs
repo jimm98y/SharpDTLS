@@ -32,7 +32,7 @@ namespace SharpDTLS
     /// A TLS server for every version: each connection's ClientHello decides between TLS 1.3 and TLS 1.0-1.2. A TLS 1.2
     /// handshake carries the RFC 8446 downgrade sentinel while TLS 1.3 is enabled.
     /// </summary>
-    public class TlsServer : IDisposable
+    public class TlsServer : TlsServerBase, IDisposable
     {
         private TcpListener _listener;
 
@@ -42,15 +42,15 @@ namespace SharpDTLS
         }
 
         public TlsServer(AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
+            : base(new Tls12Server(keyPair, certificate), new Tls13Server(keyPair, certificate))
         {
-            Tls12 = new Tls12Server(keyPair, certificate);
-            Tls13 = new Tls13Server(keyPair, certificate);
             Tls12.HandshakeFinished += (_, c) => HandshakeFinished?.Invoke(this, c);
             Tls13.HandshakeFinished += (_, c) => HandshakeFinished?.Invoke(this, c);
             Tls12.ApplicationDataReceived += (_, e) => ApplicationDataReceived?.Invoke(this, new TlsDataReceivedEventArgs(e.Connection, e.Data));
             Tls13.ApplicationDataReceived += (_, e) => ApplicationDataReceived?.Invoke(this, new TlsDataReceivedEventArgs(e.Connection, e.Data));
             Tls12.ConnectionClosed += (_, c) => ConnectionClosed?.Invoke(this, c);
             Tls13.ConnectionClosed += (_, c) => ConnectionClosed?.Invoke(this, c);
+            Tls13.EarlyDataReceived += (_, e) => EarlyDataReceived?.Invoke(this, new TlsDataReceivedEventArgs(e.Connection, e.Data));
             Tls12.ConnectionCreated += OnConnectionCreated;
             Tls13.ConnectionCreated += OnConnectionCreated;
         }
@@ -61,10 +61,10 @@ namespace SharpDTLS
         }
 
         /// <summary>The TLS 1.0-1.2 engine.</summary>
-        internal Tls12Server Tls12 { get; }
+        internal Tls12Server Tls12 => (Tls12Server)Engine12;
 
         /// <summary>The TLS 1.3 engine.</summary>
-        internal Tls13Server Tls13 { get; }
+        internal Tls13Server Tls13 => (Tls13Server)Engine13;
 
         /// <summary>The oldest version accepted; TLS 1.2 by default (RFC 8996 deprecates 1.0 and 1.1).</summary>
         public ushort MinimumVersion { get => Tls12.MinimumVersion; set => Tls12.MinimumVersion = value; }
@@ -72,60 +72,12 @@ namespace SharpDTLS
         /// <summary>The newest version offered: TLS 1.3 (the default) or TLS 1.2 to turn TLS 1.3 off.</summary>
         public ushort MaximumVersion { get; set; } = TlsVersion.Tls13;
 
-        // ── Settings shared by both engines ──────────────────────────────────────────────────
-
-        /// <summary>Intermediate CA certificates sent after the server certificate.</summary>
-        public IList<X509Certificate> IntermediateCertificates
-        {
-            get => Tls13.IntermediateCertificates;
-            set { Tls12.IntermediateCertificates = value; Tls13.IntermediateCertificates = value; }
-        }
-
-        /// <summary>Chooses credentials from the client's server_name; null keeps the default certificate.</summary>
-        public Func<string, ServerCredentials> CertificateSelector
-        {
-            get => Tls13.CertificateSelector;
-            set { Tls12.CertificateSelector = value; Tls13.CertificateSelector = value; }
-        }
-
-        /// <summary>Application protocols (ALPN) in server preference order.</summary>
-        public IList<string> ApplicationProtocols
-        {
-            get => Tls13.ApplicationProtocols;
-            set { Tls12.ApplicationProtocols = value; Tls13.ApplicationProtocols = value; }
-        }
-
-        public bool RequireClientCertificate
-        {
-            get => Tls13.RequireClientCertificate;
-            set { Tls12.RequireClientCertificate = value; Tls13.RequireClientCertificate = value; }
-        }
-
-        public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ClientCertificateValidator
-        {
-            get => Tls13.ClientCertificateValidator;
-            set { Tls12.ClientCertificateValidator = value; Tls13.ClientCertificateValidator = value; }
-        }
-
-        /// <summary>
-        /// Keys for session tickets (random per server by default); share them between servers to let them resume each
-        /// other's sessions, or set null to disable tickets.
-        /// </summary>
-        public SessionTicketKeys TicketKeys
-        {
-            get => Tls13.TicketKeys;
-            set { Tls12.TicketKeys = value; Tls13.TicketKeys = value; }
-        }
-
-        /// <summary>Resumable TLS 1.0-1.2 sessions by session ID; null disables session ID resumption.</summary>
-        public IDtls12SessionCache SessionCache
-        {
-            get => Tls12.SessionCache;
-            set => Tls12.SessionCache = value;
-        }
-
         public event EventHandler<TlsConnectionBase> HandshakeFinished;
         public event EventHandler<TlsDataReceivedEventArgs> ApplicationDataReceived;
+
+        /// <summary>0-RTT data a TLS 1.3 client sent with its ClientHello (see <see cref="TlsServerBase.MaxEarlyDataSize"/>).</summary>
+        public event EventHandler<TlsDataReceivedEventArgs> EarlyDataReceived;
+
         public event EventHandler<TlsConnectionBase> ConnectionClosed;
         public event EventHandler<TlsAlertEventArgs> AlertReceived;
 

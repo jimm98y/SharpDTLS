@@ -8,7 +8,7 @@ namespace SharpDTLS.Protocol13.Messages
     /// CompressedCertificate (RFC 8879 §4): a Certificate message body, compressed. It takes the Certificate's place in the
     /// handshake and in the transcript.
     /// </summary>
-    public class CompressedCertificateDatagram : IHandshakeDatagram
+    internal class CompressedCertificateDatagram : IHandshakeDatagram
     {
         public const byte HandshakeType = 25;
 

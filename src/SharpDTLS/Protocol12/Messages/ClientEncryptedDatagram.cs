@@ -8,7 +8,7 @@ namespace SharpDTLS.Protocol12.Messages
 {
     // Wraps a client-sent DTLS 1.2 encrypted record.
     // Supports AES-GCM and ChaCha20-Poly1305 depending on the negotiated cipher suite.
-    public class ClientEncryptedDatagram : IDatagram
+    internal class ClientEncryptedDatagram : IDatagram
     {
         private readonly Dtls12CryptoContext _ctx;
 

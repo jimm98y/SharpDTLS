@@ -299,7 +299,7 @@ namespace Dtls13Test.Tests
             string sessionFile = System.IO.Path.Combine(dir, "session.pem");
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
             var server = new Dtls12Server(transport) { MinimumVersion = DtlsVersion.Dtls10 };
-            var cache = new Dtls12SessionCache();
+            var cache = new TlsSessionCache();
             server.SessionCache = cache;
             string connect = $"s_client {versionFlag} -cipher ECDHE-RSA-AES128-SHA@SECLEVEL=0 -connect 127.0.0.1:{transport.LocalEndpoint.Port}"
                 + (tickets ? "" : " -no_ticket");

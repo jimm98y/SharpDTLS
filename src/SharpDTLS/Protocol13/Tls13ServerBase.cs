@@ -13,7 +13,7 @@ namespace SharpDTLS.Protocol13
     /// The configuration shared by (D)TLS 1.3 servers: credentials, suites, groups, client authentication, extensions,
     /// resumption and 0-RTT. <see cref="Dtls13Server"/> adds the datagram transport, cookies, SRTP and connection IDs.
     /// </summary>
-    public abstract class Tls13ServerBase
+    internal abstract class Tls13ServerBase
     {
         protected Tls13ServerBase(AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
         {
@@ -104,7 +104,7 @@ namespace SharpDTLS.Protocol13
         public SessionTicketKeys TicketKeys { get; set; } = new SessionTicketKeys();
 
         /// <summary>Maps a client's PSK identity to its external PSK (null for unknown identities); enables external PSKs.</summary>
-        public Func<byte[], Dtls13ExternalPsk> ExternalPskResolver { get; set; }
+        public Func<byte[], TlsExternalPsk> ExternalPskResolver { get; set; }
 
         /// <summary>
         /// Accept psk_ke, PSK handshakes without (EC)DHE (RFC 8446 §4.2.9), when the client offers it. Off by default:

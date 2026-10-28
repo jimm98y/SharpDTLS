@@ -7,7 +7,7 @@ namespace SharpDTLS.Protocol13
     /// <summary>
     /// A DTLS 1.3 session ticket received from a server (RFC 8446 §4.6.1), usable for PSK resumption.
     /// </summary>
-    public sealed class Dtls13SessionTicket
+    internal sealed class Dtls13SessionTicket : TlsSession
     {
         internal Dtls13SessionTicket(byte[] ticket, uint lifetimeSeconds, uint ageAdd, ushort cipherSuite, byte[] psk, byte[] serverCertificate,
             uint maxEarlyDataSize = 0, string serverName = null, string applicationProtocol = null)
@@ -30,7 +30,7 @@ namespace SharpDTLS.Protocol13
         public uint LifetimeSeconds { get; }
 
         /// <summary>The suite of the session that issued the ticket; resumption needs a suite with the same hash.</summary>
-        public ushort CipherSuite { get; }
+        public override ushort CipherSuite { get; }
 
         /// <summary>The server's certificate (DER) from the full handshake.</summary>
         public byte[] ServerCertificate { get; }
@@ -38,13 +38,16 @@ namespace SharpDTLS.Protocol13
         public DateTime ReceivedUtc { get; }
 
         /// <summary>The server_name of the connection that issued the ticket; it is offered only for the same name.</summary>
-        public string ServerName { get; }
+        public override string ServerName { get; }
 
         /// <summary>The ALPN protocol of the issuing connection; 0-RTT data must use the same one (RFC 8446 §4.2.10).</summary>
         public string ApplicationProtocol { get; }
 
         /// <summary>How much 0-RTT data the server accepts with this ticket (0: none).</summary>
-        public uint MaxEarlyDataSize { get; }
+        public override uint MaxEarlyDataSize { get; }
+
+        public override byte[] PeerCertificate => ServerCertificate;
+        public override DateTime CreatedUtc => ReceivedUtc;
 
         public bool IsExpired => DateTime.UtcNow - ReceivedUtc >= TimeSpan.FromSeconds(LifetimeSeconds);
 
@@ -53,33 +56,6 @@ namespace SharpDTLS.Protocol13
 
         /// <summary>obfuscated_ticket_age = (milliseconds since the ticket arrived + ticket_age_add) mod 2^32.</summary>
         internal uint ObfuscatedAge => unchecked((uint)(DateTime.UtcNow - ReceivedUtc).TotalMilliseconds + AgeAdd);
-    }
-
-    /// <summary>
-    /// An external (out-of-band provisioned) pre-shared key for DTLS 1.3 (RFC 8446 §2.2, §4.2.11). TLS 1.3 binds
-    /// every PSK to one hash; it is the hash of <see cref="CipherSuite"/>, and the handshake must negotiate a suite
-    /// with that hash.
-    /// </summary>
-    public sealed class Dtls13ExternalPsk
-    {
-        public Dtls13ExternalPsk(byte[] identity, byte[] key, ushort cipherSuite = Dtls13CipherSuite.TLS_AES_128_GCM_SHA256)
-        {
-            if (identity == null || identity.Length == 0)
-                throw new ArgumentException("The PSK identity must not be empty.", nameof(identity));
-            if (key == null || key.Length == 0)
-                throw new ArgumentException("The PSK must not be empty.", nameof(key));
-            if (!Dtls13CipherSuite.IsSupported(cipherSuite))
-                throw new ArgumentException($"Cipher suite 0x{cipherSuite:X4} is not supported.", nameof(cipherSuite));
-            Identity = identity;
-            Key = key;
-            CipherSuite = cipherSuite;
-        }
-
-        public byte[] Identity { get; }
-        public byte[] Key { get; }
-
-        /// <summary>A suite whose hash is the PSK's hash.</summary>
-        public ushort CipherSuite { get; }
     }
 
     /// <summary>What a DTLS 1.3 server seals into a ticket.</summary>
@@ -149,7 +125,7 @@ namespace SharpDTLS.Protocol13
     /// early_data (RFC 8446 §4.2.10): empty in ClientHello and EncryptedExtensions, max_early_data_size in
     /// NewSessionTicket.
     /// </summary>
-    public class EarlyDataExtension : ITlsExtension
+    internal class EarlyDataExtension : ITlsExtension
     {
         public const ushort Type = 0x002a;
 
@@ -190,7 +166,7 @@ namespace SharpDTLS.Protocol13
     }
 
     /// <summary>psk_key_exchange_modes (RFC 8446 §4.2.9): psk_ke(0), psk_dhe_ke(1).</summary>
-    public class PskKeyExchangeModesExtension : ITlsExtension
+    internal class PskKeyExchangeModesExtension : ITlsExtension
     {
         public const ushort Type = 0x002d;
         public const byte PskKe = 0;
@@ -228,7 +204,7 @@ namespace SharpDTLS.Protocol13
     /// pre_shared_key in ClientHello (RFC 8446 §4.2.11): identities&lt;7..2^16-1&gt; (identity&lt;1..2^16-1&gt;,
     /// obfuscated_ticket_age) and binders&lt;33..2^16-1&gt;. It must be the last extension.
     /// </summary>
-    public class ClientPreSharedKeyExtension : ITlsExtension
+    internal class ClientPreSharedKeyExtension : ITlsExtension
     {
         public const ushort Type = 0x0029;
 
@@ -278,7 +254,7 @@ namespace SharpDTLS.Protocol13
     }
 
     /// <summary>pre_shared_key in ServerHello: the selected identity index.</summary>
-    public class ServerPreSharedKeyExtension : ITlsExtension
+    internal class ServerPreSharedKeyExtension : ITlsExtension
     {
         public ServerPreSharedKeyExtension() { }
         public ServerPreSharedKeyExtension(ushort selectedIdentity) => SelectedIdentity = selectedIdentity;

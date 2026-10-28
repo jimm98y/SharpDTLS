@@ -8,7 +8,7 @@ namespace SharpDTLS.Protocol13.TLS13
     /// shared 1.3 client handshake over TLS records (RFC 8446), so the same settings apply; DTLS-only ones (SRTP,
     /// connection IDs) are ignored. 0-RTT data (EarlyData, with a ResumptionTicket) ends with EndOfEarlyData.
     /// </summary>
-    public class Tls13Client : Tls13ClientConnection
+    internal class Tls13Client : Tls13ClientConnection
     {
         // Shares for the post-quantum hybrid that servers such as OpenSSL 3.5+ prefer, and for x25519: either way no
         // HelloRetryRequest (which also costs 0-RTT). Over a stream the larger ClientHello is no problem.

@@ -7,7 +7,7 @@ namespace SharpDTLS.Protocol13
     /// Handshake transcript. DTLS 1.3 hashes messages in TLS 1.3 form: the DTLS-only
     /// message_seq, fragment_offset and fragment_length fields are omitted (RFC 9147 §5.2).
     /// </summary>
-    public sealed class Dtls13Transcript
+    internal sealed class Dtls13Transcript
     {
         private const int DtlsHandshakeHeaderLength = 12;
         private readonly List<byte[]> _messages = new();

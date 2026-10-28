@@ -59,7 +59,7 @@ namespace SharpDTLS
     /// A record that must be silently discarded (duplicate, unauthenticated or for an unknown epoch).
     /// Per RFC 9147 §4.5.2 such records do not terminate the connection.
     /// </summary>
-    public class DtlsRecordDiscardedException : Exception
+    internal class DtlsRecordDiscardedException : Exception
     {
         public DtlsRecordDiscardedException(string message) : base(message) { }
         public DtlsRecordDiscardedException(string message, Exception innerException) : base(message, innerException) { }

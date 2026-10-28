@@ -10,7 +10,7 @@ namespace SharpDTLS
     /// One instance per connection direction (e.g. one for server-to-client traffic).
     /// Thread-safety: not thread-safe; callers must synchronise if needed.
     /// </summary>
-    public sealed class HandshakeReassembler
+    internal sealed class HandshakeReassembler
     {
         private readonly struct Key : IEquatable<Key>
         {

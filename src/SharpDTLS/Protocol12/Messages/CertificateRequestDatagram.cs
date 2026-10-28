@@ -6,7 +6,7 @@ namespace SharpDTLS.Protocol12.Messages
 {
     // DTLS 1.2 CertificateRequest (RFC 5246 §7.4.4).
     // Body: certificate_types + supported_signature_algorithms + distinguished_names.
-    public class CertificateRequestDatagram : IDatagram
+    internal class CertificateRequestDatagram : IDatagram
     {
         public int    RecordSequenceNumber  { get; set; }
         public ushort MessageSequenceNumber { get; set; }

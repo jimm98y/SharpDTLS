@@ -7,7 +7,7 @@ namespace SharpDTLS.Protocol12.Messages
     // DTLS 1.2 Certificate message.
     // Unlike DTLS 1.3 there is no request_context field.
     // Format: cert_list_length(3) + cert_length(3) + cert_data
-    public class ServerCertificateDatagram : IDatagram
+    internal class ServerCertificateDatagram : IDatagram
     {
         public ushort MessageSequenceNumber { get; set; } = 2;
         public byte[] Certificate { get; set; }

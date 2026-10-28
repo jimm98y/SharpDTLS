@@ -18,7 +18,7 @@ using System.Text;
 
 namespace SharpDTLS.Protocol13
 {
-    public static class Dtls13CryptoUtils
+    internal static class Dtls13CryptoUtils
     {
         private static readonly byte[] _cookieKey;
         private static readonly BcTlsCrypto _crypto = new BcTlsCrypto();

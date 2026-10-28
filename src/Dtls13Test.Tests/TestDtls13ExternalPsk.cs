@@ -28,7 +28,7 @@ namespace Dtls13Test.Tests
             public List<string> ServerReceived = new();
         }
 
-        private static Dtls13ExternalPsk Resolve(byte[] identity) => identity.AsSpan().SequenceEqual(Identity) ? new Dtls13ExternalPsk(Identity, Key) : null;
+        private static TlsExternalPsk Resolve(byte[] identity) => identity.AsSpan().SequenceEqual(Identity) ? new TlsExternalPsk(Identity, Key) : null;
 
         private static Run Connect(Action<Dtls13Server> configureServer, Action<Dtls13Client> configureClient, bool expectSuccess = true,
             bool certificate = true)
@@ -39,7 +39,7 @@ namespace Dtls13Test.Tests
             r.Server.ExternalPskResolver = Resolve;
             configureServer?.Invoke(r.Server);
             r.Server.ApplicationDataReceived += (_, e) => { lock (r.ServerReceived) r.ServerReceived.Add(Encoding.UTF8.GetString(e.Data)); };
-            r.Client = new Dtls13Client(r.Pair.Client) { ExternalPsk = new Dtls13ExternalPsk(Identity, Key), InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50) };
+            r.Client = new Dtls13Client(r.Pair.Client) { ExternalPsk = new TlsExternalPsk(Identity, Key), InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50) };
             configureClient?.Invoke(r.Client);
 
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -74,7 +74,7 @@ namespace Dtls13Test.Tests
         [TestMethod]
         public void ExternalPsk_WithSha384()
         {
-            var psk = new Dtls13ExternalPsk(Identity, Key, Dtls13CipherSuite.TLS_AES_256_GCM_SHA384);
+            var psk = new TlsExternalPsk(Identity, Key, Dtls13CipherSuite.TLS_AES_256_GCM_SHA384);
             var r = Connect(s => { s.ExternalPskResolver = _ => psk; s.CipherSuites = new List<ushort> { 0x1302 }; },
                 c => { c.ExternalPsk = psk; c.CipherSuites = new List<ushort> { 0x1302 }; });
             Assert.IsTrue(r.Client.IsExternalPsk);
@@ -109,14 +109,14 @@ namespace Dtls13Test.Tests
         {
             byte[] wrong = (byte[])Key.Clone();
             wrong[^1] ^= 1;
-            var r = Connect(null, c => c.ExternalPsk = new Dtls13ExternalPsk(Identity, wrong), expectSuccess: false);
+            var r = Connect(null, c => c.ExternalPsk = new TlsExternalPsk(Identity, wrong), expectSuccess: false);
             Assert.AreEqual(AlertDescription.DecryptError, (r.ClientError as DtlsException)?.Alert, r.ClientError?.ToString());
         }
 
         [TestMethod]
         public void UnknownIdentity_FallsBackToACertificateHandshake()
         {
-            var r = Connect(null, c => c.ExternalPsk = new Dtls13ExternalPsk(Encoding.ASCII.GetBytes("stranger"), Key));
+            var r = Connect(null, c => c.ExternalPsk = new TlsExternalPsk(Encoding.ASCII.GetBytes("stranger"), Key));
             Assert.IsFalse(r.Client.IsExternalPsk);
             Assert.IsNotNull(r.Client.ServerCertificate);
         }
@@ -127,7 +127,7 @@ namespace Dtls13Test.Tests
             var ok = Connect(null, null, certificate: false);
             Assert.IsTrue(ok.Client.IsExternalPsk);
 
-            var r = Connect(null, c => c.ExternalPsk = new Dtls13ExternalPsk(Encoding.ASCII.GetBytes("stranger"), Key),
+            var r = Connect(null, c => c.ExternalPsk = new TlsExternalPsk(Encoding.ASCII.GetBytes("stranger"), Key),
                 expectSuccess: false, certificate: false);
             Assert.AreEqual(AlertDescription.HandshakeFailure, (r.ClientError as DtlsException)?.Alert, r.ClientError?.ToString());
         }

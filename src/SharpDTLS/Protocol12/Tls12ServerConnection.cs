@@ -12,7 +12,7 @@ using System.Security.Cryptography;
 namespace SharpDTLS.Protocol12
 {
     /// <summary>Configuration shared by all connections of a (D)TLS 1.0-1.2 server.</summary>
-    public sealed class Tls12ServerSettings
+    internal sealed class Tls12ServerSettings
     {
         public AsymmetricCipherKeyPair KeyPair { get; set; }
         public X509Certificate Certificate { get; set; }
@@ -72,7 +72,7 @@ namespace SharpDTLS.Protocol12
         public ECPrivateKeyParameters PwdProtectionKey { get; set; }
 
         /// <summary>Resumable sessions by session ID; null disables session ID resumption.</summary>
-        public IDtls12SessionCache SessionCache { get; set; } = new Dtls12SessionCache();
+        public ITlsSessionCache SessionCache { get; set; } = new TlsSessionCache();
 
         /// <summary>Intermediate CA certificates sent after the server certificate, issuer of the previous one first.</summary>
         public IList<X509Certificate> IntermediateCertificates { get; set; }
@@ -124,7 +124,7 @@ namespace SharpDTLS.Protocol12
     /// Server side of one (D)TLS 1.0-1.2 connection: over datagrams created once the ClientHello has passed the
     /// cookie exchange (RFC 6347 §4.2.1), over a stream reading the ClientHello itself.
     /// </summary>
-    public class Tls12ServerConnection : Tls12Connection
+    internal class Tls12ServerConnection : Tls12Connection
     {
         private enum State
         {
@@ -177,20 +177,13 @@ namespace SharpDTLS.Protocol12
         private readonly PeerAddressTracker _address;
 
         /// <summary>Where this connection sends: the client's address, which can move with connection IDs.</summary>
-        public EndPoint RemoteEndPoint => _address.Current;
+        public override EndPoint RemoteEndPoint => _address.Current;
 
         /// <summary>A newer client address awaiting <see cref="ConfirmPeerAddress"/> (when not following automatically).</summary>
-        public EndPoint PendingPeerAddress => _address.Pending;
-
-        /// <summary>
-        /// The client appeared at a new address (RFC 9146 §6): a record carrying our CID authenticated, was newer than
-        /// any before and came from elsewhere. With AutoUpdatePeerAddress replies already go there; otherwise the
-        /// address is pending until <see cref="ConfirmPeerAddress"/>.
-        /// </summary>
-        public event EventHandler<(EndPoint Old, EndPoint New)> PeerAddressChanged;
+        public override EndPoint PendingPeerAddress => _address.Pending;
 
         /// <summary>Sends to <paramref name="address"/> from now on, after the application has checked it can be reached.</summary>
-        public void ConfirmPeerAddress(EndPoint address) => Locked(() =>
+        public override void ConfirmPeerAddress(EndPoint address) => Locked(() =>
         {
             var old = _address.Current;
             _address.Confirm(address);
@@ -206,13 +199,10 @@ namespace SharpDTLS.Protocol12
                 return;
             var change = (old, DatagramSource);
             Debug.WriteLine($"{LogPrefix} Peer address {(_settings.AutoUpdatePeerAddress ? "changed" : "pending")}: {old} -> {DatagramSource}");
-            RaiseEvent(() => PeerAddressChanged?.Invoke(this, change));
+            RaisePeerAddressChanged(change);
             if (_settings.AutoUpdatePeerAddress)
                 RaiseEvent(() => PeerAddressConfirmed?.Invoke(this, change));
         }
-
-        /// <summary>The host name the client asked for in server_name, or null.</summary>
-        public string ServerName { get; private set; }
 
         /// <summary>The client's certificate, when one was sent.</summary>
         public X509Certificate ClientCertificate => _clientCertificate;
@@ -223,10 +213,14 @@ namespace SharpDTLS.Protocol12
         public byte[] ClientRawPublicKey { get; private set; }
 
         /// <summary>The certificate type we authenticated with (RFC 7250).</summary>
-        public CertificateType ServerCertificateType => _serverCertificateType ?? CertificateType.X509;
+        public override CertificateType ServerCertificateType => _serverCertificateType ?? CertificateType.X509;
 
         /// <summary>The negotiated (EC)DHE group, or 0 (RSA key exchange).</summary>
         public ushort NamedGroup => _keyExchange?.Group ?? 0;
+
+        public override ushort NegotiatedGroup => NamedGroup;
+
+        public override byte[] PeerRawPublicKey => ClientRawPublicKey;
         public bool ExtendedMasterSecretNegotiated => UseExtendedMasterSecret;
         public bool EncryptThenMacNegotiated => UseEncryptThenMac;
         public byte[] ClientRandomBytes => ClientRandom;
@@ -394,7 +388,7 @@ namespace SharpDTLS.Protocol12
             if (ticket is { Length: > 0 } && _settings.TicketKeys != null)
                 session = Dtls12SessionState.Open(_settings.TicketKeys, ticket, out renewTicket);
             if (session == null && ch.SessionId.Length != 0 && _settings.SessionCache != null)
-                session = _settings.SessionCache.Find(ch.SessionId);
+                session = _settings.SessionCache.Find(ch.SessionId) as Dtls12SessionState;
             if (session == null)
                 return false;
 
@@ -670,7 +664,7 @@ namespace SharpDTLS.Protocol12
                 SendHandshake(HandshakeType.Finished, ComputeVerifyData(fromClient: false));
 
                 if (_sessionId.Length != 0)
-                    _settings.SessionCache.Store(new Dtls12SessionState(_sessionId, NegotiatedVersion, CipherSuite.Id, MasterSecret,
+                    _settings.SessionCache.Store(_sessionId, new Dtls12SessionState(_sessionId, NegotiatedVersion, CipherSuite.Id, MasterSecret,
                         UseEncryptThenMac, _clientCertificate?.GetEncoded(), serverName: ServerName));
             }
 

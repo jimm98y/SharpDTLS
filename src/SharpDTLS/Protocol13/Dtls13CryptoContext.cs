@@ -5,7 +5,7 @@ namespace SharpDTLS.Protocol13
     /// <summary>
     /// Traffic keys for one DTLS 1.3 epoch, in both directions.
     /// </summary>
-    public class Dtls13CryptoContext
+    internal class Dtls13CryptoContext
     {
         public Dtls13CipherSuite Suite { get; }
 

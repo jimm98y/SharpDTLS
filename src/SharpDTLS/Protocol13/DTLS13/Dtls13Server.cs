@@ -11,7 +11,7 @@ using System.Net;
 
 namespace SharpDTLS.Protocol13.DTLS13
 {
-    public class Dtls13ConnectionEventArgs : EventArgs
+    internal class Dtls13ConnectionEventArgs : EventArgs
     {
         public Dtls13ConnectionEventArgs(EndPoint remoteEndPoint, Tls13ServerConnection connection)
         {
@@ -23,7 +23,7 @@ namespace SharpDTLS.Protocol13.DTLS13
         public Tls13ServerConnection Connection { get; }
     }
 
-    public class Dtls13DataReceivedEventArgs : Dtls13ConnectionEventArgs
+    internal class Dtls13DataReceivedEventArgs : Dtls13ConnectionEventArgs
     {
         public Dtls13DataReceivedEventArgs(EndPoint remoteEndPoint, Tls13ServerConnection connection, byte[] data)
             : base(remoteEndPoint, connection)
@@ -38,7 +38,7 @@ namespace SharpDTLS.Protocol13.DTLS13
     /// DTLS 1.3 server. Answers new clients statelessly (HelloRetryRequest with cookie) and keeps
     /// one <see cref="Tls13ServerConnection"/> per remote endpoint once the cookie has been verified.
     /// </summary>
-    public class Dtls13Server : Tls13ServerBase
+    internal class Dtls13Server : Tls13ServerBase
     {
         private readonly ConcurrentDictionary<string, Tls13ServerConnection> _connections = new();
         private readonly ClientHelloReassembler _clientHelloReassembler = new();

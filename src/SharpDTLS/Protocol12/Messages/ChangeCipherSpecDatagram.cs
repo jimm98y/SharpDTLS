@@ -6,7 +6,7 @@ namespace SharpDTLS.Protocol12.Messages
 {
     // DTLS 1.2 ChangeCipherSpec — record type 0x14, single byte content 0x01.
     // Not a handshake message; not included in the transcript hash.
-    public class ChangeCipherSpecDatagram : IDatagram
+    internal class ChangeCipherSpecDatagram : IDatagram
     {
         public int Epoch { get; set; } = 0;
         public int RecordSequenceNumber { get; set; }

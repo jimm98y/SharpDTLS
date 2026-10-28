@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace SharpDTLS.Protocol12.Messages
 {
-    public class ServerHelloDoneDatagram : IDatagram
+    internal class ServerHelloDoneDatagram : IDatagram
     {
         public ushort MessageSequenceNumber { get; set; } = 4;
         public int RecordSequenceNumber { get; set; }

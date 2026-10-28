@@ -3,7 +3,7 @@ using System;
 namespace SharpDTLS.Protocol13.Messages
 {
     /// <summary>RequestConnectionId (RFC 9147 §9): asks the peer for num_cids spare CIDs. struct { uint8 num_cids; }</summary>
-    public class RequestConnectionIdDatagram : IHandshakeDatagram
+    internal class RequestConnectionIdDatagram : IHandshakeDatagram
     {
         public const byte HandshakeType = 9;
 

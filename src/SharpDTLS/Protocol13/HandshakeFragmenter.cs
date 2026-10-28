@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace SharpDTLS.Protocol13
 {
-    public static class HandshakeFragmenter
+    internal static class HandshakeFragmenter
     {
         /// <summary>
         /// Splits an unencrypted DTLS record (ClientHello / ServerHello format) into per-MTU fragments.

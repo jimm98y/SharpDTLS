@@ -8,7 +8,7 @@ namespace SharpDTLS.Protocol12.TLS12
     /// IDs) are ignored. Set <see cref="Tls12Connection.MinimumVersion"/> to also accept TLS 1.0 or 1.1 servers,
     /// and <see cref="Tls12Connection.MaximumVersion"/> to speak only those.
     /// </summary>
-    public class Tls12Client : Tls12ClientConnection
+    internal class Tls12Client : Tls12ClientConnection
     {
         private readonly Stream _stream;
 

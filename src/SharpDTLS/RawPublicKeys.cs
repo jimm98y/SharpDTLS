@@ -20,7 +20,7 @@ namespace SharpDTLS
     /// client_certificate_type (19) and server_certificate_type (20), RFC 7250 §4: the client lists the types it supports
     /// in preference order; the server answers with the one it chose.
     /// </summary>
-    public class CertificateTypeExtension : ITlsExtension
+    internal class CertificateTypeExtension : ITlsExtension
     {
         public const ushort ClientType = 19;
         public const ushort ServerType = 20;

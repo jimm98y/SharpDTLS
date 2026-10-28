@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace SharpDTLS.Protocol13.Messages
 {
-    public class ClientHelloDatagram : IHandshakeDatagram
+    internal class ClientHelloDatagram : IHandshakeDatagram
     {
         public List<ushort> CipherSuites = new List<ushort>(Dtls13CipherSuite.Supported);
         public byte[] PublicKey { get; private set; }
@@ -299,7 +299,7 @@ namespace SharpDTLS.Protocol13.Messages
 
    
 
-    public class ClientKeyShareExtension : ITlsExtension
+    internal class ClientKeyShareExtension : ITlsExtension
     {
         /// <summary>All offered key shares in client preference order.</summary>
         public List<(ushort Group, byte[] KeyExchange)> Entries { get; private set; } = new();
@@ -386,7 +386,7 @@ namespace SharpDTLS.Protocol13.Messages
         }
     }
 
-    public class ClientSupportedVersions : ITlsExtension
+    internal class ClientSupportedVersions : ITlsExtension
     {
         public const ushort Dtls13 = 0xFEFC;
         public const ushort Dtls12 = 0xFEFD;
@@ -441,7 +441,7 @@ namespace SharpDTLS.Protocol13.Messages
         }
     }
 
-    public class ClientSignatureAlgorithms : ITlsExtension
+    internal class ClientSignatureAlgorithms : ITlsExtension
     {
         public ushort[] SignatureAlgorithms { get; private set; }
 
@@ -514,7 +514,7 @@ namespace SharpDTLS.Protocol13.Messages
         }
     }
 
-    public class EncryptThenMac : ITlsExtension
+    internal class EncryptThenMac : ITlsExtension
     {
         public EncryptThenMac()
         {  }
@@ -549,7 +549,7 @@ namespace SharpDTLS.Protocol13.Messages
         }
     }
 
-    public class SupportedGroups : ITlsExtension
+    internal class SupportedGroups : ITlsExtension
     {
         public ushort[] Groups { get; private set; }
 
@@ -621,7 +621,7 @@ namespace SharpDTLS.Protocol13.Messages
         }
     }
 
-    public class UseSrtpExtension : ITlsExtension
+    internal class UseSrtpExtension : ITlsExtension
     {
         public ushort[] SrtpProtectionProfiles { get; private set; }
         public byte[] MasterKeyIdentifier { get; private set; }

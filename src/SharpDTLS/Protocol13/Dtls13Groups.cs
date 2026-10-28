@@ -19,7 +19,7 @@ namespace SharpDTLS.Protocol13
     /// DTLS 1.3 key exchange groups (RFC 8446 §4.2.7): elliptic curves, X25519/X448, RFC 7919 FFDHE, ML-KEM
     /// (draft-ietf-tls-mlkem) and the ECDHE + ML-KEM hybrids (draft-ietf-tls-ecdhe-mlkem).
     /// </summary>
-    public static class Dtls13Groups
+    internal static class Dtls13Groups
     {
         public const ushort Secp256r1 = 0x0017;
         public const ushort Secp384r1 = 0x0018;

@@ -40,8 +40,8 @@ namespace Dtls13Test.Tests
             second.Close();
 
             byte[] identity = Encoding.ASCII.GetBytes("tls13 psk"), key = new byte[32];
-            server.ExternalPskResolver = id => id.AsSpan().SequenceEqual(identity) ? new Dtls13ExternalPsk(identity, key) : null;
-            var psk = TestTls13.Connect(server.LocalEndpoint, c => c.ExternalPsk = new Dtls13ExternalPsk(identity, key));
+            server.ExternalPskResolver = id => id.AsSpan().SequenceEqual(identity) ? new TlsExternalPsk(identity, key) : null;
+            var psk = TestTls13.Connect(server.LocalEndpoint, c => c.ExternalPsk = new TlsExternalPsk(identity, key));
             Assert.IsTrue(psk.IsExternalPsk);
         }
 

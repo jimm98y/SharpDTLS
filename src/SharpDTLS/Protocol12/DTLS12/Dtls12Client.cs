@@ -8,7 +8,7 @@ namespace SharpDTLS.Protocol12.DTLS12
     /// DTLS 1.2 client. Set <see cref="Tls12Connection.MinimumVersion"/> to <see cref="DtlsVersion.Dtls10"/>
     /// to also accept DTLS 1.0 servers.
     /// </summary>
-    public class Dtls12Client : Tls12ClientConnection
+    internal class Dtls12Client : Tls12ClientConnection
     {
         public event EventHandler<NewSessionTicketDatagram> NewSessionTicketReceived;
 

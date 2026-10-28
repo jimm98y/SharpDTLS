@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace SharpDTLS.Protocol13.Messages
 {
-    public class KeyUpdateDatagram : IHandshakeDatagram
+    internal class KeyUpdateDatagram : IHandshakeDatagram
     {
         // Handshake type for KeyUpdate per TLS 1.3 post-handshake
         public byte HandshakeType { get; set; } = 0x18; // key_update(24)

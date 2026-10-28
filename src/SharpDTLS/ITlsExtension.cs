@@ -4,7 +4,7 @@ using System.Text;
 
 namespace SharpDTLS
 {
-    public interface ITlsExtension
+    internal interface ITlsExtension
     {
         int Write(int offset, byte[] destination);
         int Read(int offset, byte[] source);

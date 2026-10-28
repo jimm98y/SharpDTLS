@@ -3,7 +3,7 @@ using System.Text;
 
 namespace SharpDTLS
 {
-    public static class KeylogUtils
+    internal static class KeylogUtils
     {
         public static void WriteKeys(string clientRandom, string clientHandshakeTrafficSecret, string clientTrafficSecret, string serverHandhsakeTrafficSecret, string serverTrafficSecret)
         {

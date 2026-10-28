@@ -62,7 +62,7 @@ namespace SharpDTLS
         }
 
         /// <summary>Serves a TLS 1.0-1.2 client connected on <paramref name="inner"/> and completes the handshake.</summary>
-        public static Task<TlsStream> AcceptAsync(Tls12Server server, Stream inner, CancellationToken cancellationToken = default)
+        internal static Task<TlsStream> AcceptAsync(Tls12Server server, Stream inner, CancellationToken cancellationToken = default)
             => Accepted(server.Accept(inner), cancellationToken);
 
         private static async Task<TlsStream> Accepted(TlsConnectionBase connection, CancellationToken cancellationToken)

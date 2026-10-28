@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace SharpDTLS.Protocol13.Messages
 {
-    public class FinishedDatagram : IHandshakeDatagram
+    internal class FinishedDatagram : IHandshakeDatagram
     {
         public int SequenceNumber { get; set; } = 4;
         public byte[] VerifyData { get; set; }

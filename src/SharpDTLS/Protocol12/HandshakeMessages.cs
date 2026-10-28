@@ -6,7 +6,7 @@ using System.Linq;
 namespace SharpDTLS.Protocol12
 {
     /// <summary>Handshake message types (RFC 5246 §7.4, RFC 6347 §4.2.1, RFC 5077).</summary>
-    public static class HandshakeType
+    internal static class HandshakeType
     {
         public const byte HelloRequest = 0;
         public const byte ClientHello = 1;
@@ -72,7 +72,7 @@ namespace SharpDTLS.Protocol12
         };
     }
 
-    public sealed class ClientHelloMessage
+    internal sealed class ClientHelloMessage
     {
         public ushort ClientVersion { get; set; } = DtlsVersion.Dtls12;
         public byte[] Random { get; set; }
@@ -117,7 +117,7 @@ namespace SharpDTLS.Protocol12
         }
     }
 
-    public sealed class HelloVerifyRequestMessage
+    internal sealed class HelloVerifyRequestMessage
     {
         public ushort ServerVersion { get; set; } = DtlsVersion.Dtls10;
         public byte[] Cookie { get; set; }
@@ -133,7 +133,7 @@ namespace SharpDTLS.Protocol12
         }
     }
 
-    public sealed class ServerHelloMessage
+    internal sealed class ServerHelloMessage
     {
         public ushort ServerVersion { get; set; }
         public byte[] Random { get; set; }
@@ -170,7 +170,7 @@ namespace SharpDTLS.Protocol12
         }
     }
 
-    public sealed class CertificateMessage
+    internal sealed class CertificateMessage
     {
         public List<byte[]> Chain { get; set; } = new List<byte[]>();
 
@@ -199,7 +199,7 @@ namespace SharpDTLS.Protocol12
         }
     }
 
-    public sealed class CertificateRequestMessage
+    internal sealed class CertificateRequestMessage
     {
         public byte[] CertificateTypes { get; set; } = { 1, 2, 64 }; // rsa_sign, dss_sign, ecdsa_sign
         public ushort[] SignatureAlgorithms { get; set; } = Dtls12Signatures.Supported;
@@ -229,7 +229,7 @@ namespace SharpDTLS.Protocol12
         }
     }
 
-    public sealed class CertificateVerifyMessage
+    internal sealed class CertificateVerifyMessage
     {
         public ushort? SignatureScheme { get; set; }
         public byte[] Signature { get; set; }
@@ -254,7 +254,7 @@ namespace SharpDTLS.Protocol12
         }
     }
 
-    public sealed class NewSessionTicketMessage
+    internal sealed class NewSessionTicketMessage
     {
         public uint LifetimeHint { get; set; }
         public byte[] Ticket { get; set; } = Array.Empty<byte>();

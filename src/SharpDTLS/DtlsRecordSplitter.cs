@@ -7,7 +7,7 @@ namespace SharpDTLS
     /// Splits a received UDP datagram into individual DTLS records. A single datagram may carry
     /// several records (RFC 6347 §4.1.1, RFC 9147 §4.3).
     /// </summary>
-    public static class DtlsRecordSplitter
+    internal static class DtlsRecordSplitter
     {
         private const int PlaintextHeaderLength = 13;
         private const byte Tls12Cid = 25;

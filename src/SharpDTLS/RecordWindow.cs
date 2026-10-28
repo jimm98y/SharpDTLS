@@ -4,7 +4,7 @@ namespace SharpDTLS
     /// Per-epoch receive state: anti-replay sliding window (RFC 6347 §4.1.2.6, RFC 9147 §4.5.1)
     /// and DTLS 1.3 sequence number reconstruction (RFC 9147 §4.2.2).
     /// </summary>
-    public sealed class RecordWindow
+    internal sealed class RecordWindow
     {
         public const int WindowSize = 64;
 

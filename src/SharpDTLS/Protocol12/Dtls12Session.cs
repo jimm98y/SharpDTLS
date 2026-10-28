@@ -2,7 +2,7 @@ using System.Collections.Generic;
 
 namespace SharpDTLS.Protocol12
 {
-    public class Dtls12Session
+    internal class Dtls12Session
     {
         public byte[] PrivateKey { get; set; }   // ECDHE private key
         public byte[] PublicKey { get; set; }    // ECDHE public key

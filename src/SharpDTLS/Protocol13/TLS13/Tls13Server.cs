@@ -12,7 +12,7 @@ using System.Threading.Tasks;
 
 namespace SharpDTLS.Protocol13.TLS13
 {
-    public class Tls13DataReceivedEventArgs : EventArgs
+    internal class Tls13DataReceivedEventArgs : EventArgs
     {
         public Tls13DataReceivedEventArgs(Tls13ServerConnection connection, byte[] data)
         {
@@ -30,7 +30,7 @@ namespace SharpDTLS.Protocol13.TLS13
     /// sent only when the client has no key share the server accepts. 0-RTT is accepted under the same rules as for DTLS
     /// once MaxEarlyDataSize is set.
     /// </summary>
-    public class Tls13Server : Tls13ServerBase, IDisposable
+    internal class Tls13Server : Tls13ServerBase, IDisposable
     {
         private readonly ConcurrentDictionary<Tls13ServerConnection, Stream> _connections = new();
         private TcpListener _listener;

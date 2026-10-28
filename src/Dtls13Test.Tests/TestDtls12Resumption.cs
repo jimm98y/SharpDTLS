@@ -25,7 +25,7 @@ namespace Dtls13Test.Tests
             public List<string> ClientReceived = new();
         }
 
-        private static Run Connect(ushort version, IDtls12SessionCache cache, Dtls12SessionState resume, ushort? suite = null,
+        private static Run Connect(ushort version, ITlsSessionCache cache, Dtls12SessionState resume, ushort? suite = null,
             Action<ScriptedTransportPair> configureLink = null, SessionTicketKeys ticketKeys = null)
         {
             var r = new Run();
@@ -73,7 +73,7 @@ namespace Dtls13Test.Tests
         [TestMethod]
         public void SessionId_IsResumedWithAnAbbreviatedHandshake(ushort version, ushort suite)
         {
-            var cache = new Dtls12SessionCache();
+            var cache = new TlsSessionCache();
             var first = Connect(version, cache, null, suite);
 
             Assert.IsFalse(first.Client.IsResumed);
@@ -103,10 +103,10 @@ namespace Dtls13Test.Tests
         [TestMethod]
         public void UnknownOrExpiredSession_FallsBackToAFullHandshakeWithANewSession()
         {
-            var cache = new Dtls12SessionCache();
+            var cache = new TlsSessionCache();
             var session = Connect(DtlsVersion.Dtls12, cache, null).Client.SessionState;
 
-            var otherServer = Connect(DtlsVersion.Dtls12, new Dtls12SessionCache(), session);
+            var otherServer = Connect(DtlsVersion.Dtls12, new TlsSessionCache(), session);
             Assert.IsFalse(otherServer.Client.IsResumed);
             Assert.IsNotNull(otherServer.Client.SessionState);
             CollectionAssert.AreNotEqual(session.SessionId, otherServer.Client.SessionState.SessionId);
@@ -125,7 +125,7 @@ namespace Dtls13Test.Tests
         [TestMethod]
         public void SuiteNoLongerOffered_IsNotResumed()
         {
-            var cache = new Dtls12SessionCache();
+            var cache = new TlsSessionCache();
             var session = Connect(DtlsVersion.Dtls12, cache, null, 0xC02F).Client.SessionState;
             var r = Connect(DtlsVersion.Dtls12, cache, session, 0xC030);
             Assert.IsFalse(r.Client.IsResumed);
@@ -135,7 +135,7 @@ namespace Dtls13Test.Tests
         [TestMethod]
         public void VersionMismatch_IsNotResumed()
         {
-            var cache = new Dtls12SessionCache();
+            var cache = new TlsSessionCache();
             var session = Connect(DtlsVersion.Dtls10, cache, null).Client.SessionState;
             Assert.IsFalse(Connect(DtlsVersion.Dtls12, cache, session).Client.IsResumed);
         }
@@ -149,7 +149,7 @@ namespace Dtls13Test.Tests
         [TestMethod]
         public void AbbreviatedHandshake_RecoversFromLoss(bool serverToClient, int dropIndex)
         {
-            var cache = new Dtls12SessionCache();
+            var cache = new TlsSessionCache();
             var session = Connect(DtlsVersion.Dtls12, cache, null).Client.SessionState;
 
             var r = Connect(DtlsVersion.Dtls12, cache, session, configureLink: pair =>
@@ -173,7 +173,7 @@ namespace Dtls13Test.Tests
         [TestMethod]
         public void Ticket_IsResumedStatelessly(ushort version, ushort suite)
         {
-            var cache = new Dtls12SessionCache();
+            var cache = new TlsSessionCache();
             var keys = new SessionTicketKeys();
             var first = Connect(version, cache, null, suite, ticketKeys: keys);
             var session = first.Client.SessionState;
@@ -182,7 +182,7 @@ namespace Dtls13Test.Tests
             Assert.AreEqual(0, cache.Count, "ticket sessions need no server state");
             Assert.AreEqual((uint)keys.Lifetime.TotalSeconds, session.TicketLifetimeHint);
 
-            var second = Connect(version, new Dtls12SessionCache(), session, suite, ticketKeys: keys);
+            var second = Connect(version, new TlsSessionCache(), session, suite, ticketKeys: keys);
             Assert.IsTrue(second.Client.IsResumed);
             Assert.IsTrue(second.ServerConnection.IsResumed);
             Assert.AreSame(session, second.Client.SessionState, "tickets under the current key are not renewed");
@@ -235,7 +235,7 @@ namespace Dtls13Test.Tests
         [TestMethod]
         public void ClientWithoutTickets_GetsASessionId()
         {
-            var cache = new Dtls12SessionCache();
+            var cache = new TlsSessionCache();
             var r = Connect(DtlsVersion.Dtls12, cache, null);
             Assert.IsNull(r.Client.SessionState.Ticket);
             Assert.HasCount(32, r.Client.SessionState.SessionId);

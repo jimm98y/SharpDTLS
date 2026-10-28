@@ -4,7 +4,7 @@ using System.Collections.Generic;
 
 namespace SharpDTLS.Protocol12
 {
-    public abstract partial class Tls12Connection
+    internal abstract partial class Tls12Connection
     {
         /// <summary>
         /// TLS framing over a reliable byte stream (RFC 5246 §6.2): 5-byte record headers, an implicit 64-bit sequence

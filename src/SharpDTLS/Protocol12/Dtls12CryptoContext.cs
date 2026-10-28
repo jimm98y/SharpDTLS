@@ -3,7 +3,7 @@ using Org.BouncyCastle.Crypto.Modes;
 
 namespace SharpDTLS.Protocol12
 {
-    public class Dtls12CryptoContext
+    internal class Dtls12CryptoContext
     {
         public ushort CipherSuite { get; }
 

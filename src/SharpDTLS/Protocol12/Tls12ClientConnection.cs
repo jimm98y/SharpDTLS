@@ -15,7 +15,7 @@ namespace SharpDTLS.Protocol12
     /// Client side of a (D)TLS 1.0-1.2 connection (RFC 5246 §7.3, RFC 6347 §4.2): <see cref="Dtls12Client"/> over
     /// datagrams, <see cref="SharpDTLS.Protocol12.TLS12.Tls12Client"/> over a stream.
     /// </summary>
-    public class Tls12ClientConnection : Tls12Connection
+    internal class Tls12ClientConnection : Tls12Connection
     {
         private const int MaxHelloVerifyRequests = 3;
 
@@ -121,11 +121,12 @@ namespace SharpDTLS.Protocol12
         /// <summary>The server's raw public key (DER SubjectPublicKeyInfo), when it authenticated with one.</summary>
         public byte[] ServerRawPublicKey { get; private set; }
 
-        /// <summary>The certificate type the server authenticated with.</summary>
-        public CertificateType ServerCertificateType { get; private set; }
-
         /// <summary>The negotiated (EC)DHE group, or 0 (RSA key exchange, or custom DH parameters).</summary>
         public ushort NamedGroup => _keyExchange?.Group ?? 0;
+
+        public override ushort NegotiatedGroup => NamedGroup;
+
+        public override byte[] PeerRawPublicKey => ServerRawPublicKey;
 
         /// <summary>PSK identity for the PSK cipher suites (RFC 4279); setting it enables those suites.</summary>
         public byte[] PskIdentity { get; set; }
@@ -177,12 +178,6 @@ namespace SharpDTLS.Protocol12
         public override bool IsResumed => _isResumed;
         private bool _isResumed;
 
-        /// <summary>
-        /// The server's host name, sent in server_name (RFC 6066) so the server can pick its certificate. Sessions
-        /// are only resumed for the same name. Not an IP address literal.
-        /// </summary>
-        public string ServerName { get; set; }
-
         /// <summary>Application protocols to offer with ALPN (RFC 7301), in preference order; null to not offer any.</summary>
         public IList<string> ApplicationProtocols { get; set; }
 
@@ -195,9 +190,6 @@ namespace SharpDTLS.Protocol12
         /// the handshake; <see cref="OcspStapleValidator"/> provides one.
         /// </summary>
         public Func<byte[], IReadOnlyList<byte[]>, bool> ServerCertificateStatusValidator { get; set; }
-
-        /// <summary>The OCSP response the server stapled, or null.</summary>
-        public byte[] OcspResponse { get; private set; }
 
         /// <summary>
         /// Offer record_size_limit (RFC 8449): the most payload per record we accept, 64 to 16384; null to not offer it.

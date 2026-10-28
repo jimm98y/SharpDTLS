@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace SharpDTLS.Protocol13.Messages
 {
-    public class ApplicationDataDatagram : IDatagram
+    internal class ApplicationDataDatagram : IDatagram
     {
         public byte[] Bytes { get; private set; }
         public byte[] Data { get; set; }

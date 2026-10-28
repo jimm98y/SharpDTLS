@@ -3,7 +3,7 @@ using SharpDTLS.UDP;
 namespace SharpDTLS.Protocol13.DTLS13
 {
     /// <summary>DTLS 1.3 client (RFC 9147) over a datagram transport.</summary>
-    public class Dtls13Client : Tls13ClientConnection
+    internal class Dtls13Client : Tls13ClientConnection
     {
         public IClientTransport ClientTransport { get; }
 

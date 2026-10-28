@@ -66,7 +66,7 @@ namespace SharpDTLS
     }
 
     /// <summary>certificate_authorities (RFC 8446 §4.2.4): DER distinguished names of the CAs the sender trusts.</summary>
-    public class CertificateAuthoritiesExtension : ITlsExtension
+    internal class CertificateAuthoritiesExtension : ITlsExtension
     {
         public const ushort Type = 47;
 
@@ -116,7 +116,7 @@ namespace SharpDTLS
     }
 
     /// <summary>signature_algorithms_cert (RFC 8446 §4.2.3): the signature schemes the sender accepts in certificates.</summary>
-    public class SignatureAlgorithmsCertExtension : ITlsExtension
+    internal class SignatureAlgorithmsCertExtension : ITlsExtension
     {
         public const ushort Type = 50;
 

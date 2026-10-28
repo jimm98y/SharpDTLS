@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace SharpDTLS.Protocol13.Messages
 {
-    public class NewSessionTicketDatagram : IHandshakeDatagram
+    internal class NewSessionTicketDatagram : IHandshakeDatagram
     {
         public uint TicketLifetime { get; set; }
         public uint TicketAgeAdd { get; set; }

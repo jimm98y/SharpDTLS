@@ -7,7 +7,7 @@ namespace SharpDTLS.Protocol13.Messages
     /// <summary>
     /// TLS 1.3 CertificateRequest (RFC 8446 §4.3.2).
     /// </summary>
-    public class CertificateRequestDatagram : IHandshakeDatagram
+    internal class CertificateRequestDatagram : IHandshakeDatagram
     {
         public byte HandshakeType { get; set; } = 0x0d; // CertificateRequest
         public int SequenceNumber { get; set; } = 0;

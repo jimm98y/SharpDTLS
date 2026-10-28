@@ -15,7 +15,7 @@ namespace SharpDTLS.Protocol13
     /// Server side of one (D)TLS 1.3 connection: from a <see cref="Dtls13Server"/> or a
     /// <see cref="SharpDTLS.Protocol13.TLS13.Tls13Server"/>.
     /// </summary>
-    public class Tls13ServerConnection : Tls13Connection
+    internal class Tls13ServerConnection : Tls13Connection
     {
         private enum State
         {
@@ -41,8 +41,6 @@ namespace SharpDTLS.Protocol13
         private int _pskIdentity;
         private ushort _group;
 
-        /// <summary>The negotiated key exchange group, or 0 (psk_ke).</summary>
-        public ushort NegotiatedGroup { get; private set; }
         private bool _pskOnly;
         private bool _helloRetried;
         private Dtls13TicketState _ticketState;
@@ -59,20 +57,13 @@ namespace SharpDTLS.Protocol13
         private readonly PeerAddressTracker _address;
 
         /// <summary>Where this connection sends: the client's address, which can move with connection IDs.</summary>
-        public EndPoint RemoteEndPoint => _address.Current;
+        public override EndPoint RemoteEndPoint => _address.Current;
 
         /// <summary>A newer client address awaiting <see cref="ConfirmPeerAddress"/> (when not following automatically).</summary>
-        public EndPoint PendingPeerAddress => _address.Pending;
-
-        /// <summary>
-        /// The client appeared at a new address: a record carrying our CID authenticated, was newer than any before
-        /// and came from elsewhere. Unless the server follows automatically, verify the address (RFC 9147 §11) and
-        /// call <see cref="ConfirmPeerAddress"/>.
-        /// </summary>
-        public event EventHandler<(EndPoint Old, EndPoint New)> PeerAddressChanged;
+        public override EndPoint PendingPeerAddress => _address.Pending;
 
         /// <summary>Sends to <paramref name="address"/> from now on, after the application has checked it can be reached.</summary>
-        public void ConfirmPeerAddress(EndPoint address) => Locked(() =>
+        public override void ConfirmPeerAddress(EndPoint address) => Locked(() =>
         {
             var old = _address.Current;
             _address.Confirm(address);
@@ -87,42 +78,35 @@ namespace SharpDTLS.Protocol13
             if (!_address.Observe(epoch, sequenceNumber, withConnectionId, DatagramSource, DatagramServer.AutoUpdatePeerAddress, out var old))
                 return;
             var change = (old, DatagramSource);
-            RaiseEvent(() => PeerAddressChanged?.Invoke(this, change));
+            RaisePeerAddressChanged(change);
             if (DatagramServer.AutoUpdatePeerAddress)
                 RaiseEvent(() => DatagramServer.OnPeerAddressConfirmed(this, old));
         }
-
-        /// <summary>The host name the client asked for in server_name, or null.</summary>
-        public string ServerName { get; private set; }
 
         /// <summary>Whether the client resumed with a ticket (PSK handshake).</summary>
         public override bool IsResumed => _psk != null && ExternalPskIdentity == null;
 
         /// <summary>Whether the handshake was authenticated with an external PSK.</summary>
-        public bool IsExternalPsk => ExternalPskIdentity != null;
-
-        /// <summary>The identity of the external PSK the client authenticated with, or null.</summary>
-        public byte[] ExternalPskIdentity { get; private set; }
+        public override bool IsExternalPsk => ExternalPskIdentity != null;
 
         /// <summary>Whether the handshake used psk_ke (no (EC)DHE, no forward secrecy).</summary>
-        public bool IsPskOnlyKeyExchange => _pskOnly;
+        public override bool IsPskOnlyKeyExchange => _pskOnly;
 
         /// <summary>Whether the client's 0-RTT data was accepted.</summary>
-        public bool EarlyDataAccepted => _earlyDataAccepted;
+        public override bool EarlyDataAccepted => _earlyDataAccepted;
 
         /// <summary>The client's certificate, when one was sent.</summary>
         public X509Certificate ClientCertificate => _clientCertificate;
 
         public override X509Certificate PeerCertificate => _clientCertificate;
 
-        /// <summary>The algorithm the client compressed its certificate with, or null when it was not compressed.</summary>
-        public ushort? CertificateCompressionAlgorithm { get; private set; }
-
         /// <summary>The client's raw public key (DER SubjectPublicKeyInfo, RFC 7250), when it authenticated with one.</summary>
         public byte[] ClientRawPublicKey { get; private set; }
 
+        public override byte[] PeerRawPublicKey => ClientRawPublicKey;
+
         /// <summary>The certificate type we authenticated with (RFC 7250).</summary>
-        public CertificateType ServerCertificateType => _serverCertificateType ?? CertificateType.X509;
+        public override CertificateType ServerCertificateType => _serverCertificateType ?? CertificateType.X509;
 
         internal Tls13ServerConnection(Dtls13Server server, EndPoint remoteEndPoint)
             : this(server, new PeerAddressTracker(remoteEndPoint))
@@ -141,7 +125,7 @@ namespace SharpDTLS.Protocol13
             KeyLogWriter = server.KeyLogWriter;
 
             ApplicationDataReceived += (_, data) => _server.OnApplicationData(this, data);
-            KeyUpdateReceived += (_, keyUpdate) => _server.OnKeyUpdate(keyUpdate);
+            KeyUpdateMessageReceived += (_, keyUpdate) => _server.OnKeyUpdate(keyUpdate);
             Closed += (_, _) => _server.OnConnectionClosed(this);
         }
 
@@ -155,7 +139,7 @@ namespace SharpDTLS.Protocol13
             KeyLogWriter = server.KeyLogWriter;
 
             ApplicationDataReceived += (_, data) => _server.OnApplicationData(this, data);
-            KeyUpdateReceived += (_, keyUpdate) => _server.OnKeyUpdate(keyUpdate);
+            KeyUpdateMessageReceived += (_, keyUpdate) => _server.OnKeyUpdate(keyUpdate);
             Closed += (_, _) => _server.OnConnectionClosed(this);
         }
 
@@ -665,7 +649,7 @@ namespace SharpDTLS.Protocol13
         }
 
         /// <summary>Sends another session ticket (RFC 8446 §4.6.1); one is sent automatically after the handshake.</summary>
-        public void SendNewSessionTicket()
+        public override void SendNewSessionTicket()
         {
             Run(() =>
             {
@@ -718,20 +702,14 @@ namespace SharpDTLS.Protocol13
         private PostHandshakeAuthentication _postHandshakeAuthentication;
 
         /// <summary>Whether the client offered post_handshake_auth, so <see cref="RequestClientCertificate"/> may be used.</summary>
-        public bool AllowsPostHandshakeAuthentication => _clientHello?.Extensions.OfType<PostHandshakeAuthExtension>().Any() == true;
-
-        /// <summary>
-        /// Raised when the client answered <see cref="RequestClientCertificate"/>: <see cref="ClientCertificate"/> (or
-        /// <see cref="ClientRawPublicKey"/>) is then the authenticated client, or unchanged when it sent none.
-        /// </summary>
-        public event EventHandler PostHandshakeAuthenticationCompleted;
+        public override bool AllowsPostHandshakeAuthentication => _clientHello?.Extensions.OfType<PostHandshakeAuthExtension>().Any() == true;
 
         /// <summary>
         /// Asks the client for its certificate after the handshake (RFC 8446 §4.6.2). The answer is checked like one in
         /// the handshake (ClientCertificateValidator or ClientRawPublicKeyValidator, CertificateVerify, Finished); with
         /// <paramref name="required"/> an answer without a certificate is a certificate_required alert.
         /// </summary>
-        public void RequestClientCertificate(bool required = true) => Locked(() =>
+        public override void RequestClientCertificate(bool required = true) => Locked(() =>
         {
             if (!IsHandshakeComplete || IsClosed)
                 throw new InvalidOperationException("The handshake has not completed.");
@@ -824,7 +802,7 @@ namespace SharpDTLS.Protocol13
                         (_clientCertificate, _clientPublicKey, ClientRawPublicKey) = (auth.Certificate, auth.PublicKey, auth.RawPublicKey);
                         Session.ReceivedClientCertificate = true;
                     }
-                    RaiseEvent(() => PostHandshakeAuthenticationCompleted?.Invoke(this, EventArgs.Empty));
+                    RaisePostHandshakeAuthenticationCompleted();
                     return true;
                 }
 

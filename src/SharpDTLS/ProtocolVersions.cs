@@ -1,7 +1,7 @@
 namespace SharpDTLS
 {
     /// <summary>TLS protocol version code points (RFC 2246, 4346, 5246, 8446). SSL 3.0 is prohibited (RFC 7568).</summary>
-    public static class TlsVersion
+    internal static class TlsVersion
     {
         public const ushort Tls10 = 0x0301;
         public const ushort Tls11 = 0x0302;
@@ -13,7 +13,7 @@ namespace SharpDTLS
     /// Version arithmetic across TLS and DTLS. DTLS code points count down and TLS ones up, so ordering is per family;
     /// <see cref="Level"/> gives the shared semantics (DTLS 1.0 is TLS 1.1, DTLS 1.2 is TLS 1.2).
     /// </summary>
-    public static class ProtocolVersions
+    internal static class ProtocolVersions
     {
         public static bool IsDatagram(ushort version) => (version >> 8) == 0xFE;
 

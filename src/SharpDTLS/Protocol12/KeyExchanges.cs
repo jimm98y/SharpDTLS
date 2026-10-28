@@ -207,7 +207,7 @@ namespace SharpDTLS.Protocol12
     // ── Finite-field DHE (RFC 5246 §7.4.3, RFC 7919) ─────────────────────────────────────────
 
     /// <summary>The RFC 7919 FFDHE groups.</summary>
-    public static class FfdheGroups
+    internal static class FfdheGroups
     {
         public const ushort Ffdhe2048 = 0x0100;
         public const ushort Ffdhe3072 = 0x0101;

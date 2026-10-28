@@ -9,7 +9,7 @@ namespace SharpDTLS
     /// acknowledge that the server used it. Host names are ASCII (A-labels), without a trailing dot, and never
     /// IP address literals.
     /// </summary>
-    public class ServerNameExtension : ITlsExtension
+    internal class ServerNameExtension : ITlsExtension
     {
         public const ushort Type = 0x0000;
 
@@ -79,7 +79,7 @@ namespace SharpDTLS
     /// application_layer_protocol_negotiation (RFC 7301): the client's protocols in preference order, or the one the
     /// server selected.
     /// </summary>
-    public class AlpnExtension : ITlsExtension
+    internal class AlpnExtension : ITlsExtension
     {
         public const ushort Type = 0x0010;
 
@@ -162,7 +162,7 @@ namespace SharpDTLS
     /// connection_id (RFC 9146 §3, RFC 9147 §9): the CID the sender wants to receive; empty when it only supports
     /// sending CIDs.
     /// </summary>
-    public class ConnectionIdExtension : ITlsExtension
+    internal class ConnectionIdExtension : ITlsExtension
     {
         public const ushort Type = 0x0036;
 
@@ -204,7 +204,7 @@ namespace SharpDTLS
     /// record_size_limit (RFC 8449): the largest protected record plaintext the sender is willing to receive. In
     /// DTLS 1.3 the value counts the inner content type (and padding), so it is one more than the payload.
     /// </summary>
-    public class RecordSizeLimitExtension : ITlsExtension
+    internal class RecordSizeLimitExtension : ITlsExtension
     {
         public const ushort Type = 0x001c;
 
@@ -251,7 +251,7 @@ namespace SharpDTLS
     /// max_fragment_length (RFC 6066 §4): the client asks for records of at most 512, 1024, 2048 or 4096 bytes of
     /// plaintext in both directions, and the server confirms by echoing it. Superseded by record_size_limit.
     /// </summary>
-    public class MaxFragmentLengthExtension : ITlsExtension
+    internal class MaxFragmentLengthExtension : ITlsExtension
     {
         public const ushort Type = 0x0001;
 
@@ -303,7 +303,7 @@ namespace SharpDTLS
     /// extensions). A DTLS 1.2 server answers with an empty extension and a CertificateStatus message; DTLS 1.3 carries
     /// the CertificateStatus in the leaf's CertificateEntry (RFC 8446 §4.4.2.1).
     /// </summary>
-    public class StatusRequestExtension : ITlsExtension
+    internal class StatusRequestExtension : ITlsExtension
     {
         public const ushort Type = 0x0005;
         public const byte Ocsp = 1;

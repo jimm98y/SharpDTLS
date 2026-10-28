@@ -11,7 +11,7 @@ namespace SharpDTLS.Protocol13
     /// <summary>
     /// TLS 1.3 signature schemes usable in CertificateVerify (RFC 8446 §4.2.3, §4.4.3).
     /// </summary>
-    public static class Dtls13Signatures
+    internal static class Dtls13Signatures
     {
         public const ushort EcdsaSecp256r1Sha256 = 0x0403;
         public const ushort EcdsaSecp384r1Sha384 = 0x0503;

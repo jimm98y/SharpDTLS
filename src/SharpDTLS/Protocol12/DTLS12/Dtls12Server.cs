@@ -8,7 +8,7 @@ using System.Net;
 
 namespace SharpDTLS.Protocol12.DTLS12
 {
-    public class Dtls12DataReceivedEventArgs : EventArgs
+    internal class Dtls12DataReceivedEventArgs : EventArgs
     {
         public Dtls12DataReceivedEventArgs(EndPoint remoteEndPoint, byte[] data)
         {
@@ -24,7 +24,7 @@ namespace SharpDTLS.Protocol12.DTLS12
     /// DTLS 1.2 server. Set <see cref="Dtls12ServerBase.MinimumVersion"/> to <see cref="DtlsVersion.Dtls10"/>
     /// to also accept DTLS 1.0 clients.
     /// </summary>
-    public class Dtls12Server : Dtls12ServerBase
+    internal class Dtls12Server : Dtls12ServerBase
     {
         // ECDHE suites by certificate key type, in server preference order.
         public static readonly ushort[] EcdsaCipherSuites = SharpDTLS.CipherSuites.All.Where(s => s.ServerCertificateType == CertificateKeyType.Ecdsa).Select(s => s.Id).ToArray();

@@ -10,7 +10,7 @@ namespace SharpDTLS.Protocol12
     /// authentication, extensions and resumption. <see cref="Dtls12ServerBase"/> adds datagram transport, cookies,
     /// SRTP and connection IDs; <see cref="SharpDTLS.Protocol12.TLS12.Tls12Server"/> adds a TCP listener.
     /// </summary>
-    public abstract class Tls12ServerBase
+    internal abstract class Tls12ServerBase
     {
         protected Tls12ServerBase(AsymmetricCipherKeyPair keyPair, X509Certificate certificate, ushort version)
         {
@@ -101,7 +101,7 @@ namespace SharpDTLS.Protocol12
         public Func<string, PwdCredential> PwdCredentialProvider { get => Settings.PwdCredentialProvider; set => Settings.PwdCredentialProvider = value; }
 
         /// <summary>Resumable sessions by session ID; null disables session ID resumption.</summary>
-        public IDtls12SessionCache SessionCache { get => Settings.SessionCache; set => Settings.SessionCache = value; }
+        public ITlsSessionCache SessionCache { get => Settings.SessionCache; set => Settings.SessionCache = value; }
 
         /// <summary>
         /// Keys for RFC 5077 session tickets (random per server by default); share them between servers to let them

@@ -7,7 +7,7 @@ namespace SharpDTLS.Protocol13.Messages
     /// NewConnectionId (RFC 9147 §9): CIDs the sender wants the peer to use, immediately (cid_immediate) or as spares
     /// (cid_spare). struct { ConnectionId cids&lt;0..2^16-1&gt;; ConnectionIdUsage usage; }
     /// </summary>
-    public class NewConnectionIdDatagram : IHandshakeDatagram
+    internal class NewConnectionIdDatagram : IHandshakeDatagram
     {
         public const byte HandshakeType = 10;
         public const byte CidImmediate = 0;

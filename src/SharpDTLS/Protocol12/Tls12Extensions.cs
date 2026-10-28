@@ -8,7 +8,7 @@ namespace SharpDTLS.Protocol12
     /// renegotiation_info (RFC 5746). Renegotiation is not supported, so only the initial-handshake form
     /// with an empty renegotiated_connection is ever sent or accepted.
     /// </summary>
-    public class RenegotiationInfoExtension : ITlsExtension
+    internal class RenegotiationInfoExtension : ITlsExtension
     {
         public const ushort Type = 0xff01;
 
@@ -38,7 +38,7 @@ namespace SharpDTLS.Protocol12
     }
 
     /// <summary>An extension whose data is a single name&lt;1..2^8-1&gt;.</summary>
-    public abstract class OpaqueNameExtension : ITlsExtension
+    internal abstract class OpaqueNameExtension : ITlsExtension
     {
         private readonly ushort _type;
 
@@ -76,7 +76,7 @@ namespace SharpDTLS.Protocol12
     }
 
     /// <summary>srp (RFC 5054 §2.8.1): the client's SRP username, srp_I&lt;1..2^8-1&gt;.</summary>
-    public class SrpExtension : OpaqueNameExtension
+    internal class SrpExtension : OpaqueNameExtension
     {
         public const ushort Type = 0x000c;
 
@@ -87,7 +87,7 @@ namespace SharpDTLS.Protocol12
     }
 
     /// <summary>pwd_protect (RFC 8492 §4.3.1): C.x || SIV-encrypt(k, username), opaque to observers.</summary>
-    public class PwdProtectExtension : OpaqueNameExtension
+    internal class PwdProtectExtension : OpaqueNameExtension
     {
         public const ushort Type = 0x001d;
 
@@ -98,7 +98,7 @@ namespace SharpDTLS.Protocol12
     }
 
     /// <summary>pwd_clear (RFC 8492 §4.4.3): the client's TLS-PWD username, unprotected, as UTF-8 OpaqueString.</summary>
-    public class PwdClearExtension : OpaqueNameExtension
+    internal class PwdClearExtension : OpaqueNameExtension
     {
         public const ushort Type = 0x001e;
 
@@ -112,7 +112,7 @@ namespace SharpDTLS.Protocol12
     /// SessionTicket (RFC 5077 §3.2): empty to advertise support (and, in ServerHello, to announce a
     /// NewSessionTicket), or a ticket to resume. The extension data is the ticket itself.
     /// </summary>
-    public class SessionTicketExtension : ITlsExtension
+    internal class SessionTicketExtension : ITlsExtension
     {
         public const ushort Type = 0x0023;
 
@@ -146,7 +146,7 @@ namespace SharpDTLS.Protocol12
     /// <summary>
     /// extended_master_secret (RFC 7627): binds the master secret to the handshake transcript.
     /// </summary>
-    public class ExtendedMasterSecretExtension : ITlsExtension
+    internal class ExtendedMasterSecretExtension : ITlsExtension
     {
         public const ushort Type = 0x0017;
 

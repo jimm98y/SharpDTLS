@@ -10,7 +10,7 @@ namespace SharpDTLS.Protocol13
     /// TLS certificate compression (RFC 8879) for DTLS 1.3: zlib and Brotli (zstd is not available in .NET). Decompression
     /// is bounded by the declared length, itself capped at the largest handshake message accepted.
     /// </summary>
-    public static class CertificateCompression
+    internal static class CertificateCompression
     {
         public const ushort Zlib = 1;
         public const ushort Brotli = 2;
@@ -93,7 +93,7 @@ namespace SharpDTLS.Protocol13
     }
 
     /// <summary>compress_certificate (RFC 8879 §3): the algorithms the sender can decompress, in preference order.</summary>
-    public class CompressCertificateExtension : ITlsExtension
+    internal class CompressCertificateExtension : ITlsExtension
     {
         public const ushort Type = 27;
 

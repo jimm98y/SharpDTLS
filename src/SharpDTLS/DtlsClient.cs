@@ -1,10 +1,7 @@
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.X509;
 using SharpDTLS.Protocol12.DTLS12;
 using SharpDTLS.Protocol13.DTLS13;
 using SharpDTLS.UDP;
 using System;
-using System.Collections.Generic;
 
 namespace SharpDTLS
 {
@@ -13,15 +10,14 @@ namespace SharpDTLS
     /// decides which version continues. A DTLS 1.2 ServerHello carrying the RFC 9147 §5.3 downgrade sentinel is
     /// rejected.
     /// </summary>
-    public sealed class DtlsClient
+    public sealed class DtlsClient : TlsClientBase
     {
         private volatile TlsConnectionBase _active;
 
         public DtlsClient(IClientTransport clientTransport)
+            : base(new Dtls12Client(clientTransport, receive: false), new Dtls13Client(clientTransport, receive: false))
         {
             ClientTransport = clientTransport;
-            Dtls12 = new Dtls12Client(clientTransport, receive: false);
-            Dtls13 = new Dtls13Client(clientTransport, receive: false);
 
             // Under the 1.3 engine's lock, so the next datagram already finds the 1.2 engine in charge.
             Dtls13.LegacyDatagramServerHello = handoff =>
@@ -42,15 +38,16 @@ namespace SharpDTLS
             }
             Dtls12.HandshakeFinished += (_, _) => HandshakeFinished?.Invoke(this, EventArgs.Empty);
             Dtls13.HandshakeFinished += (_, _) => HandshakeFinished?.Invoke(this, EventArgs.Empty);
+            WireSessionEvents();
         }
 
         public IClientTransport ClientTransport { get; }
 
         /// <summary>The DTLS 1.0-1.2 engine.</summary>
-        internal Dtls12Client Dtls12 { get; }
+        internal Dtls12Client Dtls12 => (Dtls12Client)Engine12;
 
         /// <summary>The DTLS 1.3 engine.</summary>
-        internal Dtls13Client Dtls13 { get; }
+        internal Dtls13Client Dtls13 => (Dtls13Client)Engine13;
 
         /// <summary>The oldest version offered; DTLS 1.2 by default (RFC 8996 deprecates DTLS 1.0).</summary>
         public ushort MinimumVersion { get; set; } = DtlsVersion.Dtls12;
@@ -71,64 +68,44 @@ namespace SharpDTLS
         public byte[] SelectedSrtpMki => _active?.SelectedSrtpMki;
         public int MaxApplicationDataSize => _active?.MaxApplicationDataSize ?? TlsConnectionBase.MaxRecordPayload;
 
-        // ── Settings shared by both engines ──────────────────────────────────────────────────
+        // ── DTLS settings ────────────────────────────────────────────────────────────────────
 
-        /// <summary>The server's host name, sent in server_name.</summary>
-        public string ServerName
-        {
-            get => Dtls13.ServerName;
-            set { Dtls12.ServerName = value; Dtls13.ServerName = value; }
-        }
-
-        public IList<string> ApplicationProtocols
-        {
-            get => Dtls13.ApplicationProtocols;
-            set { Dtls12.ApplicationProtocols = value; Dtls13.ApplicationProtocols = value; }
-        }
-
-        /// <summary>SRTP protection profiles offered with use_srtp (RFC 5764); null or empty for none.</summary>
+        /// <summary>SRTP protection profiles offered in use_srtp (RFC 5764); null to not offer DTLS-SRTP.</summary>
         public ushort[] SrtpProtectionProfiles
         {
             get => Dtls13.SrtpProtectionProfiles;
             set { Dtls12.SrtpProtectionProfiles = value; Dtls13.SrtpProtectionProfiles = value; }
         }
 
-        /// <summary>SRTP Master Key Identifier offered with use_srtp (RFC 5764 §4.1.1); null or empty for none.</summary>
+        /// <summary>SRTP Master Key Identifier offered in use_srtp (RFC 5764 §4.1.1); null or empty for none, at most 255 bytes.</summary>
         public byte[] SrtpMasterKeyIdentifier
         {
             get => Dtls13.SrtpMasterKeyIdentifier;
             set { Dtls12.SrtpMasterKeyIdentifier = value; Dtls13.SrtpMasterKeyIdentifier = value; }
         }
 
-        public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ServerCertificateValidator
-        {
-            get => Dtls13.ServerCertificateValidator;
-            set { Dtls12.ServerCertificateValidator = value; Dtls13.ServerCertificateValidator = value; }
-        }
-
-        public AsymmetricCipherKeyPair ClientCertificateKeyPair
-        {
-            get => Dtls13.ClientCertificateKeyPair;
-            set { Dtls12.ClientCertificateKeyPair = value; Dtls13.ClientCertificateKeyPair = value; }
-        }
-
-        public X509Certificate ClientCertificate
-        {
-            get => Dtls13.ClientCertificate;
-            set { Dtls12.ClientCertificate = value; Dtls13.ClientCertificate = value; }
-        }
-
-        public IList<X509Certificate> ClientIntermediateCertificates
-        {
-            get => Dtls13.ClientIntermediateCertificates;
-            set { Dtls12.ClientIntermediateCertificates = value; Dtls13.ClientIntermediateCertificates = value; }
-        }
-
-        /// <summary>Initial retransmission timeout; doubles on every retransmission.</summary>
+        /// <summary>Initial retransmission timeout; doubles on every retransmission (RFC 6347 §4.2.4.1, RFC 9147 §5.8).</summary>
         public TimeSpan InitialRetransmitTimeout
         {
             get => Dtls13.InitialRetransmitTimeout;
             set { Dtls12.InitialRetransmitTimeout = value; Dtls13.InitialRetransmitTimeout = value; }
+        }
+
+        /// <summary>
+        /// Offer connection IDs (RFC 9147 §9) so the association survives our address changing: a server that agrees
+        /// gives us a CID to send in every record.
+        /// </summary>
+        public bool UseConnectionId
+        {
+            get => Dtls13.UseConnectionId;
+            set { Dtls12.UseConnectionId = value; Dtls13.UseConnectionId = value; }
+        }
+
+        /// <summary>Length of the CID we ask the server to send us; 0 (the default) when only our address may change.</summary>
+        public int ConnectionIdLength
+        {
+            get => Dtls13.ConnectionIdLength;
+            set { Dtls12.ConnectionIdLength = value; Dtls13.ConnectionIdLength = value; }
         }
 
         public event EventHandler HandshakeFinished;

@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace SharpDTLS.Protocol12.Messages
 {
-    public class ServerHelloDatagram : IDatagram
+    internal class ServerHelloDatagram : IDatagram
     {
         public byte[] ServerRandom { get; set; }
         public ushort SelectedCipherSuite { get; set; } = 0xC02F; // TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256

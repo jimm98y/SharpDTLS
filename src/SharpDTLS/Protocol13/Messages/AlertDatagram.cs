@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace SharpDTLS.Protocol13.Messages
 {
-    public class AlertDatagram : IDatagram
+    internal class AlertDatagram : IDatagram
     {
         public ushort Alert { get; set; } = 0x0100; // close_notify
         public byte[] Bytes { get; private set; }

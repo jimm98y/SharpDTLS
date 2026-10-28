@@ -6,7 +6,7 @@ namespace SharpDTLS
     /// <summary>
     /// Bounds-checked reader for TLS presentation-language structures. Any underflow is a decode_error.
     /// </summary>
-    public sealed class TlsReader
+    internal sealed class TlsReader
     {
         private readonly byte[] _buffer;
         private readonly int _end;
@@ -110,7 +110,7 @@ namespace SharpDTLS
     /// <summary>
     /// Writer for TLS presentation-language structures.
     /// </summary>
-    public sealed class TlsWriter
+    internal sealed class TlsWriter
     {
         private byte[] _buffer = new byte[256];
 

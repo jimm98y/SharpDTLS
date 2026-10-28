@@ -14,7 +14,7 @@ namespace SharpDTLS.Protocol13
     /// The (D)TLS 1.3 client handshake (RFC 8446, RFC 9147), over datagrams (<see cref="Dtls13Client"/>) or a stream
     /// (<see cref="SharpDTLS.Protocol13.TLS13.Tls13Client"/>).
     /// </summary>
-    public abstract class Tls13ClientConnection : Tls13Connection
+    internal abstract class Tls13ClientConnection : Tls13Connection
     {
         private readonly Dictionary<ushort, Dtls13Groups.ClientKeyShare> _keyShares = new();
 
@@ -49,12 +49,6 @@ namespace SharpDTLS.Protocol13
 
         public event EventHandler<EventArgs> HandshakeFinished;
 
-        /// <summary>
-        /// The server's host name, sent in server_name (RFC 6066) so the server can pick its certificate. Tickets are
-        /// only offered for the same name. Not an IP address literal.
-        /// </summary>
-        public string ServerName { get; set; }
-
         /// <summary>Application protocols to offer with ALPN (RFC 7301), in preference order; null to not offer any.</summary>
         public IList<string> ApplicationProtocols { get; set; }
 
@@ -77,9 +71,6 @@ namespace SharpDTLS.Protocol13
         /// </summary>
         public IList<ushort> CertificateCompressionAlgorithms { get; set; }
 
-        /// <summary>The algorithm the server compressed its certificate with, or null when it was not compressed.</summary>
-        public ushort? CertificateCompressionAlgorithm { get; private set; }
-
         /// <summary>
         /// Let the server ask for our certificate after the handshake (post_handshake_auth, RFC 8446 §4.6.2). Requests are
         /// answered with <see cref="ClientCertificate"/> (or a raw public key) and its key, or with no certificate.
@@ -98,9 +89,6 @@ namespace SharpDTLS.Protocol13
         /// <see cref="OcspStapleValidator"/> provides one.
         /// </summary>
         public Func<byte[], IReadOnlyList<byte[]>, bool> ServerCertificateStatusValidator { get; set; }
-
-        /// <summary>The OCSP response the server stapled, or null.</summary>
-        public byte[] OcspResponse { get; private set; }
 
         /// <summary>
         /// Offer connection IDs (RFC 9147 §9) so the association survives our address changing: a server that agrees
@@ -129,9 +117,6 @@ namespace SharpDTLS.Protocol13
         /// <summary>Groups offered in supported_groups, in preference order (see <see cref="Dtls13Groups"/>).</summary>
         public IList<ushort> SupportedGroups { get; set; } = new List<ushort>(Dtls13Groups.DefaultPreference);
 
-        /// <summary>The negotiated key exchange group, or 0 (psk_ke).</summary>
-        public ushort NegotiatedGroup { get; private set; }
-
         /// <summary>A ticket from an earlier connection to resume with (PSK resumption, RFC 8446 §2.2).</summary>
         public Dtls13SessionTicket ResumptionTicket { get; set; }
 
@@ -149,10 +134,7 @@ namespace SharpDTLS.Protocol13
         /// An externally provisioned PSK to authenticate with (RFC 8446 §4.2.11), offered after any resumption ticket.
         /// The server is then not authenticated by a certificate.
         /// </summary>
-        public Dtls13ExternalPsk ExternalPsk { get; set; }
-
-        /// <summary>Whether the handshake was authenticated with <see cref="ExternalPsk"/>.</summary>
-        public bool IsExternalPsk { get; private set; }
+        public TlsExternalPsk ExternalPsk { get; set; }
 
         /// <summary>
         /// PSK key exchange modes to offer (RFC 8446 §4.2.9). The default psk_dhe_ke keeps forward secrecy; offering
@@ -165,12 +147,9 @@ namespace SharpDTLS.Protocol13
         /// <summary>
         /// 0-RTT data to send right after the ClientHello when resuming with a ticket that allows it (RFC 8446 §2.3).
         /// It is sent at most once, may be replayed by an attacker, and is lost when the server declines it
-        /// (<see cref="EarlyDataAccepted"/> false): send it again after the handshake in that case.
+        /// (<see cref="TlsConnectionBase.EarlyDataAccepted"/> false): send it again after the handshake in that case.
         /// </summary>
         public byte[] EarlyData { get; set; }
-
-        /// <summary>Whether the server accepted <see cref="EarlyData"/>.</summary>
-        public bool EarlyDataAccepted { get; private set; }
 
         // Set these before BeginHandshake to enable client authentication.
         public AsymmetricCipherKeyPair ClientCertificateKeyPair { get; set; }
@@ -234,8 +213,7 @@ namespace SharpDTLS.Protocol13
         /// <summary>The server's raw public key (DER SubjectPublicKeyInfo), when it authenticated with one.</summary>
         public byte[] ServerRawPublicKey { get; private set; }
 
-        /// <summary>The certificate type the server authenticated with.</summary>
-        public CertificateType ServerCertificateType { get; private set; }
+        public override byte[] PeerRawPublicKey => ServerRawPublicKey;
 
         /// <param name="stream">TLS 1.3 over a reliable byte stream instead of DTLS 1.3 over datagrams.</param>
         protected Tls13ClientConnection(Action<byte[]> send, bool stream)

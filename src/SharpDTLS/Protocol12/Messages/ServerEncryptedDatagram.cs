@@ -18,7 +18,7 @@ namespace SharpDTLS.Protocol12.Messages
     //   DTLS record header (13 bytes)
     //   ciphertext + Poly1305 tag (16 bytes)  — no explicit nonce field
     //   Nonce = server_write_IV(12) XOR (0x00x4 || epoch(2) || seq(6))
-    public class ServerEncryptedDatagram : IDatagram
+    internal class ServerEncryptedDatagram : IDatagram
     {
         private readonly Dtls12CryptoContext _ctx;
 

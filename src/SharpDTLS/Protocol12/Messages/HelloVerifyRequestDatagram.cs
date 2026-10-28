@@ -6,7 +6,7 @@ namespace SharpDTLS.Protocol12.Messages
 {
     // DTLS 1.2 HelloVerifyRequest — sends a cookie to the client before the real handshake.
     // RFC 6347 Section 4.2.1
-    public class HelloVerifyRequestDatagram : IDatagram
+    internal class HelloVerifyRequestDatagram : IDatagram
     {
         public byte[] Cookie { get; set; }
         public int RecordSequenceNumber { get; set; }

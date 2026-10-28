@@ -34,7 +34,7 @@ namespace SharpDTLS
     /// 1.0-1.2, and its later datagrams stay with that version. A DTLS 1.2 handshake carries the RFC 9147 §5.3
     /// downgrade sentinel while DTLS 1.3 is enabled.
     /// </summary>
-    public class DtlsServer
+    public class DtlsServer : TlsServerBase
     {
         private readonly EnginePort _port12;
         private readonly EnginePort _port13;
@@ -46,12 +46,17 @@ namespace SharpDTLS
         }
 
         public DtlsServer(IServerTransport serverTransport, AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
+            : this(serverTransport, new EnginePort(serverTransport), new EnginePort(serverTransport), keyPair, certificate)
+        {
+        }
+
+        private DtlsServer(IServerTransport serverTransport, EnginePort port12, EnginePort port13, AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
+            : base(new Dtls12Server(port12, keyPair, certificate), new Dtls13Server(port13, keyPair, certificate))
         {
             ServerTransport = serverTransport;
-            _port12 = new EnginePort(serverTransport);
-            _port13 = new EnginePort(serverTransport);
-            Dtls12 = new Dtls12Server(_port12, keyPair, certificate);
-            Dtls13 = new Dtls13Server(_port13, keyPair, certificate);
+            _port12 = port12;
+            _port13 = port13;
+            Dtls12.AutoUpdatePeerAddress = false; // the 1.3 default (RFC 9147 §11), for every version
 
             Dtls12.ConnectionEstablished += c => HandshakeFinished?.Invoke(this, c);
             Dtls13.HandshakeFinished += (_, e) => HandshakeFinished?.Invoke(this, ((Dtls13ConnectionEventArgs)e).Connection);
@@ -59,6 +64,7 @@ namespace SharpDTLS
             Dtls13.ApplicationDataReceived += (_, e) => ApplicationDataReceived?.Invoke(this, new DtlsDataReceivedEventArgs(e.RemoteEndPoint, e.Connection, e.Data));
             Dtls12.ConnectionEnded += c => ConnectionClosed?.Invoke(this, c);
             Dtls13.ConnectionClosed += (_, e) => ConnectionClosed?.Invoke(this, e.Connection);
+            Dtls13.EarlyDataReceived += (_, e) => EarlyDataReceived?.Invoke(this, new DtlsDataReceivedEventArgs(e.RemoteEndPoint, e.Connection, e.Data));
             Dtls12.ConnectionCreated += OnConnectionCreated;
             Dtls13.ConnectionCreated += OnConnectionCreated;
 
@@ -73,10 +79,10 @@ namespace SharpDTLS
         public IServerTransport ServerTransport { get; }
 
         /// <summary>The DTLS 1.0-1.2 engine.</summary>
-        internal Dtls12Server Dtls12 { get; }
+        internal Dtls12Server Dtls12 => (Dtls12Server)Engine12;
 
         /// <summary>The DTLS 1.3 engine.</summary>
-        internal Dtls13Server Dtls13 { get; }
+        internal Dtls13Server Dtls13 => (Dtls13Server)Engine13;
 
         /// <summary>The oldest version accepted; DTLS 1.2 by default (RFC 8996 deprecates DTLS 1.0).</summary>
         public ushort MinimumVersion { get => Dtls12.MinimumVersion; set => Dtls12.MinimumVersion = value; }
@@ -84,28 +90,7 @@ namespace SharpDTLS
         /// <summary>The newest version offered: DTLS 1.3 (the default) or DTLS 1.2 to turn DTLS 1.3 off.</summary>
         public ushort MaximumVersion { get; set; } = DtlsVersion.Dtls13;
 
-        // ── Settings shared by both engines ──────────────────────────────────────────────────
-
-        /// <summary>Intermediate CA certificates sent after the server certificate.</summary>
-        public IList<X509Certificate> IntermediateCertificates
-        {
-            get => Dtls13.IntermediateCertificates;
-            set { Dtls12.IntermediateCertificates = value; Dtls13.IntermediateCertificates = value; }
-        }
-
-        /// <summary>Chooses credentials from the client's server_name; null keeps the default certificate.</summary>
-        public Func<string, ServerCredentials> CertificateSelector
-        {
-            get => Dtls13.CertificateSelector;
-            set { Dtls12.CertificateSelector = value; Dtls13.CertificateSelector = value; }
-        }
-
-        /// <summary>Application protocols (ALPN) in server preference order.</summary>
-        public IList<string> ApplicationProtocols
-        {
-            get => Dtls13.ApplicationProtocols;
-            set { Dtls12.ApplicationProtocols = value; Dtls13.ApplicationProtocols = value; }
-        }
+        // ── DTLS settings ────────────────────────────────────────────────────────────────────
 
         /// <summary>SRTP protection profiles in server preference order; null to never negotiate use_srtp.</summary>
         public ushort[] SrtpProtectionProfiles
@@ -121,37 +106,58 @@ namespace SharpDTLS
             set { Dtls12.SrtpDisableMki = value; Dtls13.SrtpDisableMki = value; }
         }
 
-        public bool RequireClientCertificate
+        /// <summary>Initial retransmission timeout; doubles on every retransmission (RFC 6347 §4.2.4.1, RFC 9147 §5.8).</summary>
+        public TimeSpan InitialRetransmitTimeout
         {
-            get => Dtls13.RequireClientCertificate;
-            set { Dtls12.RequireClientCertificate = value; Dtls13.RequireClientCertificate = value; }
-        }
-
-        public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ClientCertificateValidator
-        {
-            get => Dtls13.ClientCertificateValidator;
-            set { Dtls12.ClientCertificateValidator = value; Dtls13.ClientCertificateValidator = value; }
+            get => Dtls13.InitialRetransmitTimeout;
+            set { Dtls12.InitialRetransmitTimeout = value; Dtls13.InitialRetransmitTimeout = value; }
         }
 
         /// <summary>
-        /// Keys for session tickets (random per server by default); share them between servers to let them resume each
-        /// other's sessions, or set null to disable tickets.
+        /// Negotiate connection IDs (RFC 9147 §9) with clients that offer them: their records are then routed by CID,
+        /// so the association survives an address change.
         /// </summary>
-        public SessionTicketKeys TicketKeys
+        public bool UseConnectionIds
         {
-            get => Dtls13.TicketKeys;
-            set { Dtls12.TicketKeys = value; Dtls13.TicketKeys = value; }
+            get => Dtls13.UseConnectionIds;
+            set { Dtls12.UseConnectionIds = value; Dtls13.UseConnectionIds = value; }
         }
 
-        /// <summary>Resumable DTLS 1.0-1.2 sessions by session ID; null disables session ID resumption.</summary>
-        public IDtls12SessionCache SessionCache
+        /// <summary>Length of the CIDs this server issues.</summary>
+        public int ConnectionIdLength
         {
-            get => Dtls12.SessionCache;
-            set => Dtls12.SessionCache = value;
+            get => Dtls13.ConnectionIdLength;
+            set { Dtls12.ConnectionIdLength = value; Dtls13.ConnectionIdLength = value; }
+        }
+
+        /// <summary>
+        /// Send to a client's new address as soon as an authenticated, newer record arrives from it. Off by default:
+        /// RFC 9147 §11 requires a reachability test first, so verify the pending address and call
+        /// <see cref="TlsConnectionBase.ConfirmPeerAddress"/>.
+        /// </summary>
+        public bool AutoUpdatePeerAddress
+        {
+            get => Dtls13.AutoUpdatePeerAddress;
+            set { Dtls12.AutoUpdatePeerAddress = value; Dtls13.AutoUpdatePeerAddress = value; }
+        }
+
+        /// <summary>
+        /// Require a cookie round trip (HelloVerifyRequest, or a HelloRetryRequest for DTLS 1.3) before keeping any state
+        /// for a client (RFC 6347 §4.2.1, RFC 9147 §5.1); on by default. Without it a spoofed source address can make the
+        /// server send its first flight to a victim.
+        /// </summary>
+        public bool RequireCookie
+        {
+            get => Dtls13.ShouldSendHelloRetry;
+            set { Dtls12.ShouldSendHelloVerify = value; Dtls13.ShouldSendHelloRetry = value; }
         }
 
         public event EventHandler<TlsConnectionBase> HandshakeFinished;
         public event EventHandler<DtlsDataReceivedEventArgs> ApplicationDataReceived;
+
+        /// <summary>0-RTT data a DTLS 1.3 client sent with its ClientHello (see <see cref="TlsServerBase.MaxEarlyDataSize"/>).</summary>
+        public event EventHandler<DtlsDataReceivedEventArgs> EarlyDataReceived;
+
         public event EventHandler<TlsConnectionBase> ConnectionClosed;
         public event EventHandler<TlsAlertEventArgs> AlertReceived;
 

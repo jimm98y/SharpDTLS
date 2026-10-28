@@ -1,6 +1,6 @@
 ﻿namespace SharpDTLS
 {
-    public interface IDatagram
+    internal interface IDatagram
     {
         byte[] Bytes { get; }
         void FromBytes(byte[] bytes);

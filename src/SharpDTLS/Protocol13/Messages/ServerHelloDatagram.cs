@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace SharpDTLS.Protocol13.Messages
 {
-    public class ServerHelloDatagram : IHandshakeDatagram
+    internal class ServerHelloDatagram : IHandshakeDatagram
     {
         public byte[] ServerRandom { get; set; } 
         public byte[] PublicKey { get; private set; }
@@ -243,7 +243,7 @@ namespace SharpDTLS.Protocol13.Messages
         }
     }
 
-    public class ServerKeyShareExtension : ITlsExtension
+    internal class ServerKeyShareExtension : ITlsExtension
     {
         public ushort KeyType { get; private set; }
 
@@ -320,7 +320,7 @@ namespace SharpDTLS.Protocol13.Messages
         }
     }
 
-    public class ServerSupportedVersions : ITlsExtension
+    internal class ServerSupportedVersions : ITlsExtension
     {
         public ServerSupportedVersions()
         { }
@@ -369,7 +369,7 @@ namespace SharpDTLS.Protocol13.Messages
         }
     }
 
-    public class CookieExtension : ITlsExtension
+    internal class CookieExtension : ITlsExtension
     {
         public byte[] Cookie { get; set; }
 
@@ -417,7 +417,7 @@ namespace SharpDTLS.Protocol13.Messages
         }
     }
 
-    public class ServerUseSrtpExtension : ITlsExtension
+    internal class ServerUseSrtpExtension : ITlsExtension
     {
         public ushort SelectedSrtpProfile { get; set; }
         public byte[] MasterKeyIdentifier { get; set; }

@@ -5,7 +5,7 @@ namespace SharpDTLS.Protocol12
     /// <summary>
     /// Handshake transcript contributions for DTLS 1.0 and 1.2.
     /// </summary>
-    public static class DtlsHandshakeHash
+    internal static class DtlsHandshakeHash
     {
         /// <summary>
         /// Returns a handshake message as it is hashed in DTLS 1.0/1.2: the full 12-byte DTLS handshake

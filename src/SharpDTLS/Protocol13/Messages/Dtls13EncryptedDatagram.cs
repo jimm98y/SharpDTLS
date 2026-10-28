@@ -5,7 +5,7 @@ namespace SharpDTLS.Protocol13.Messages
     /// <summary>
     /// A DTLS 1.3 protected record (unified header) carrying one inner message.
     /// </summary>
-    public abstract class Dtls13EncryptedDatagram : IDatagram
+    internal abstract class Dtls13EncryptedDatagram : IDatagram
     {
         protected readonly Dtls13CryptoContext _cryptoContext;
 
@@ -87,7 +87,7 @@ namespace SharpDTLS.Protocol13.Messages
     }
 
     /// <summary>A protected record sent by the server.</summary>
-    public class ServerEncryptedDatagram : Dtls13EncryptedDatagram
+    internal class ServerEncryptedDatagram : Dtls13EncryptedDatagram
     {
         protected override bool FromClient => false;
 
@@ -100,7 +100,7 @@ namespace SharpDTLS.Protocol13.Messages
     }
 
     /// <summary>A protected record sent by the client.</summary>
-    public class ClientEncryptedDatagram : Dtls13EncryptedDatagram
+    internal class ClientEncryptedDatagram : Dtls13EncryptedDatagram
     {
         protected override bool FromClient => true;
 

@@ -7,7 +7,7 @@ namespace SharpDTLS.Protocol12.Messages
     // DTLS 1.2 Finished handshake message — 12-byte verify_data computed via PRF.
     // Sent encrypted inside a Dtls12*EncryptedDatagram after ChangeCipherSpec.
     // ToBytes / FromBytes operate on the handshake layer only (no DTLS record header).
-    public class FinishedDatagram : IDatagram
+    internal class FinishedDatagram : IDatagram
     {
         public ushort MessageSequenceNumber { get; set; }
         public byte[] VerifyData { get; set; } // 12 bytes

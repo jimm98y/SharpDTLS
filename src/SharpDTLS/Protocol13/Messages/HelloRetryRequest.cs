@@ -7,7 +7,7 @@ namespace SharpDTLS.Protocol13.Messages
     /// <summary>
     /// HelloRetryRequest: a ServerHello with the special random value (RFC 8446 §4.1.3).
     /// </summary>
-    public class HelloRetryRequest : ServerHelloDatagram
+    internal class HelloRetryRequest : ServerHelloDatagram
     {
         public static readonly byte[] HelloRetryRequestRandom = Convert.FromHexString("CF21AD74E59A6111BE1D8C021E65B891C2A211167ABB8C5E079E09E2C8A8339C");
 

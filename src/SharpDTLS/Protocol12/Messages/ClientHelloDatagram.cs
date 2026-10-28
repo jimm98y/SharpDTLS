@@ -8,7 +8,7 @@ namespace SharpDTLS.Protocol12.Messages
 {
     // DTLS 1.2 ClientHello.
     // Cookie lives in the handshake body (offset 60), not as an extension (unlike DTLS 1.3).
-    public class ClientHelloDatagram : IDatagram
+    internal class ClientHelloDatagram : IDatagram
     {
         // TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
         // TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
@@ -214,7 +214,7 @@ namespace SharpDTLS.Protocol12.Messages
 
     // ── Extensions ──────────────────────────────────────────────────────────────
 
-    public class SupportedGroupsExtension : ITlsExtension
+    internal class SupportedGroupsExtension : ITlsExtension
     {
         public ushort[] Groups { get; private set; }
 
@@ -253,7 +253,7 @@ namespace SharpDTLS.Protocol12.Messages
         }
     }
 
-    public class EcPointFormatsExtension : ITlsExtension
+    internal class EcPointFormatsExtension : ITlsExtension
     {
         public byte[] Formats { get; private set; }
 
@@ -284,7 +284,7 @@ namespace SharpDTLS.Protocol12.Messages
         }
     }
 
-    public class SignatureAlgorithmsExtension : ITlsExtension
+    internal class SignatureAlgorithmsExtension : ITlsExtension
     {
         public ushort[] Algorithms { get; private set; }
 
@@ -323,7 +323,7 @@ namespace SharpDTLS.Protocol12.Messages
         }
     }
 
-    public class EncryptThenMacExtension : ITlsExtension
+    internal class EncryptThenMacExtension : ITlsExtension
     {
         public int CalculateLength() => 4;
 
@@ -339,7 +339,7 @@ namespace SharpDTLS.Protocol12.Messages
         }
     }
 
-    public class UseSrtpExtension : ITlsExtension
+    internal class UseSrtpExtension : ITlsExtension
     {
         public ushort[] ProtectionProfiles { get; private set; }
         public byte[] MasterKeyIdentifier { get; private set; }
@@ -396,7 +396,7 @@ namespace SharpDTLS.Protocol12.Messages
         }
     }
 
-    public class ServerUseSrtpExtension : ITlsExtension
+    internal class ServerUseSrtpExtension : ITlsExtension
     {
         public ushort SelectedProfile { get; set; } = 0x0001;
         public byte[] MasterKeyIdentifier { get; set; } = Array.Empty<byte>();
@@ -445,7 +445,7 @@ namespace SharpDTLS.Protocol12.Messages
         }
     }
 
-    public class ServerEcPointFormatsExtension : ITlsExtension
+    internal class ServerEcPointFormatsExtension : ITlsExtension
     {
         public byte[] Formats { get; private set; } = new byte[] { 0x00 };
 

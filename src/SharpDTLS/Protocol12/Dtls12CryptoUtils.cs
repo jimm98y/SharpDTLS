@@ -17,7 +17,7 @@ using System.Text;
 
 namespace SharpDTLS.Protocol12
 {
-    public static class Dtls12CryptoUtils
+    internal static class Dtls12CryptoUtils
     {
         private static readonly byte[] _cookieKey;
 

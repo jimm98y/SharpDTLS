@@ -11,7 +11,7 @@ namespace SharpDTLS.Protocol13
     /// (RFC 9147 §7) or TLS 1.3 records over a stream (RFC 8446 §5), handshake message ordering and reassembly,
     /// and KeyUpdate. Subclasses implement the handshake state machine.
     /// </summary>
-    public abstract class Tls13Connection : TlsConnectionBase
+    internal abstract class Tls13Connection : TlsConnectionBase
     {
         // Maximum handshake body bytes per protected record; keeps datagrams under ~1200 bytes
         // (5 B header + 16 B tag + 12 B handshake header + 1 B content type + body).
@@ -42,7 +42,7 @@ namespace SharpDTLS.Protocol13
         public override ushort NegotiatedCipherSuite => Session.CipherSuite?.Id ?? 0;
 
         public event EventHandler<NewSessionTicketDatagram> NewSessionTicketReceived;
-        public event EventHandler<KeyUpdateDatagram> KeyUpdateReceived;
+        internal event EventHandler<KeyUpdateDatagram> KeyUpdateMessageReceived;
 
         /// <summary>The CID the peer puts in records it sends us (RFC 9147 §9), or null / empty for none.</summary>
         protected byte[] ReadConnectionId { get; set; }
@@ -51,10 +51,10 @@ namespace SharpDTLS.Protocol13
         protected byte[] WriteConnectionId { get; set; }
 
         /// <summary>Our connection ID: the peer sends it in every record from the handshake epoch on. Null when not negotiated.</summary>
-        public byte[] ConnectionId => ReadConnectionId is { Length: > 0 } ? ReadConnectionId : null;
+        public override byte[] ConnectionId => ReadConnectionId is { Length: > 0 } ? ReadConnectionId : null;
 
         /// <summary>The peer's connection ID, sent in our records. Null when not negotiated.</summary>
-        public byte[] PeerConnectionId => WriteConnectionId is { Length: > 0 } ? WriteConnectionId : null;
+        public override byte[] PeerConnectionId => WriteConnectionId is { Length: > 0 } ? WriteConnectionId : null;
 
         protected override int ReceiveConnectionIdLength => ReadConnectionId?.Length ?? 0;
 
@@ -65,7 +65,7 @@ namespace SharpDTLS.Protocol13
         private const int MaxConnectionIds = 16;
 
         /// <summary>Spare CIDs the peer gave us for sending, e.g. when moving to a new path.</summary>
-        public int SpareConnectionIdCount => _spareWriteConnectionIds.Count;
+        public override int SpareConnectionIdCount => _spareWriteConnectionIds.Count;
 
         /// <summary>A CID we issued for receiving (the server registers it for routing).</summary>
         protected virtual void OnConnectionIdIssued(byte[] connectionId) { }
@@ -77,7 +77,7 @@ namespace SharpDTLS.Protocol13
         /// Asks the peer for <paramref name="count"/> spare CIDs to send with (RFC 9147 §9). Needs a negotiated
         /// non-empty peer CID; only one request may be outstanding.
         /// </summary>
-        public void RequestConnectionIds(byte count) => Locked(() =>
+        public override void RequestConnectionIds(byte count) => Locked(() =>
         {
             if (!IsHandshakeComplete || PeerConnectionId == null)
                 throw new InvalidOperationException("No connection ID was negotiated for sending.");
@@ -91,7 +91,7 @@ namespace SharpDTLS.Protocol13
         /// Gives the peer <paramref name="count"/> new CIDs to send to us with: spares, or with
         /// <paramref name="immediate"/> to be used at once (RFC 9147 §9).
         /// </summary>
-        public void IssueConnectionIds(int count, bool immediate = false) => Locked(() =>
+        public override void IssueConnectionIds(int count, bool immediate = false) => Locked(() =>
         {
             if (!IsHandshakeComplete || ConnectionId == null)
                 throw new InvalidOperationException("No connection ID was negotiated for receiving.");
@@ -99,7 +99,7 @@ namespace SharpDTLS.Protocol13
         });
 
         /// <summary>Switches to the next spare CID for sending; false when there is none.</summary>
-        public bool UseSpareConnectionId()
+        public override bool UseSpareConnectionId()
         {
             bool switched = false;
             Locked(() =>
@@ -172,7 +172,7 @@ namespace SharpDTLS.Protocol13
         /// Sends a KeyUpdate. The new write keys take effect once the peer ACKs it (RFC 9147 §8).
         /// While an earlier KeyUpdate (possibly one answering the peer's) awaits its ACK, this one is sent after it.
         /// </summary>
-        public void SendKeyUpdate(bool requestUpdate = false) => Locked(() =>
+        public override void SendKeyUpdate(bool requestUpdate = false) => Locked(() =>
         {
             if (!IsHandshakeComplete || IsClosed)
                 throw new InvalidOperationException("The handshake has not completed.");
@@ -643,7 +643,8 @@ namespace SharpDTLS.Protocol13
                         : Dtls13CryptoUtils.UpdateClientTrafficSecret(latest);
                     AddReadKeys(updated);
 
-                    RaiseEvent(() => KeyUpdateReceived?.Invoke(this, keyUpdate));
+                    RaiseEvent(() => KeyUpdateMessageReceived?.Invoke(this, keyUpdate));
+                    RaiseKeyUpdateReceived();
                     if (keyUpdate.UpdateRequest == 1 && _pendingKeyUpdateRecords == null)
                         StartKeyUpdate(requestUpdate: false);
                     break;

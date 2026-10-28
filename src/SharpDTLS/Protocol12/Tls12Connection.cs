@@ -14,7 +14,7 @@ namespace SharpDTLS.Protocol12
     /// epochs, replay windows, message_seq, fragmentation, reassembly, reordering, retransmission; for TLS:
     /// stream records with implicit sequence numbers).
     /// </summary>
-    public abstract partial class Tls12Connection : TlsConnectionBase
+    internal abstract partial class Tls12Connection : TlsConnectionBase
     {
         private readonly Framing _framing;
 
@@ -95,10 +95,12 @@ namespace SharpDTLS.Protocol12
         protected byte[] WriteConnectionId { get; set; }
 
         /// <summary>Our connection ID (RFC 9146): the peer sends it in every encrypted record. Null when not negotiated.</summary>
-        public byte[] ConnectionId => ReadConnectionId is { Length: > 0 } ? ReadConnectionId : null;
+        public override byte[] ConnectionId => ReadConnectionId is { Length: > 0 } ? ReadConnectionId : null;
 
         /// <summary>The peer's connection ID, sent in our encrypted records. Null when not negotiated.</summary>
-        public byte[] PeerConnectionId => WriteConnectionId is { Length: > 0 } ? WriteConnectionId : null;
+        public override byte[] PeerConnectionId => WriteConnectionId is { Length: > 0 } ? WriteConnectionId : null;
+
+        public override bool IsEncryptThenMac => UseEncryptThenMac;
 
         protected override int ReceiveConnectionIdLength => ReadConnectionId?.Length ?? 0;
 

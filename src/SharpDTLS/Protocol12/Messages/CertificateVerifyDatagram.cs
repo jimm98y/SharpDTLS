@@ -6,7 +6,7 @@ namespace SharpDTLS.Protocol12.Messages
 {
     // DTLS 1.2 CertificateVerify (RFC 5246 §7.4.8).
     // Body: hash_algorithm(1) + sig_algorithm(1) + signature_length(2) + signature.
-    public class CertificateVerifyDatagram : IDatagram
+    internal class CertificateVerifyDatagram : IDatagram
     {
         public int    RecordSequenceNumber  { get; set; }
         public ushort MessageSequenceNumber { get; set; }

@@ -15,7 +15,7 @@ namespace SharpDTLS.Protocol12
     /// Protection for DTLS 1.0/1.2 records in one direction (RFC 5246 §6.2.3, RFC 6347 §4.1.2.1).
     /// The 64-bit sequence number used in MACs and nonces is epoch (16 bits) || sequence number (48 bits).
     /// </summary>
-    public interface IRecordCipher
+    internal interface IRecordCipher
     {
         /// <param name="connectionId">The CID of a tls12_cid record (RFC 9146), which changes the MAC / AEAD input; null otherwise.</param>
         byte[] Encrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] plaintext, byte[] connectionId = null);
@@ -24,7 +24,7 @@ namespace SharpDTLS.Protocol12
         byte[] Decrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment, byte[] connectionId = null);
     }
 
-    public static class RecordCiphers
+    internal static class RecordCiphers
     {
         /// <summary>
         /// Length of the key block: MAC keys, encryption keys and fixed IVs for both directions. With

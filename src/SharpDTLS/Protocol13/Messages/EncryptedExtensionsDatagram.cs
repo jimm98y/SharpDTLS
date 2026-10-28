@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace SharpDTLS.Protocol13.Messages
 {
-    public class EncryptedExtensionsDatagram : IHandshakeDatagram
+    internal class EncryptedExtensionsDatagram : IHandshakeDatagram
     {
         public List<ITlsExtension> Extensions { get; private set; } = new List<ITlsExtension>();
         public int SequenceNumber { get; set; } = 1;

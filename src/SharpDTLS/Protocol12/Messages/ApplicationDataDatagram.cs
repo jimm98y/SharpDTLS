@@ -6,7 +6,7 @@ namespace SharpDTLS.Protocol12.Messages
 {
     // DTLS 1.2 application data payload (used as the inner datagram inside encrypted records).
     // ToBytes / FromBytes operate on the raw payload only — no record header.
-    public class ApplicationDataDatagram : IDatagram
+    internal class ApplicationDataDatagram : IDatagram
     {
         public byte[] Data { get; set; }
         public byte[] Bytes { get; private set; }

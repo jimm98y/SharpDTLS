@@ -8,7 +8,7 @@ namespace SharpDTLS.Protocol13.Messages
     /// DTLS 1.3 ACK (RFC 9147 §7): struct { RecordNumber record_numbers&lt;0..2^16-1&gt;; } ACK;
     /// where RecordNumber is { uint64 epoch; uint64 sequence_number; }.
     /// </summary>
-    public class AcknowledgementDatagram : IDatagram
+    internal class AcknowledgementDatagram : IDatagram
     {
         public List<(ulong Epoch, ulong SequenceNumber)> Records { get; set; } = new List<(ulong, ulong)>();
 

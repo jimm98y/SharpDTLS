@@ -5,7 +5,7 @@ namespace SharpDTLS.Protocol13
     /// <summary>
     /// Negotiated state of one DTLS 1.3 association.
     /// </summary>
-    public class Dtls13Session
+    internal class Dtls13Session
     {
         public byte[] PrivateKey { get; set; }
         public byte[] PublicKey { get; set; }

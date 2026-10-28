@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 
 namespace SharpDTLS.Protocol12.TLS12
 {
-    public class Tls12DataReceivedEventArgs : EventArgs
+    internal class Tls12DataReceivedEventArgs : EventArgs
     {
         public Tls12DataReceivedEventArgs(Tls12ServerConnection connection, byte[] data)
         {
@@ -29,7 +29,7 @@ namespace SharpDTLS.Protocol12.TLS12
     /// Set <see cref="Tls12ServerBase.MinimumVersion"/> to also accept TLS 1.0 or 1.1 clients,
     /// and <see cref="Tls12ServerBase.MaximumVersion"/> to speak only those.
     /// </summary>
-    public class Tls12Server : Tls12ServerBase, IDisposable
+    internal class Tls12Server : Tls12ServerBase, IDisposable
     {
         private readonly ConcurrentDictionary<Tls12ServerConnection, Stream> _connections = new();
         private TcpListener _listener;

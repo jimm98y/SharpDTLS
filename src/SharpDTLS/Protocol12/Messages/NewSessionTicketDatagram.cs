@@ -8,7 +8,7 @@ namespace SharpDTLS.Protocol12.Messages
     // Wire format inside the DTLS 1.2 handshake header (12 bytes):
     //   ticket_lifetime_hint  uint32  (seconds)
     //   ticket                opaque<0..2^16-1>
-    public class NewSessionTicketDatagram : IDatagram
+    internal class NewSessionTicketDatagram : IDatagram
     {
         public uint   TicketLifetimeHint { get; set; }
         public byte[] Ticket             { get; set; } = Array.Empty<byte>();

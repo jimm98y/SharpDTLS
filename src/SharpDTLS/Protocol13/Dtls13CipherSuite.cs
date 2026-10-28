@@ -16,7 +16,7 @@ namespace SharpDTLS.Protocol13
     /// <summary>
     /// Parameters of a DTLS 1.3 cipher suite (RFC 8446 Appendix B.4, RFC 9150, draft-irtf-cfrg-aegis-aead-08).
     /// </summary>
-    public sealed class Dtls13CipherSuite
+    internal sealed class Dtls13CipherSuite
     {
         public const ushort TLS_AES_128_GCM_SHA256       = 0x1301;
         public const ushort TLS_AES_256_GCM_SHA384       = 0x1302;

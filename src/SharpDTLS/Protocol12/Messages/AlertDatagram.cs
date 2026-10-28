@@ -6,7 +6,7 @@ namespace SharpDTLS.Protocol12.Messages
 {
     // DTLS 1.2 Alert record (unencrypted during handshake, encrypted after CCS).
     // Sent as a full DTLS record: type(1)+version(2)+epoch(2)+seq(6)+length(2)+alert_level(1)+alert_desc(1)
-    public class AlertDatagram : IDatagram
+    internal class AlertDatagram : IDatagram
     {
         public byte Level       { get; set; } = 0x01; // 1=warning, 2=fatal
         public byte Description { get; set; } = 0x00; // 0=close_notify

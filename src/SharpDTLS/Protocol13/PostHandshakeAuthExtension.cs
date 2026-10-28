@@ -1,7 +1,7 @@
 namespace SharpDTLS.Protocol13
 {
     /// <summary>post_handshake_auth (RFC 8446 §4.2.6): the client accepts a CertificateRequest after the handshake.</summary>
-    public class PostHandshakeAuthExtension : ITlsExtension
+    internal class PostHandshakeAuthExtension : ITlsExtension
     {
         public const ushort Type = 49;
 

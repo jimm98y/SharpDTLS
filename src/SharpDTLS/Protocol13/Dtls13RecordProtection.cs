@@ -11,7 +11,7 @@ namespace SharpDTLS.Protocol13
     /// DTLS 1.3 record protection (RFC 9147 §4): AEAD with per-record nonce, record number
     /// encryption, unified header parsing and sequence number reconstruction.
     /// </summary>
-    public static class Dtls13RecordProtection
+    internal static class Dtls13RecordProtection
     {
         private const int SampleLength = 16;
 
