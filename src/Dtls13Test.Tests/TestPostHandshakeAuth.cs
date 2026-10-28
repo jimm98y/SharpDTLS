@@ -160,9 +160,10 @@ namespace Dtls13Test.Tests
             Assert.IsTrue(Authenticate(s), s.ServerFailed.Task.IsCompleted ? s.ServerFailed.Task.Result.ToString() : "no answer");
             CollectionAssert.AreEqual(spki, s.Connection.ClientRawPublicKey);
 
-            var c = Connect(configure: (_, client) => client.CertificateCompressionAlgorithms = new[] { CertificateCompression.Brotli });
+            ushort algorithm = CertificateCompression.Supported[0]; // Brotli, or zlib where Brotli is missing
+            var c = Connect(configure: (_, client) => client.CertificateCompressionAlgorithms = new[] { algorithm });
             Assert.IsTrue(Authenticate(c));
-            Assert.AreEqual(CertificateCompression.Brotli, c.Connection.CertificateCompressionAlgorithm);
+            Assert.AreEqual(algorithm, c.Connection.CertificateCompressionAlgorithm);
         }
 
         // ── wolfSSL ──────────────────────────────────────────────────────────────────────────

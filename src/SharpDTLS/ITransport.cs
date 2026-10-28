@@ -94,9 +94,12 @@ namespace SharpDTLS.UDP
         {
             if (_remote == null)
             {
-                this._socket.ReceiveTimeout = waitMillis;
                 try
                 {
+                    // Poll, not ReceiveTimeout: a receive that times out leaves a Windows socket in an indeterminate
+                    // state, and a datagram arriving at that moment can be lost.
+                    if (!this._socket.Poll(PollMicroseconds(waitMillis), SelectMode.SelectRead))
+                        return -1;
                     EndPoint remote = new IPEndPoint(IPAddress.Any, 0);
                     var byteBuffer = buffer.ToArray();
                     int len = this._socket.ReceiveFrom(byteBuffer, ref remote);
@@ -118,6 +121,9 @@ namespace SharpDTLS.UDP
                 return -1;
             }
         }
+
+        /// <summary>Socket.Poll microseconds for a wait in milliseconds, where 0 or less waits indefinitely (-1).</summary>
+        internal static int PollMicroseconds(int waitMillis) => waitMillis <= 0 ? -1 : (int)Math.Min((long)waitMillis * 1000, int.MaxValue);
 
         public virtual void Send(byte[] buf, int off, int len)
         {
@@ -183,7 +189,6 @@ namespace SharpDTLS.UDP
         public ServerTransport(IPEndPoint localEndpoint)
         {
             _listenSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-            _listenSocket.ReceiveTimeout = 1000;
 
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
@@ -212,11 +217,10 @@ namespace SharpDTLS.UDP
                 int length = 0;
                 try
                 {
+                    // Poll, not ReceiveTimeout, which can lose a datagram arriving as it expires (see UdpTransport.Receive).
+                    if (!_listenSocket.Poll(1_000_000, SelectMode.SelectRead))
+                        continue;
                     length = _listenSocket.ReceiveFrom(buffer, ref remoteEndpoint);
-                }
-                catch (SocketException ex) when (ex.SocketErrorCode == SocketError.TimedOut)
-                {
-                    continue;
                 }
                 catch (SocketException ex)
                 {

@@ -166,6 +166,15 @@ static int status_cb(WOLFSSL *ssl, void *arg)
     return 0; /* SSL_TLSEXT_ERR_OK */
 }
 
+/* Whether the session already holds a resumption ticket (TLS 1.3 sends it after the handshake). */
+static int has_ticket(WOLFSSL *ssl)
+{
+    WOLFSSL_SESSION *session = wolfSSL_get1_session(ssl);
+    int ready = session != NULL && wolfSSL_SESSION_has_ticket(session);
+    if (session) wolfSSL_SESSION_free(session);
+    return ready;
+}
+
 static void fail(const char *what, WOLFSSL *ssl, int ret)
 {
     char buf[WOLFSSL_MAX_ERROR_SZ];
@@ -429,7 +438,7 @@ int main(int argc, char **argv)
             struct timeval wait = { 0, 100000 };
             if (select(fd + 1, &rfds, NULL, NULL, &wait) <= 0) {
                 if (!tls) wolfSSL_dtls_got_timeout(ssl);
-                if (!server && i >= 5) break; /* the ticket follows the handshake closely */
+                if (!server && has_ticket(ssl)) break; /* wait for the ticket, up to the 5 s of the loop */
                 continue;
             }
             ret = wolfSSL_read(ssl, drain, sizeof(drain));

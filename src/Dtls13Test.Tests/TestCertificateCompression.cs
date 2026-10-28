@@ -47,11 +47,22 @@ namespace Dtls13Test.Tests
             return new Outcome(done.Task.Result, client, connection, pair.ServerSent.ToList().Sum(d => d.Length));
         }
 
+        /// <summary>Brotli is missing from the netstandard2.0 build (.NET Framework); zlib is everywhere.</summary>
+        private static bool HasBrotli => CertificateCompression.Supported.Contains(CertificateCompression.Brotli);
+
+        private static void RequireBrotli()
+        {
+            if (!HasBrotli)
+                Assert.Inconclusive("Brotli certificate compression is not available on this target.");
+        }
+
         [DataRow(CertificateCompression.Brotli)]
         [DataRow(CertificateCompression.Zlib)]
         [TestMethod]
         public void ServerCertificate_IsCompressed(ushort algorithm)
         {
+            if (algorithm == CertificateCompression.Brotli)
+                RequireBrotli();
             var compressed = Run(new[] { algorithm }, CertificateCompression.Supported.ToList());
             Assert.IsNull(compressed.Error, compressed.Error?.ToString());
             Assert.AreEqual(algorithm, compressed.Client.CertificateCompressionAlgorithm);
@@ -64,6 +75,7 @@ namespace Dtls13Test.Tests
         [TestMethod]
         public void ServerPreference_PicksTheAlgorithm()
         {
+            RequireBrotli();
             var result = Run(new[] { CertificateCompression.Zlib, CertificateCompression.Brotli }, new[] { CertificateCompression.Brotli, CertificateCompression.Zlib });
             Assert.AreEqual(CertificateCompression.Brotli, result.Client.CertificateCompressionAlgorithm);
         }
@@ -79,7 +91,8 @@ namespace Dtls13Test.Tests
         [TestMethod]
         public void ClientCertificate_IsCompressedWhenTheServerAllowsIt()
         {
-            var result = Run(new[] { CertificateCompression.Zlib }, new[] { CertificateCompression.Brotli, CertificateCompression.Zlib }, clientAuth: true);
+            var clientAlgorithms = HasBrotli ? new[] { CertificateCompression.Brotli, CertificateCompression.Zlib } : new[] { CertificateCompression.Zlib };
+            var result = Run(new[] { CertificateCompression.Zlib }, clientAlgorithms, clientAuth: true);
             Assert.IsNull(result.Error, result.Error?.ToString());
             Assert.AreEqual(CertificateCompression.Zlib, result.Server.CertificateCompressionAlgorithm);
             Assert.IsNotNull(result.Server.ClientCertificate);
@@ -96,7 +109,8 @@ namespace Dtls13Test.Tests
             AssertAlert(AlertDescription.BadCertificate, () => CertificateCompression.Decompress(CertificateCompression.Zlib, zlib, 999));
             AssertAlert(AlertDescription.BadCertificate, () => CertificateCompression.Decompress(CertificateCompression.Zlib, zlib, 1001));
             AssertAlert(AlertDescription.BadCertificate, () => CertificateCompression.Decompress(CertificateCompression.Zlib, zlib, CertificateCompression.MaxUncompressedLength + 1));
-            AssertAlert(AlertDescription.BadCertificate, () => CertificateCompression.Decompress(CertificateCompression.Brotli, new byte[] { 1, 2, 3, 4, 5 }, 10));
+            if (HasBrotli)
+                AssertAlert(AlertDescription.BadCertificate, () => CertificateCompression.Decompress(CertificateCompression.Brotli, new byte[] { 1, 2, 3, 4, 5 }, 10));
             AssertAlert(AlertDescription.IllegalParameter, () => CertificateCompression.Decompress(CertificateCompression.Zstd, zlib, 1000));
         }
 
@@ -104,12 +118,12 @@ namespace Dtls13Test.Tests
         public void UnofferedAlgorithm_IsIllegalParameter()
         {
             var certificate = new CertificateDatagram(new[] { Pki.Leaf().Cert.GetEncoded() });
-            var message = new CompressedCertificateDatagram(CertificateCompression.Brotli, certificate);
+            var message = new CompressedCertificateDatagram(CertificateCompression.Zlib, certificate);
             var parsed = new CompressedCertificateDatagram();
             parsed.FromBytes(message.ToBytes());
-            AssertAlert(AlertDescription.IllegalParameter, () => parsed.Decompress(new[] { CertificateCompression.Zlib }));
+            AssertAlert(AlertDescription.IllegalParameter, () => parsed.Decompress(new[] { CertificateCompression.Brotli }));
             AssertAlert(AlertDescription.IllegalParameter, () => parsed.Decompress(null));
-            CollectionAssert.AreEqual(certificate.CertificateChain[0], parsed.Decompress(new[] { CertificateCompression.Brotli }).CertificateChain[0]);
+            CollectionAssert.AreEqual(certificate.CertificateChain[0], parsed.Decompress(new[] { CertificateCompression.Zlib }).CertificateChain[0]);
         }
 
         [TestMethod]
