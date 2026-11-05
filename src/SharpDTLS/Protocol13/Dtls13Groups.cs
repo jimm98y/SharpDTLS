@@ -190,7 +190,10 @@ namespace SharpDTLS.Protocol13
                 case X25519:
                 {
                     var key = new X25519PrivateKeyParameters(random);
-                    return (key.GeneratePublicKey().GetEncoded(), peer =>
+                    byte[] share = key.GeneratePublicKey().GetEncoded();
+                    if (TlsInspector.Current is { } inspector)
+                        TlsInspector.KeyExchange(inspector, group, key.GetEncoded(), share);
+                    return (share, peer =>
                     {
                         Expect(peer, 32);
                         return NonZero(Agree(new X25519Agreement(), key, new X25519PublicKeyParameters(peer, 0)));
@@ -199,7 +202,10 @@ namespace SharpDTLS.Protocol13
                 case X448:
                 {
                     var key = new X448PrivateKeyParameters(random);
-                    return (key.GeneratePublicKey().GetEncoded(), peer =>
+                    byte[] share = key.GeneratePublicKey().GetEncoded();
+                    if (TlsInspector.Current is { } inspector)
+                        TlsInspector.KeyExchange(inspector, group, key.GetEncoded(), share);
+                    return (share, peer =>
                     {
                         Expect(peer, 56);
                         return NonZero(Agree(new X448Agreement(), key, new X448PublicKeyParameters(peer, 0)));
@@ -215,7 +221,10 @@ namespace SharpDTLS.Protocol13
                     var pair = generator.GenerateKeyPair();
                     var key = (ECPrivateKeyParameters)pair.Private;
                     // RFC 8446 §4.2.8.2: uncompressed points; the secret is the x-coordinate, field-size long.
-                    return (((ECPublicKeyParameters)pair.Public).Q.GetEncoded(false), peer => EcdhSecret(domain, key, peer));
+                    byte[] share = ((ECPublicKeyParameters)pair.Public).Q.GetEncoded(false);
+                    if (TlsInspector.Current is { } inspector)
+                        TlsInspector.KeyExchange(inspector, group, BigIntegers.AsUnsignedByteArray((domain.Curve.FieldSize + 7) / 8, key.D), share);
+                    return (share, peer => EcdhSecret(domain, key, peer));
                 }
                 default:
                 {
@@ -306,7 +315,14 @@ namespace SharpDTLS.Protocol13
             var generator = new MLKemKeyPairGenerator();
             generator.Init(new MLKemKeyGenerationParameters(new SecureRandom(), parameters));
             var pair = generator.GenerateKeyPair();
-            return (((MLKemPublicKeyParameters)pair.Public).GetEncoded(), ciphertext =>
+            byte[] encapsulationKey = ((MLKemPublicKeyParameters)pair.Public).GetEncoded();
+            if (TlsInspector.Current is { } inspector)
+            {
+                ushort group = parameters == Org.BouncyCastle.Crypto.Parameters.MLKemParameters.ml_kem_512 ? MlKem512
+                    : parameters == Org.BouncyCastle.Crypto.Parameters.MLKemParameters.ml_kem_768 ? MlKem768 : MlKem1024;
+                TlsInspector.KeyExchange(inspector, group, ((MLKemPrivateKeyParameters)pair.Private).GetEncoded(), encapsulationKey);
+            }
+            return (encapsulationKey, ciphertext =>
             {
                 var decapsulator = new MLKemDecapsulator(parameters);
                 decapsulator.Init(pair.Private);

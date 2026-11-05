@@ -147,6 +147,8 @@ namespace SharpDTLS.Protocol13
         {
             Run(() =>
             {
+                if (IsDatagram)
+                    InspectReceivedRecord(record); // a TLS ClientHello was reported as it arrived on the stream
                 _clientHello = clientHello;
                 _group = group;
                 Session.CipherSuite = suite;
@@ -211,6 +213,7 @@ namespace SharpDTLS.Protocol13
                 if (AcceptEarlyData())
                 {
                     _earlyKeys = Dtls13CryptoUtils.CalculateEarlyKeys(_clientHello.ClientRandom, Session.Transcript.Hash(suite), _psk, suite);
+                    InspectSecret(TlsInspector.ClientEarlyTrafficSecret, _earlyKeys.ClientSecret);
                     AddReadKeys(_earlyKeys);
                     _earlyDataAccepted = true;
                 }
@@ -362,8 +365,16 @@ namespace SharpDTLS.Protocol13
             if (ReadConnectionId != null)
                 serverHello.Extensions.Add(new ConnectionIdExtension(ReadConnectionId));
             Session.Transcript.AddPlaintextRecord(SendPlaintextHandshake(serverHello));
+            suite = Session.CipherSuite; // an inspector may have changed the ServerHello's suite
 
             var handshakeKeys = Dtls13CryptoUtils.CalculateHandshakeKeys(_clientHello.ClientRandom, Session.Transcript.Hash(suite), sharedSecret, suite, _psk);
+            if (TlsInspector.Current != null)
+            {
+                InspectSecret(TlsInspector.Psk, _psk);
+                InspectSecret(TlsInspector.SharedSecret, sharedSecret);
+                InspectSecret(TlsInspector.HelloHash, Session.Transcript.Hash(suite));
+                InspectKeys(handshakeKeys);
+            }
             Session.ServerHandshakeKeys = handshakeKeys;
             Session.WriteKeys = handshakeKeys;
             AddReadKeys(handshakeKeys);
@@ -423,9 +434,28 @@ namespace SharpDTLS.Protocol13
             byte[] serverFinishedHash = Session.Transcript.Hash(suite);
             Session.ServerApplicationKeys = Dtls13CryptoUtils.CalculateApplicationKeys(_clientHello.ClientRandom, serverFinishedHash, handshakeKeys.Secret, suite);
             Session.ExporterMasterSecret = Dtls13CryptoUtils.CalculateExporterMasterSecret(Session.ServerApplicationKeys.Secret, serverFinishedHash, suite);
+            if (TlsInspector.Current != null)
+            {
+                InspectSecret(TlsInspector.HandshakeHash, serverFinishedHash);
+                InspectKeys(Session.ServerApplicationKeys);
+                InspectSecret(TlsInspector.ExporterMasterSecret, Session.ExporterMasterSecret);
+            }
 
             ArmRetransmission();
             _state = _certificateRequest != null ? State.WaitClientCertificate : State.WaitClientFinished;
+        }
+
+        /// <summary>
+        /// An inspector edited our ServerHello: its random is the one sent, and a different suite is used when implemented
+        /// (the handshake keys are derived after the ServerHello, with the suite's hash).
+        /// </summary>
+        protected override void OnSentHelloEdited(byte[] record)
+        {
+            var sent = new ServerHelloDatagram { Datagram = IsDatagram };
+            sent.FromBytes(record);
+            ServerRandom = sent.ServerRandom;
+            if (sent.SelectedCipherSuite != Session.CipherSuite.Id && Dtls13CipherSuite.IsSupported(sent.SelectedCipherSuite))
+                Session.CipherSuite = SuiteFor(sent.SelectedCipherSuite);
         }
 
         private EncryptedExtensionsDatagram BuildEncryptedExtensions()
@@ -494,6 +524,7 @@ namespace SharpDTLS.Protocol13
         {
             if (record[5] != 0x01 || _clientHello != null)
                 throw new DtlsException(AlertDescription.UnexpectedMessage, $"Unexpected plaintext handshake message 0x{record[5]:X2}");
+            InspectReceivedRecord(record);
 
             var clientHello = new ClientHelloDatagram { Datagram = false };
             clientHello.FromBytes(record);
@@ -625,6 +656,7 @@ namespace SharpDTLS.Protocol13
 
             Session.ResumptionMasterSecret = Dtls13CryptoUtils.CalculateResumptionMasterSecret(
                 Session.ServerApplicationKeys.Secret, Session.Transcript.Hash(suite), suite);
+            InspectSecret(TlsInspector.ResumptionMasterSecret, Session.ResumptionMasterSecret);
 
             var applicationKeys = Session.ServerApplicationKeys;
             Session.WriteKeys = applicationKeys;

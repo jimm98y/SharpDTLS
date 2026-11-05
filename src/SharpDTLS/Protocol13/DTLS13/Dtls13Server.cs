@@ -206,7 +206,14 @@ namespace SharpDTLS.Protocol13.DTLS13
             decision.HelloRetryRequest.SequenceNumber = clientHello.SequenceNumber;
             decision.HelloRetryRequest.RecordSequenceNumber = clientHello.RecordSequenceNumber;
             Debug.WriteLine($"[DTLS13 Server] Sending HelloRetryRequest to {endpoint}");
-            ServerTransport.Send(endpoint, decision.HelloRetryRequest.ToBytes());
+            byte[] hrr = decision.HelloRetryRequest.ToBytes();
+            if (TlsInspector.Current is { } inspector)
+            {
+                // Stateless: no connection exists for either message.
+                TlsInspector.Received(inspector, null, false, record, 13, 12);
+                hrr = TlsInspector.Sending(inspector, null, false, hrr, 13, 12);
+            }
+            ServerTransport.Send(endpoint, hrr);
             return false;
         }
 

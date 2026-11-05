@@ -129,7 +129,49 @@ namespace SharpDTLS.Protocol12
         /// Sends a handshake message as part of the current flight in the current write epoch, adding it
         /// to the transcript unless <paramref name="addToTranscript"/> is false. Returns the message as framed.
         /// </summary>
-        protected byte[] SendHandshake(byte type, byte[] body, bool addToTranscript = true) => _framing.SendHandshake(type, body, addToTranscript);
+        protected byte[] SendHandshake(byte type, byte[] body, bool addToTranscript = true)
+        {
+            if (TlsInspector.Current is { } inspector)
+            {
+                byte[] message = new byte[4 + body.Length];
+                message[0] = type;
+                message[1] = (byte)(body.Length >> 16); message[2] = (byte)(body.Length >> 8); message[3] = (byte)body.Length;
+                body.CopyTo(message, 4);
+                byte[] replaced = inspector.OnHandshakeSending(this, IsClient, IsDatagram ? NextSendMessageSeq : -1, message);
+                if (replaced != null && !ReferenceEquals(replaced, message) && !replaced.AsSpan().SequenceEqual(message))
+                {
+                    (type, body) = (replaced[0], replaced.AsSpan(4).ToArray());
+                    try
+                    {
+                        OnSentHandshakeEdited(type, body);
+                    }
+                    catch (Exception ex) when (ex is System.IO.InvalidDataException or ArgumentException or IndexOutOfRangeException or DtlsException)
+                    {
+                        // Not decodable: the engine keeps its own values; only the peer sees the change.
+                    }
+                }
+            }
+            return _framing.SendHandshake(type, body, addToTranscript);
+        }
+
+        /// <summary>
+        /// The inspector replaced a message this engine sends: adopt from it what this engine chose and can follow
+        /// (see <see cref="TlsInspector.OnHandshakeSending"/>).
+        /// </summary>
+        private protected virtual void OnSentHandshakeEdited(byte type, byte[] body) { }
+
+        // ── Inspection (TlsInspector.Current; nothing happens without one) ───────────────────
+
+        /// <summary>Reports a received handshake message (4-byte TLS or 12-byte DTLS header) to the inspector, if there is one.</summary>
+        protected void InspectReceived(byte[] message, int headerLength)
+        {
+            if (TlsInspector.Current is { } inspector)
+                TlsInspector.Received(inspector, this, IsClient, message, 0, headerLength);
+        }
+
+        /// <summary>Reports the content of a protected record to the inspector, if there is one.</summary>
+        private void InspectRecord(bool sent, byte contentType, ulong epoch, ulong sequenceNumber, byte[] content)
+            => TlsInspector.Current?.OnProtectedRecord(this, IsClient, sent, contentType, epoch, sequenceNumber, content);
 
         /// <summary>Sends ChangeCipherSpec (in the current epoch) and switches writes to the pending cipher.</summary>
         protected void SendChangeCipherSpec() => _framing.SendChangeCipherSpec();
@@ -185,8 +227,15 @@ namespace SharpDTLS.Protocol12
         /// </summary>
         protected void DeriveKeys(byte[] preMasterSecret)
         {
-            DeriveKeysFromMasterSecret(UseExtendedMasterSecret
-                ? Prf(preMasterSecret, "extended master secret", TranscriptHash(), 48)
+            byte[] sessionHash = UseExtendedMasterSecret ? TranscriptHash() : null;
+            if (TlsInspector.Current is { } inspector)
+            {
+                inspector.OnSecret(this, IsClient, TlsInspector.PreMasterSecret, preMasterSecret);
+                if (sessionHash != null)
+                    inspector.OnSecret(this, IsClient, TlsInspector.SessionHash, sessionHash);
+            }
+            DeriveKeysFromMasterSecret(sessionHash != null
+                ? Prf(preMasterSecret, "extended master secret", sessionHash, 48)
                 : Prf(preMasterSecret, "master secret", Concat(ClientRandom, ServerRandom), 48));
         }
 
@@ -200,6 +249,11 @@ namespace SharpDTLS.Protocol12
             // TLS 1.0 takes CBC IVs from the key block and chains them (DTLS 1.0 is TLS 1.1, with explicit IVs).
             bool implicitIv = ProtocolVersions.Level(NegotiatedVersion) == 1;
             byte[] keyBlock = Prf(MasterSecret, "key expansion", Concat(ServerRandom, ClientRandom), RecordCiphers.KeyBlockLength(CipherSuite, implicitIv));
+            if (TlsInspector.Current is { } inspector)
+            {
+                inspector.OnSecret(this, IsClient, TlsInspector.MasterSecret, MasterSecret);
+                inspector.OnSecret(this, IsClient, TlsInspector.KeyBlock, keyBlock);
+            }
             var (clientWrite, serverWrite) = RecordCiphers.Create(CipherSuite, keyBlock, UseEncryptThenMac && CipherSuite.IsCbc, implicitIv);
             _framing.SetPendingCiphers(read: IsClient ? serverWrite : clientWrite, write: IsClient ? clientWrite : serverWrite);
 

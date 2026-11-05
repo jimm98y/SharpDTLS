@@ -427,6 +427,7 @@ namespace SharpDTLS.Protocol13
         {
             var ticketSuite = SuiteFor(_offeredPsks[0].Ticket.CipherSuite);
             _earlyKeys = Dtls13CryptoUtils.CalculateEarlyKeys(_clientHello.ClientRandom, Session.Transcript.Hash(ticketSuite), _offeredPsks[0].Key, ticketSuite);
+            InspectSecret(TlsInspector.ClientEarlyTrafficSecret, _earlyKeys.ClientSecret);
             SendProtected(_earlyKeys, new ApplicationDataDatagram(EarlyData).ToBytes());
         }
 
@@ -541,12 +542,24 @@ namespace SharpDTLS.Protocol13
                 RaiseEvent(() => LegacyServerHello?.Invoke(pending));
                 return;
             }
+            InspectReceivedRecord(record); // the legacy engine reports a ServerHello handed to it
             ValidateServerHello(serverHello);
 
             if (HelloRetryRequest.IsHelloRetryRequest(serverHello))
                 OnHelloRetryRequest(record, serverHello);
             else
                 OnServerHello(record, serverHello);
+        }
+
+        /// <summary>An inspector edited our ClientHello: the random, legacy_session_id and offered suites are the ones sent.</summary>
+        protected override void OnSentHelloEdited(byte[] record)
+        {
+            var sent = new ClientHelloDatagram { Datagram = IsDatagram };
+            sent.FromBytes(record);
+            ClientRandom = sent.ClientRandom;
+            _clientHello.ClientRandom = sent.ClientRandom;
+            _clientHello.LegacySessionId = sent.LegacySessionId;
+            _clientHello.CipherSuites = sent.CipherSuites;
         }
 
         // A DTLS 1.2 server checks our address first (RFC 6347 §4.2.1): the same ClientHello again, with its cookie.
@@ -557,6 +570,7 @@ namespace SharpDTLS.Protocol13
                 return; // retransmitted
             if (++_helloVerifyRequests > 3)
                 throw new DtlsException(AlertDescription.UnexpectedMessage, "Too many HelloVerifyRequests.");
+            InspectReceivedRecord(record);
 
             int length = (record[14] << 16) | (record[15] << 8) | record[16];
             var hvr = SharpDTLS.Protocol12.HelloVerifyRequestMessage.Decode(record.AsSpan(25, length).ToArray());
@@ -584,7 +598,8 @@ namespace SharpDTLS.Protocol13
             if (versions == null || versions.Version != (IsDatagram ? ClientSupportedVersions.Dtls13 : ClientSupportedVersions.Tls13))
                 throw new DtlsException(AlertDescription.ProtocolVersion, IsDatagram ? "Server did not negotiate DTLS 1.3." : "Server did not negotiate TLS 1.3.");
 
-            if (!CipherSuites.Contains(serverHello.SelectedCipherSuite))
+            // The suites the ClientHello offered (as sent: an inspector may have edited them), that this engine implements.
+            if (!_clientHello.CipherSuites.Contains(serverHello.SelectedCipherSuite) || !Dtls13CipherSuite.IsSupported(serverHello.SelectedCipherSuite))
                 throw new DtlsException(AlertDescription.IllegalParameter, $"Server selected a cipher suite that was not offered (0x{serverHello.SelectedCipherSuite:X4}).");
 
             // RFC 9147 §5.4: DTLS 1.3 servers must not echo legacy_session_id; TLS 1.3 servers echo ours (RFC 8446 §4.1.3).
@@ -693,6 +708,13 @@ namespace SharpDTLS.Protocol13
 
             byte[] sharedSecret = keyShare == null ? null : _keyShares[keyShare.KeyType].Complete(keyShare.PublicKey);
             var handshakeKeys = Dtls13CryptoUtils.CalculateHandshakeKeys(_clientHello.ClientRandom, Session.Transcript.Hash(suite), sharedSecret, suite, psk);
+            if (TlsInspector.Current != null)
+            {
+                InspectSecret(TlsInspector.Psk, psk);
+                InspectSecret(TlsInspector.SharedSecret, sharedSecret);
+                InspectSecret(TlsInspector.HelloHash, Session.Transcript.Hash(suite));
+                InspectKeys(handshakeKeys);
+            }
 
             Session.ServerHandshakeKeys = handshakeKeys;
             Session.WriteKeys = handshakeKeys;
@@ -868,6 +890,13 @@ namespace SharpDTLS.Protocol13
             byte[] verifyData = Dtls13CryptoUtils.CalculateFinished(handshakeKeys.ClientSecret, Session.Transcript.Hash(suite), suite);
             SendHandshake(new FinishedDatagram { VerifyData = verifyData }, handshakeKeys);
             Session.ResumptionMasterSecret = Dtls13CryptoUtils.CalculateResumptionMasterSecret(applicationKeys.Secret, Session.Transcript.Hash(suite), suite);
+            if (TlsInspector.Current != null)
+            {
+                InspectSecret(TlsInspector.HandshakeHash, serverFinishedHash);
+                InspectKeys(applicationKeys);
+                InspectSecret(TlsInspector.ExporterMasterSecret, Session.ExporterMasterSecret);
+                InspectSecret(TlsInspector.ResumptionMasterSecret, Session.ResumptionMasterSecret);
+            }
 
             // Switch to the application epoch. The server's ACK (or its first application record) ends retransmission.
             Session.WriteKeys = applicationKeys;

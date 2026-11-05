@@ -81,8 +81,14 @@ namespace SharpDTLS
         public event EventHandler<TlsConnectionBase> ConnectionClosed;
         public event EventHandler<TlsAlertEventArgs> AlertReceived;
 
+        /// <summary>A connection was created for a new client, before its handshake runs (e.g. to watch it fail).</summary>
+        public event EventHandler<TlsConnectionBase> ConnectionCreated;
+
         private void OnConnectionCreated(TlsConnectionBase connection)
-            => connection.AlertReceived += (_, alert) => AlertReceived?.Invoke(this, new TlsAlertEventArgs(connection, alert));
+        {
+            connection.AlertReceived += (_, alert) => AlertReceived?.Invoke(this, new TlsAlertEventArgs(connection, alert));
+            ConnectionCreated?.Invoke(this, connection);
+        }
 
         public IReadOnlyCollection<TlsConnectionBase> Connections
             => Tls12.Connections.Cast<TlsConnectionBase>().Concat(Tls13.Connections).ToList();
