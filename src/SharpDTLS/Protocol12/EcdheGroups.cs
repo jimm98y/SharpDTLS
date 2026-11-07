@@ -33,7 +33,10 @@ namespace SharpDTLS.Protocol12
                 var generator = new X25519KeyPairGenerator();
                 generator.Init(new X25519KeyGenerationParameters(random));
                 var keyPair = generator.GenerateKeyPair();
-                return (((X25519PrivateKeyParameters)keyPair.Private).GetEncoded(), ((X25519PublicKeyParameters)keyPair.Public).GetEncoded());
+                var pair = (((X25519PrivateKeyParameters)keyPair.Private).GetEncoded(), ((X25519PublicKeyParameters)keyPair.Public).GetEncoded());
+                if (TlsInspector.Current is { } x25519Inspector)
+                    TlsInspector.KeyExchange(x25519Inspector, group, pair.Item1, pair.Item2);
+                return pair;
             }
 
             var domain = Domain(group);
@@ -42,6 +45,8 @@ namespace SharpDTLS.Protocol12
             var ecKeyPair = ecGenerator.GenerateKeyPair();
             byte[] privateKey = BigIntegers.AsUnsignedByteArray(FieldLength(group), ((ECPrivateKeyParameters)ecKeyPair.Private).D);
             byte[] publicKey = ((ECPublicKeyParameters)ecKeyPair.Public).Q.GetEncoded(false); // uncompressed
+            if (TlsInspector.Current is { } inspector)
+                TlsInspector.KeyExchange(inspector, group, privateKey, publicKey);
             return (privateKey, publicKey);
         }
 

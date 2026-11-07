@@ -275,6 +275,7 @@ namespace SharpDTLS.Protocol12
         internal void AdoptClientHello(byte[] message) => Locked(() =>
         {
             _clientHello = ClientHelloMessage.Decode(message.AsSpan(4).ToArray(), datagram: false);
+            ClientRandom = _clientHello.Random; // the one sent, also when an inspector replaced it
             ResetTranscript();
             AddToTranscript(message);
             _state = State.WaitServerHello;
@@ -287,6 +288,7 @@ namespace SharpDTLS.Protocol12
         internal void AdoptHandoff(SharpDTLS.Protocol13.LegacyDatagramHandoff handoff) => Locked(() =>
         {
             _clientHello = ClientHelloMessage.Decode(handoff.ClientHello.AsSpan(12).ToArray(), datagram: true);
+            ClientRandom = _clientHello.Random;
             // The 1.3 engine's connection ID went out; it is the one the server answers.
             _offeredConnectionId = _clientHello.Extension<ConnectionIdExtension>()?.ConnectionId;
             SetInitialRecordSequence((ulong)handoff.NextRecordSequence);
@@ -296,6 +298,18 @@ namespace SharpDTLS.Protocol12
             AddToTranscript(handoff.ClientHello);
             _state = State.WaitServerHello;
         });
+
+        /// <summary>An inspector edited our ClientHello: the random, session ID and offered suites are the ones sent.</summary>
+        private protected override void OnSentHandshakeEdited(byte type, byte[] body)
+        {
+            if (type != HandshakeType.ClientHello)
+                return;
+            var sent = ClientHelloMessage.Decode(body, IsDatagram);
+            _clientHello = sent;
+            ClientRandom = sent.Random;
+            if (_offeredSessionId != null)
+                _offeredSessionId = sent.SessionId;
+        }
 
         private ClientHelloMessage BuildClientHello(byte[] cookie)
         {

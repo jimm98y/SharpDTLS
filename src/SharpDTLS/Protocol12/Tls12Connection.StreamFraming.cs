@@ -73,7 +73,10 @@ namespace SharpDTLS.Protocol12
                     ? fragment
                     : _readCipher.Decrypt(contentType, version, (ushort)(sequence >> 48), sequence & 0xFFFFFFFFFFFFUL, fragment);
                 if (_readCipher != null)
+                {
+                    C.InspectRecord(false, contentType, _readEpoch, sequence, plaintext);
                     C.CheckReceivedRecordSize(plaintext.Length);
+                }
                 else if (plaintext.Length > MaxRecordPayload)
                     throw new DtlsException(AlertDescription.RecordOverflow, $"Record of {plaintext.Length} bytes.");
 
@@ -131,6 +134,7 @@ namespace SharpDTLS.Protocol12
                     byte[] message = _handshake.GetRange(0, 4 + length).ToArray();
                     _handshake.RemoveRange(0, 4 + length);
                     C.NextReceiveMessageSeq++;
+                    C.InspectReceived(message, 4);
                     C.OnHandshakeMessage(message[0], message.AsSpan(4).ToArray(), message, _readEpoch);
                 }
             }
@@ -141,6 +145,8 @@ namespace SharpDTLS.Protocol12
             {
                 ulong sequence = _writeSequence++;
                 ushort version = C.RecordVersion;
+                if (_writeCipher != null)
+                    C.InspectRecord(true, contentType, 1, sequence, payload); // TLS has one ChangeCipherSpec per direction
                 byte[] fragment = _writeCipher == null
                     ? payload
                     : _writeCipher.Encrypt(contentType, version, (ushort)(sequence >> 48), sequence & 0xFFFFFFFFFFFFUL, payload);

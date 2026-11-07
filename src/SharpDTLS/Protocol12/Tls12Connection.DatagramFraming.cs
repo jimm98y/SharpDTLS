@@ -132,6 +132,7 @@ namespace SharpDTLS.Protocol12
                 }
                 if (cipher != null)
                 {
+                    C.InspectRecord(false, contentType, epoch, sequenceNumber, plaintext);
                     C.CheckReceivedRecordSize(plaintext.Length);
                     C.OnRecordAuthenticated(epoch, sequenceNumber, connectionId != null);
                 }
@@ -246,6 +247,7 @@ namespace SharpDTLS.Protocol12
             private void Deliver(byte[] message, ushort epoch)
             {
                 C.NextReceiveMessageSeq++;
+                C.InspectReceived(message, 12);
                 byte[] body = message.AsSpan(12).ToArray();
                 C.OnHandshakeMessage(message[0], body, message, epoch);
 
@@ -279,6 +281,8 @@ namespace SharpDTLS.Protocol12
                     throw new DtlsException(AlertDescription.InternalError, "Record sequence number space exhausted.");
 
                 var cipher = _writeCiphers[epoch];
+                if (cipher != null)
+                    C.InspectRecord(true, contentType, epoch, seq, plaintext);
 
                 // RFC 9146 §4: once encrypting, a peer that asked for a CID gets tls12_cid records with the real content
                 // type inside DTLSInnerPlaintext.

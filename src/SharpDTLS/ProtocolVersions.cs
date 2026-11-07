@@ -1,7 +1,7 @@
 namespace SharpDTLS
 {
     /// <summary>TLS protocol version code points (RFC 2246, 4346, 5246, 8446). SSL 3.0 is prohibited (RFC 7568).</summary>
-    internal static class TlsVersion
+    public static class TlsVersion
     {
         public const ushort Tls10 = 0x0301;
         public const ushort Tls11 = 0x0302;

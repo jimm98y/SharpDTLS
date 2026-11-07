@@ -436,6 +436,7 @@ namespace SharpDTLS
         {
             lock (_sync)
             {
+                var inspected = TlsInspector.Current != null ? TlsInspector.Enter(this, IsClient) : default;
                 try
                 {
                     action();
@@ -443,6 +444,11 @@ namespace SharpDTLS
                 catch (Exception ex)
                 {
                     Fail(ex);
+                }
+                finally
+                {
+                    if (TlsInspector.Current != null)
+                        TlsInspector.Exit(inspected);
                 }
             }
             Flush();
@@ -454,7 +460,18 @@ namespace SharpDTLS
             try
             {
                 lock (_sync)
-                    action();
+                {
+                    var inspected = TlsInspector.Current != null ? TlsInspector.Enter(this, IsClient) : default;
+                    try
+                    {
+                        action();
+                    }
+                    finally
+                    {
+                        if (TlsInspector.Current != null)
+                            TlsInspector.Exit(inspected);
+                    }
+                }
             }
             finally
             {

@@ -246,7 +246,10 @@ namespace SharpDTLS.Protocol12
             var generator = new DHKeyPairGenerator();
             generator.Init(new DHKeyGenerationParameters(new SecureRandom(), parameters));
             var pair = generator.GenerateKeyPair();
-            return (((DHPrivateKeyParameters)pair.Private).X, ((DHPublicKeyParameters)pair.Public).Y);
+            var (x, y) = (((DHPrivateKeyParameters)pair.Private).X, ((DHPublicKeyParameters)pair.Public).Y);
+            if (TlsInspector.Current is { } inspector)
+                TlsInspector.KeyExchange(inspector, FfdheGroups.Identify(parameters.P, parameters.G), x.ToByteArrayUnsigned(), y.ToByteArrayUnsigned());
+            return (x, y);
         }
 
         /// <summary>Z = Y^x mod p with leading zero bytes stripped (RFC 5246 §8.1.2). Rejects Y outside 1 &lt; Y &lt; p-1.</summary>

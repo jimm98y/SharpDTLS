@@ -354,6 +354,7 @@ namespace SharpDTLS.Protocol13
             _tlsReadSequence[keys] = sequence + 1;
 
             byte contentType = inner[^1];
+            TlsInspector.Current?.OnProtectedRecord(this, IsClient, false, contentType, keys.Epoch, sequence, inner.AsSpan(0, inner.Length - 1));
             CheckReceivedRecordSize(inner.Length - 1);
             if (contentType != 0x16 && _tlsHandshake.Count > 0)
                 throw new DtlsException(AlertDescription.UnexpectedMessage, "Record interleaved with a fragmented handshake message.");
@@ -482,6 +483,7 @@ namespace SharpDTLS.Protocol13
             OnRecordAuthenticated(keys.Epoch, unprotected.SequenceNumber, unprotected.ConnectionId != null);
             byte[] inner = unprotected.InnerPlaintext;
             byte contentType = inner[inner.Length - 1];
+            TlsInspector.Current?.OnProtectedRecord(this, IsClient, false, contentType, keys.Epoch, unprotected.SequenceNumber, inner.AsSpan(0, inner.Length - 1));
             if (keys.Epoch >= 2)
                 CheckReceivedRecordSize(inner.Length - 1);
 
@@ -574,6 +576,8 @@ namespace SharpDTLS.Protocol13
         private void DeliverHandshake(byte[] message)
         {
             NextReceiveMessageSeq++;
+            if (TlsInspector.Current is { } inspector)
+                TlsInspector.Received(inspector, this, IsClient, message, 0, 12, IsDatagram);
 
             var parsed = ParseHandshake(message);
             if (IsHandshakeComplete)
@@ -745,13 +749,76 @@ namespace SharpDTLS.Protocol13
         protected byte[] SendPlaintextHandshake(ServerHelloDatagram serverHello)
         {
             serverHello.SequenceNumber = NextSendMessageSeq++;
-            return SendPlaintextRecord(serverHello.ToBytes());
+            return SendPlaintextRecord(InspectSending(serverHello.ToBytes()));
         }
 
         protected byte[] SendPlaintextHandshake(ClientHelloDatagram clientHello)
         {
             clientHello.SequenceNumber = NextSendMessageSeq++;
-            return SendPlaintextRecord(clientHello.ToBytes());
+            return SendPlaintextRecord(InspectSending(clientHello.ToBytes()));
+        }
+
+        // ── Inspection (TlsInspector.Current; nothing happens without one) ───────────────────
+
+        /// <summary>A whole-message plaintext handshake record, as the inspector may have replaced it.</summary>
+        private byte[] InspectSending(byte[] record)
+        {
+            if (TlsInspector.Current is not { } inspector)
+                return record;
+            byte[] sent = TlsInspector.Sending(inspector, this, IsClient, record, IsDatagram ? 13 : 5, IsDatagram ? 12 : 4);
+            if (!ReferenceEquals(sent, record))
+            {
+                try
+                {
+                    OnSentHelloEdited(sent);
+                }
+                catch (Exception ex) when (ex is System.IO.InvalidDataException or ArgumentException or IndexOutOfRangeException or DtlsException)
+                {
+                    // Not decodable: the engine keeps its own values; only the peer sees the change.
+                }
+            }
+            return sent;
+        }
+
+        /// <summary>
+        /// The inspector replaced our ClientHello or ServerHello (a whole-message record): adopt from it what this engine
+        /// chose and can follow (see <see cref="TlsInspector.OnHandshakeSending"/>).
+        /// </summary>
+        protected virtual void OnSentHelloEdited(byte[] record) { }
+
+        /// <summary>Reports a received whole-message plaintext handshake record (ClientHello, ServerHello, HelloRetryRequest).</summary>
+        protected void InspectReceivedRecord(byte[] record)
+        {
+            if (TlsInspector.Current is { } inspector)
+                TlsInspector.Received(inspector, this, IsClient, record, IsDatagram ? 13 : 5, IsDatagram ? 12 : 4);
+        }
+
+        /// <summary>Reports a secret to the inspector, if there is one.</summary>
+        protected void InspectSecret(string name, byte[] value)
+        {
+            if (value != null)
+                TlsInspector.Current?.OnSecret(this, IsClient, name, value);
+        }
+
+        /// <summary>Reports the traffic secrets and keys of the handshake (epoch 2) or first application (epoch 3) keys.</summary>
+        protected void InspectKeys(Dtls13CryptoContext keys)
+        {
+            var inspector = TlsInspector.Current;
+            if (inspector == null)
+                return;
+            bool handshake = keys.Epoch == 2;
+            inspector.OnSecret(this, IsClient, handshake ? TlsInspector.HandshakeSecret : TlsInspector.MasterSecret, keys.Secret);
+            inspector.OnSecret(this, IsClient, handshake ? TlsInspector.ClientHandshakeTrafficSecret : TlsInspector.ClientApplicationTrafficSecret, keys.ClientSecret);
+            inspector.OnSecret(this, IsClient, handshake ? TlsInspector.ServerHandshakeTrafficSecret : TlsInspector.ServerApplicationTrafficSecret, keys.ServerSecret);
+            inspector.OnSecret(this, IsClient, handshake ? TlsInspector.ClientHandshakeKey : TlsInspector.ClientApplicationKey, keys.ClientKey);
+            inspector.OnSecret(this, IsClient, handshake ? TlsInspector.ClientHandshakeIv : TlsInspector.ClientApplicationIv, keys.ClientIv);
+            inspector.OnSecret(this, IsClient, handshake ? TlsInspector.ServerHandshakeKey : TlsInspector.ServerApplicationKey, keys.ServerKey);
+            inspector.OnSecret(this, IsClient, handshake ? TlsInspector.ServerHandshakeIv : TlsInspector.ServerApplicationIv, keys.ServerIv);
+            if (IsDatagram)
+            {
+                inspector.OnSecret(this, IsClient, handshake ? TlsInspector.ClientHandshakeSnKey : TlsInspector.ClientApplicationSnKey, keys.ClientSnKey);
+                inspector.OnSecret(this, IsClient, handshake ? TlsInspector.ServerHandshakeSnKey : TlsInspector.ServerApplicationSnKey, keys.ServerSnKey);
+            }
         }
 
         /// <summary>Epoch-0 record sequence numbers continue from here (a stateless server starts after the HelloRetryRequest).</summary>
@@ -786,6 +853,8 @@ namespace SharpDTLS.Protocol13
         {
             message.SequenceNumber = NextSendMessageSeq++;
             byte[] plaintext = message.ToBytes();
+            if (TlsInspector.Current is { } inspector)
+                plaintext = TlsInspector.Sending(inspector, this, IsClient, plaintext, 0, 12, trailer: 1, datagram: IsDatagram);
             if (addToTranscript)
                 Session.Transcript.AddHandshake(plaintext);
 
@@ -832,6 +901,7 @@ namespace SharpDTLS.Protocol13
             ulong seq = IsClient ? keys.ClientKeyUseCounter++ : keys.ServerKeyUseCounter++;
             if (seq >= (1UL << 48) - 1)
                 throw new DtlsException(AlertDescription.InternalError, "Record sequence number space exhausted; a KeyUpdate is required");
+            TlsInspector.Current?.OnProtectedRecord(this, IsClient, true, innerPlaintext[^1], keys.Epoch, seq, innerPlaintext.AsSpan(0, innerPlaintext.Length - 1));
 
             if (!IsDatagram)
                 return (Dtls13RecordProtection.ProtectTls(keys, IsClient, seq, innerPlaintext), (keys.Epoch, seq));

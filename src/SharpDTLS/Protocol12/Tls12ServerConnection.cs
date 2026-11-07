@@ -238,6 +238,7 @@ namespace SharpDTLS.Protocol12
         /// </summary>
         internal void Start(ClientHelloMessage clientHello, byte[] message, ulong recordSequenceNumber) => Run(() =>
         {
+            InspectReceived(message, 12); // a stateless DTLS ClientHello does not pass the framing
             _clientHello = clientHello;
             int messageSeq = (message[4] << 8) | message[5];
 
@@ -417,6 +418,25 @@ namespace SharpDTLS.Protocol12
             if (session.PeerCertificate != null)
                 _clientCertificate = Tls12ClientConnection.ParseCertificate(session.PeerCertificate);
             return true;
+        }
+
+        /// <summary>
+        /// An inspector edited our ServerHello: its random and session ID are the ones sent; a different suite is used when
+        /// implemented for this version with the same key exchange, and extended_master_secret / encrypt_then_mac follow
+        /// their presence.
+        /// </summary>
+        private protected override void OnSentHandshakeEdited(byte type, byte[] body)
+        {
+            if (type != HandshakeType.ServerHello)
+                return;
+            var sent = ServerHelloMessage.Decode(body);
+            ServerRandom = sent.Random;
+            _sessionId = sent.SessionId;
+            if (sent.CipherSuite != CipherSuite.Id && SharpDTLS.CipherSuites.TryGet(sent.CipherSuite, out var suite)
+                && suite.KeyExchange == CipherSuite.KeyExchange && suite.IsUsableWith(NegotiatedVersion))
+                CipherSuite = suite;
+            UseExtendedMasterSecret = sent.Extension<ExtendedMasterSecretExtension>() != null;
+            UseEncryptThenMac = sent.Extension<EncryptThenMacExtension>() != null && CipherSuite.IsCbc;
         }
 
         private void SendServerFlight()

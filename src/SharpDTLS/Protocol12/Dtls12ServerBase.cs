@@ -188,6 +188,9 @@ namespace SharpDTLS.Protocol12
             if (ShouldSendHelloVerify &&
                 (clientHello.Cookie.Length == 0 || !Dtls12CryptoUtils.ValidateCookie(DateTime.UtcNow, ip.Address.ToString(), ip.Port, clientHello.Cookie)))
             {
+                // Stateless: no connection exists for the ClientHello or the HelloVerifyRequest.
+                if (TlsInspector.Current is { } inspector)
+                    TlsInspector.Received(inspector, null, false, message, 0, 12);
                 SendHelloVerifyRequest(endpoint, Dtls12CryptoUtils.CreateCookie(DateTime.UtcNow, ip.Address.ToString(), ip.Port), recordSeq, messageSeq);
                 return false;
             }
@@ -209,7 +212,10 @@ namespace SharpDTLS.Protocol12
                 .WriteUInt24(0).WriteUInt24(body.Length)
                 .WriteBytes(body);
 
-            try { ServerTransport.Send(endpoint, w.ToArray()); }
+            byte[] record = w.ToArray();
+            if (TlsInspector.Current is { } inspector)
+                record = TlsInspector.Sending(inspector, null, false, record, 13, 12);
+            try { ServerTransport.Send(endpoint, record); }
             catch (Exception ex) { Debug.WriteLine($"[DTLS12 Server] Failed to send HelloVerifyRequest to {endpoint}: {ex.Message}"); }
         }
     }
