@@ -1,0 +1,724 @@
+abstract SharpDTLS.TlsConnectionBase.ConnectionId.get -> byte[]
+abstract SharpDTLS.TlsConnectionBase.IsResumed.get -> bool
+abstract SharpDTLS.TlsConnectionBase.NegotiatedCipherSuite.get -> ushort
+abstract SharpDTLS.TlsConnectionBase.PeerCertificate.get -> Org.BouncyCastle.X509.X509Certificate
+abstract SharpDTLS.TlsConnectionBase.PeerConnectionId.get -> byte[]
+abstract SharpDTLS.TlsSession.CipherSuite.get -> ushort
+abstract SharpDTLS.TlsSession.CreatedUtc.get -> System.DateTime
+abstract SharpDTLS.TlsSession.PeerCertificate.get -> byte[]
+abstract SharpDTLS.TlsSession.ServerName.get -> string
+const SharpDTLS.CertificateCompressionAlgorithms.Brotli = 2 -> ushort
+const SharpDTLS.CertificateCompressionAlgorithms.Zlib = 1 -> ushort
+const SharpDTLS.CertificateCompressionAlgorithms.Zstd = 3 -> ushort
+const SharpDTLS.CipherSuites.TLS_EMPTY_RENEGOTIATION_INFO_SCSV = 255 -> ushort
+const SharpDTLS.CipherSuites.TLS_FALLBACK_SCSV = 22016 -> ushort
+const SharpDTLS.DtlsSrtp.DOUBLE_AEAD_AES_128_GCM_AEAD_AES_128_GCM = 9 -> ushort
+const SharpDTLS.DtlsSrtp.DOUBLE_AEAD_AES_256_GCM_AEAD_AES_256_GCM = 10 -> ushort
+const SharpDTLS.DtlsSrtp.ExporterLabel = "EXTRACTOR-dtls_srtp" -> string
+const SharpDTLS.DtlsSrtp.MaxMkiLength = 255 -> int
+const SharpDTLS.DtlsSrtp.SRTP_AEAD_AES_128_GCM = 7 -> ushort
+const SharpDTLS.DtlsSrtp.SRTP_AEAD_AES_256_GCM = 8 -> ushort
+const SharpDTLS.DtlsSrtp.SRTP_AEAD_ARIA_128_GCM = 15 -> ushort
+const SharpDTLS.DtlsSrtp.SRTP_AEAD_ARIA_256_GCM = 16 -> ushort
+const SharpDTLS.DtlsSrtp.SRTP_AES128_CM_HMAC_SHA1_32 = 2 -> ushort
+const SharpDTLS.DtlsSrtp.SRTP_AES128_CM_HMAC_SHA1_80 = 1 -> ushort
+const SharpDTLS.DtlsSrtp.SRTP_ARIA_128_CTR_HMAC_SHA1_32 = 12 -> ushort
+const SharpDTLS.DtlsSrtp.SRTP_ARIA_128_CTR_HMAC_SHA1_80 = 11 -> ushort
+const SharpDTLS.DtlsSrtp.SRTP_ARIA_256_CTR_HMAC_SHA1_32 = 14 -> ushort
+const SharpDTLS.DtlsSrtp.SRTP_ARIA_256_CTR_HMAC_SHA1_80 = 13 -> ushort
+const SharpDTLS.DtlsSrtp.SRTP_NULL_HMAC_SHA1_32 = 6 -> ushort
+const SharpDTLS.DtlsSrtp.SRTP_NULL_HMAC_SHA1_80 = 5 -> ushort
+const SharpDTLS.DtlsVersion.Dtls10 = 65279 -> ushort
+const SharpDTLS.DtlsVersion.Dtls12 = 65277 -> ushort
+const SharpDTLS.DtlsVersion.Dtls13 = 65276 -> ushort
+const SharpDTLS.NamedGroups.Ffdhe2048 = 256 -> ushort
+const SharpDTLS.NamedGroups.Ffdhe3072 = 257 -> ushort
+const SharpDTLS.NamedGroups.Ffdhe4096 = 258 -> ushort
+const SharpDTLS.NamedGroups.Ffdhe6144 = 259 -> ushort
+const SharpDTLS.NamedGroups.Ffdhe8192 = 260 -> ushort
+const SharpDTLS.NamedGroups.MlKem1024 = 514 -> ushort
+const SharpDTLS.NamedGroups.MlKem512 = 512 -> ushort
+const SharpDTLS.NamedGroups.MlKem768 = 513 -> ushort
+const SharpDTLS.NamedGroups.Secp256r1 = 23 -> ushort
+const SharpDTLS.NamedGroups.SecP256r1MlKem768 = 4587 -> ushort
+const SharpDTLS.NamedGroups.Secp384r1 = 24 -> ushort
+const SharpDTLS.NamedGroups.SecP384r1MlKem1024 = 4589 -> ushort
+const SharpDTLS.NamedGroups.Secp521r1 = 25 -> ushort
+const SharpDTLS.NamedGroups.X25519 = 29 -> ushort
+const SharpDTLS.NamedGroups.X25519MlKem768 = 4588 -> ushort
+const SharpDTLS.NamedGroups.X448 = 30 -> ushort
+const SharpDTLS.SignatureSchemes.DsaSha1 = 514 -> ushort
+const SharpDTLS.SignatureSchemes.DsaSha256 = 1026 -> ushort
+const SharpDTLS.SignatureSchemes.DsaSha384 = 1282 -> ushort
+const SharpDTLS.SignatureSchemes.DsaSha512 = 1538 -> ushort
+const SharpDTLS.SignatureSchemes.EcdsaSecp256r1Sha256 = 1027 -> ushort
+const SharpDTLS.SignatureSchemes.EcdsaSecp384r1Sha384 = 1283 -> ushort
+const SharpDTLS.SignatureSchemes.EcdsaSecp521r1Sha512 = 1539 -> ushort
+const SharpDTLS.SignatureSchemes.EcdsaSha1 = 515 -> ushort
+const SharpDTLS.SignatureSchemes.Ed25519 = 2055 -> ushort
+const SharpDTLS.SignatureSchemes.Ed448 = 2056 -> ushort
+const SharpDTLS.SignatureSchemes.RsaPkcs1Sha1 = 513 -> ushort
+const SharpDTLS.SignatureSchemes.RsaPkcs1Sha256 = 1025 -> ushort
+const SharpDTLS.SignatureSchemes.RsaPkcs1Sha384 = 1281 -> ushort
+const SharpDTLS.SignatureSchemes.RsaPkcs1Sha512 = 1537 -> ushort
+const SharpDTLS.SignatureSchemes.RsaPssRsaeSha256 = 2052 -> ushort
+const SharpDTLS.SignatureSchemes.RsaPssRsaeSha384 = 2053 -> ushort
+const SharpDTLS.SignatureSchemes.RsaPssRsaeSha512 = 2054 -> ushort
+const SharpDTLS.TlsConnectionBase.MaxRecordPayload = 16384 -> int
+const SharpDTLS.TlsInspector.ClientApplicationIv = "client_application_iv" -> string
+const SharpDTLS.TlsInspector.ClientApplicationKey = "client_application_key" -> string
+const SharpDTLS.TlsInspector.ClientApplicationSnKey = "client_application_sn_key" -> string
+const SharpDTLS.TlsInspector.ClientApplicationTrafficSecret = "client_application_traffic_secret_0" -> string
+const SharpDTLS.TlsInspector.ClientEarlyTrafficSecret = "client_early_traffic_secret" -> string
+const SharpDTLS.TlsInspector.ClientHandshakeIv = "client_handshake_iv" -> string
+const SharpDTLS.TlsInspector.ClientHandshakeKey = "client_handshake_key" -> string
+const SharpDTLS.TlsInspector.ClientHandshakeSnKey = "client_handshake_sn_key" -> string
+const SharpDTLS.TlsInspector.ClientHandshakeTrafficSecret = "client_handshake_traffic_secret" -> string
+const SharpDTLS.TlsInspector.ExporterMasterSecret = "exporter_master_secret" -> string
+const SharpDTLS.TlsInspector.HandshakeHash = "handshake_hash" -> string
+const SharpDTLS.TlsInspector.HandshakeSecret = "handshake_secret" -> string
+const SharpDTLS.TlsInspector.HelloHash = "hello_hash" -> string
+const SharpDTLS.TlsInspector.KeyBlock = "key_block" -> string
+const SharpDTLS.TlsInspector.MasterSecret = "master_secret" -> string
+const SharpDTLS.TlsInspector.PreMasterSecret = "pre_master_secret" -> string
+const SharpDTLS.TlsInspector.Psk = "psk" -> string
+const SharpDTLS.TlsInspector.ResumptionMasterSecret = "resumption_master_secret" -> string
+const SharpDTLS.TlsInspector.ServerApplicationIv = "server_application_iv" -> string
+const SharpDTLS.TlsInspector.ServerApplicationKey = "server_application_key" -> string
+const SharpDTLS.TlsInspector.ServerApplicationSnKey = "server_application_sn_key" -> string
+const SharpDTLS.TlsInspector.ServerApplicationTrafficSecret = "server_application_traffic_secret_0" -> string
+const SharpDTLS.TlsInspector.ServerHandshakeIv = "server_handshake_iv" -> string
+const SharpDTLS.TlsInspector.ServerHandshakeKey = "server_handshake_key" -> string
+const SharpDTLS.TlsInspector.ServerHandshakeSnKey = "server_handshake_sn_key" -> string
+const SharpDTLS.TlsInspector.ServerHandshakeTrafficSecret = "server_handshake_traffic_secret" -> string
+const SharpDTLS.TlsInspector.SessionHash = "session_hash" -> string
+const SharpDTLS.TlsInspector.SharedSecret = "shared_secret" -> string
+const SharpDTLS.TlsVersion.Tls10 = 769 -> ushort
+const SharpDTLS.TlsVersion.Tls11 = 770 -> ushort
+const SharpDTLS.TlsVersion.Tls12 = 771 -> ushort
+const SharpDTLS.TlsVersion.Tls13 = 772 -> ushort
+const SharpDTLS.UDP.UdpTransport.MAX_RECEIVE_QUEUE_ITEMS = 32 -> int
+const SharpDTLS.UDP.UdpTransport.MTU = 1472 -> int
+override SharpDTLS.CipherSuiteInfo.ToString() -> string
+override SharpDTLS.TlsStream.CanRead.get -> bool
+override SharpDTLS.TlsStream.CanSeek.get -> bool
+override SharpDTLS.TlsStream.CanWrite.get -> bool
+override SharpDTLS.TlsStream.Flush() -> void
+override SharpDTLS.TlsStream.Length.get -> long
+override SharpDTLS.TlsStream.Position.get -> long
+override SharpDTLS.TlsStream.Position.set -> void
+override SharpDTLS.TlsStream.Read(byte[] buffer, int offset, int count) -> int
+override SharpDTLS.TlsStream.ReadAsync(byte[] buffer, int offset, int count, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<int>
+override SharpDTLS.TlsStream.Seek(long offset, System.IO.SeekOrigin origin) -> long
+override SharpDTLS.TlsStream.SetLength(long value) -> void
+override SharpDTLS.TlsStream.Write(byte[] buffer, int offset, int count) -> void
+override SharpDTLS.TlsStream.WriteAsync(byte[] buffer, int offset, int count, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task
+SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.AccessDenied = 49 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.BadCertificate = 42 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.BadCertificateStatusResponse = 113 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.BadRecordMac = 20 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.CertificateExpired = 45 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.CertificateRequired = 116 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.CertificateRevoked = 44 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.CertificateUnknown = 46 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.CloseNotify = 0 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.DecodeError = 50 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.DecryptError = 51 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.HandshakeFailure = 40 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.IllegalParameter = 47 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.InappropriateFallback = 86 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.InsufficientSecurity = 71 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.InternalError = 80 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.MissingExtension = 109 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.NoApplicationProtocol = 120 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.NoRenegotiation = 100 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.ProtocolVersion = 70 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.RecordOverflow = 22 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.UnexpectedMessage = 10 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.UnknownCa = 48 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.UnknownPskIdentity = 115 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.UnrecognizedName = 112 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.UnsupportedCertificate = 43 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.UnsupportedExtension = 110 -> SharpDTLS.AlertDescription
+SharpDTLS.AlertDescription.UserCanceled = 90 -> SharpDTLS.AlertDescription
+SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.Aes128Cbc = 11 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.Aes128Ccm = 15 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.Aes128Ccm8 = 17 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.Aes128Gcm = 13 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.Aes256Cbc = 12 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.Aes256Ccm = 16 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.Aes256Ccm8 = 18 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.Aes256Gcm = 14 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.Aria128Cbc = 23 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.Aria128Gcm = 25 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.Aria256Cbc = 24 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.Aria256Gcm = 26 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.Camellia128Cbc = 19 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.Camellia128Gcm = 21 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.Camellia256Cbc = 20 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.Camellia256Gcm = 22 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.ChaCha20Poly1305 = 27 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.Des40Cbc = 5 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.DesCbc = 7 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.DesCbc40 = 6 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.IdeaCbc = 9 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.Null = 1 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.Rc2Cbc40 = 4 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.Rc4_128 = 3 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.Rc4_40 = 2 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.SeedCbc = 10 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.TripleDesEdeCbc = 8 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.BulkCipherAlgorithm.Unknown = 0 -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.CertificateCompressionAlgorithms
+SharpDTLS.CertificateCredentials
+SharpDTLS.CertificateCredentials.Certificate.get -> Org.BouncyCastle.X509.X509Certificate
+SharpDTLS.CertificateCredentials.CertificateCredentials(Org.BouncyCastle.Crypto.AsymmetricCipherKeyPair keyPair, Org.BouncyCastle.X509.X509Certificate certificate, System.Collections.Generic.IList<Org.BouncyCastle.X509.X509Certificate> intermediateCertificates = null) -> void
+SharpDTLS.CertificateCredentials.IntermediateCertificates.get -> System.Collections.Generic.IList<Org.BouncyCastle.X509.X509Certificate>
+SharpDTLS.CertificateCredentials.KeyPair.get -> Org.BouncyCastle.Crypto.AsymmetricCipherKeyPair
+SharpDTLS.CertificateKeyType
+SharpDTLS.CertificateKeyType.Dh = 4 -> SharpDTLS.CertificateKeyType
+SharpDTLS.CertificateKeyType.Dsa = 3 -> SharpDTLS.CertificateKeyType
+SharpDTLS.CertificateKeyType.Ecdh = 5 -> SharpDTLS.CertificateKeyType
+SharpDTLS.CertificateKeyType.Ecdsa = 2 -> SharpDTLS.CertificateKeyType
+SharpDTLS.CertificateKeyType.None = 0 -> SharpDTLS.CertificateKeyType
+SharpDTLS.CertificateKeyType.Rsa = 1 -> SharpDTLS.CertificateKeyType
+SharpDTLS.CertificateSelectionContext
+SharpDTLS.CertificateSelectionContext.CertificateAuthorities.get -> System.Collections.Generic.IReadOnlyList<Org.BouncyCastle.Asn1.X509.X509Name>
+SharpDTLS.CertificateSelectionContext.IsIssuedByAcceptedAuthority(SharpDTLS.CertificateCredentials credentials) -> bool
+SharpDTLS.CertificateSelectionContext.ServerName.get -> string
+SharpDTLS.CertificateSelectionContext.SignatureAlgorithms.get -> System.Collections.Generic.IReadOnlyList<ushort>
+SharpDTLS.CertificateSelectionContext.SignatureAlgorithmsCert.get -> System.Collections.Generic.IReadOnlyList<ushort>
+SharpDTLS.CertificateType
+SharpDTLS.CertificateType.RawPublicKey = 2 -> SharpDTLS.CertificateType
+SharpDTLS.CertificateType.X509 = 0 -> SharpDTLS.CertificateType
+SharpDTLS.CertificateValidator
+SharpDTLS.CertificateValidator.AllowCommonNameFallback.get -> bool
+SharpDTLS.CertificateValidator.AllowCommonNameFallback.set -> void
+SharpDTLS.CertificateValidator.CertificateValidator(System.Collections.Generic.IEnumerable<Org.BouncyCastle.X509.X509Certificate> trustedRoots = null) -> void
+SharpDTLS.CertificateValidator.ForClient() -> System.Func<Org.BouncyCastle.X509.X509Certificate, System.Collections.Generic.IReadOnlyList<byte[]>, bool>
+SharpDTLS.CertificateValidator.ForServer(string hostName) -> System.Func<Org.BouncyCastle.X509.X509Certificate, System.Collections.Generic.IReadOnlyList<byte[]>, bool>
+SharpDTLS.CertificateValidator.HostNameValidator.get -> System.Func<Org.BouncyCastle.X509.X509Certificate, string, bool>
+SharpDTLS.CertificateValidator.HostNameValidator.set -> void
+SharpDTLS.CertificateValidator.RevocationMode.get -> System.Security.Cryptography.X509Certificates.X509RevocationMode
+SharpDTLS.CertificateValidator.RevocationMode.set -> void
+SharpDTLS.CertificateValidator.Validate(System.Collections.Generic.IReadOnlyList<byte[]> chain, string usage, string hostName) -> void
+SharpDTLS.CertificateValidator.VerificationTime.get -> System.DateTime?
+SharpDTLS.CertificateValidator.VerificationTime.set -> void
+SharpDTLS.CipherSuiteInfo
+SharpDTLS.CipherSuiteInfo.Cipher.get -> SharpDTLS.BulkCipherAlgorithm
+SharpDTLS.CipherSuiteInfo.DtlsOk.get -> bool
+SharpDTLS.CipherSuiteInfo.FixedIvLength.get -> int
+SharpDTLS.CipherSuiteInfo.HasForwardSecrecy.get -> bool
+SharpDTLS.CipherSuiteInfo.Id.get -> ushort
+SharpDTLS.CipherSuiteInfo.IsAead.get -> bool
+SharpDTLS.CipherSuiteInfo.IsAnonymous.get -> bool
+SharpDTLS.CipherSuiteInfo.IsCbc.get -> bool
+SharpDTLS.CipherSuiteInfo.IsExport.get -> bool
+SharpDTLS.CipherSuiteInfo.IsImplemented.get -> bool
+SharpDTLS.CipherSuiteInfo.IsProhibited.get -> bool
+SharpDTLS.CipherSuiteInfo.IsStaticKeyAgreement.get -> bool
+SharpDTLS.CipherSuiteInfo.IsUsableWith(ushort version) -> bool
+SharpDTLS.CipherSuiteInfo.KeyExchange.get -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.CipherSuiteInfo.KeyLength.get -> int
+SharpDTLS.CipherSuiteInfo.Mac.get -> SharpDTLS.MacAlgorithm
+SharpDTLS.CipherSuiteInfo.MacKeyLength.get -> int
+SharpDTLS.CipherSuiteInfo.MaximumVersion.get -> ushort
+SharpDTLS.CipherSuiteInfo.MinimumVersion.get -> ushort
+SharpDTLS.CipherSuiteInfo.Name.get -> string
+SharpDTLS.CipherSuiteInfo.Prf.get -> SharpDTLS.PrfHashAlgorithm
+SharpDTLS.CipherSuiteInfo.RequiredCertificateSigner.get -> SharpDTLS.CertificateKeyType
+SharpDTLS.CipherSuiteInfo.RequiresPsk.get -> bool
+SharpDTLS.CipherSuiteInfo.RequiresPwd.get -> bool
+SharpDTLS.CipherSuiteInfo.RequiresSrp.get -> bool
+SharpDTLS.CipherSuiteInfo.Security.get -> SharpDTLS.CipherSuiteSecurity
+SharpDTLS.CipherSuiteInfo.ServerCertificateType.get -> SharpDTLS.CertificateKeyType
+SharpDTLS.CipherSuiteInfo.Status.get -> SharpDTLS.CipherSuiteStatus
+SharpDTLS.CipherSuites
+SharpDTLS.CipherSuiteSecurity
+SharpDTLS.CipherSuiteSecurity.Legacy = 1 -> SharpDTLS.CipherSuiteSecurity
+SharpDTLS.CipherSuiteSecurity.Recommended = 0 -> SharpDTLS.CipherSuiteSecurity
+SharpDTLS.CipherSuiteSecurity.Weak = 2 -> SharpDTLS.CipherSuiteSecurity
+SharpDTLS.CipherSuiteStatus
+SharpDTLS.CipherSuiteStatus.Dtls13 = 1 -> SharpDTLS.CipherSuiteStatus
+SharpDTLS.CipherSuiteStatus.Implemented = 0 -> SharpDTLS.CipherSuiteStatus
+SharpDTLS.CipherSuiteStatus.NotDtls = 2 -> SharpDTLS.CipherSuiteStatus
+SharpDTLS.CipherSuiteStatus.NotImplemented = 7 -> SharpDTLS.CipherSuiteStatus
+SharpDTLS.CipherSuiteStatus.Prohibited = 4 -> SharpDTLS.CipherSuiteStatus
+SharpDTLS.CipherSuiteStatus.Signaling = 3 -> SharpDTLS.CipherSuiteStatus
+SharpDTLS.CipherSuiteStatus.Unspecified = 6 -> SharpDTLS.CipherSuiteStatus
+SharpDTLS.CipherSuiteStatus.Unsupported = 5 -> SharpDTLS.CipherSuiteStatus
+SharpDTLS.DtlsClient
+SharpDTLS.DtlsClient.AlertReceived -> System.EventHandler<SharpDTLS.AlertDescription>
+SharpDTLS.DtlsClient.ApplicationDataReceived -> System.EventHandler<byte[]>
+SharpDTLS.DtlsClient.ApplicationProtocol.get -> string
+SharpDTLS.DtlsClient.BeginHandshake() -> void
+SharpDTLS.DtlsClient.ClientTransport.get -> SharpDTLS.UDP.IClientTransport
+SharpDTLS.DtlsClient.Close() -> void
+SharpDTLS.DtlsClient.Closed -> System.EventHandler
+SharpDTLS.DtlsClient.Connection.get -> SharpDTLS.TlsConnectionBase
+SharpDTLS.DtlsClient.ConnectionIdLength.get -> int
+SharpDTLS.DtlsClient.ConnectionIdLength.set -> void
+SharpDTLS.DtlsClient.DtlsClient(SharpDTLS.UDP.IClientTransport clientTransport) -> void
+SharpDTLS.DtlsClient.ExportKeyingMaterial(string label, byte[] context, int length) -> byte[]
+SharpDTLS.DtlsClient.Failed -> System.EventHandler<System.Exception>
+SharpDTLS.DtlsClient.HandshakeFinished -> System.EventHandler
+SharpDTLS.DtlsClient.InitialRetransmitTimeout.get -> System.TimeSpan
+SharpDTLS.DtlsClient.InitialRetransmitTimeout.set -> void
+SharpDTLS.DtlsClient.IsHandshakeComplete.get -> bool
+SharpDTLS.DtlsClient.MaxApplicationDataSize.get -> int
+SharpDTLS.DtlsClient.MaximumVersion.get -> ushort
+SharpDTLS.DtlsClient.MaximumVersion.set -> void
+SharpDTLS.DtlsClient.MinimumVersion.get -> ushort
+SharpDTLS.DtlsClient.MinimumVersion.set -> void
+SharpDTLS.DtlsClient.NegotiatedVersion.get -> ushort
+SharpDTLS.DtlsClient.SelectedSrtpMki.get -> byte[]
+SharpDTLS.DtlsClient.SelectedSrtpProtectionProfile.get -> ushort?
+SharpDTLS.DtlsClient.SendApplicationData(byte[] data) -> void
+SharpDTLS.DtlsClient.SrtpMasterKeyIdentifier.get -> byte[]
+SharpDTLS.DtlsClient.SrtpMasterKeyIdentifier.set -> void
+SharpDTLS.DtlsClient.SrtpProtectionProfiles.get -> ushort[]
+SharpDTLS.DtlsClient.SrtpProtectionProfiles.set -> void
+SharpDTLS.DtlsClient.UseConnectionId.get -> bool
+SharpDTLS.DtlsClient.UseConnectionId.set -> void
+SharpDTLS.DtlsDataReceivedEventArgs
+SharpDTLS.DtlsDataReceivedEventArgs.Connection.get -> SharpDTLS.TlsConnectionBase
+SharpDTLS.DtlsDataReceivedEventArgs.Data.get -> byte[]
+SharpDTLS.DtlsDataReceivedEventArgs.DtlsDataReceivedEventArgs(System.Net.EndPoint remoteEndPoint, SharpDTLS.TlsConnectionBase connection, byte[] data) -> void
+SharpDTLS.DtlsDataReceivedEventArgs.RemoteEndPoint.get -> System.Net.EndPoint
+SharpDTLS.DtlsException
+SharpDTLS.DtlsException.Alert.get -> SharpDTLS.AlertDescription
+SharpDTLS.DtlsException.DtlsException(SharpDTLS.AlertDescription alert, string message) -> void
+SharpDTLS.DtlsException.DtlsException(SharpDTLS.AlertDescription alert, string message, System.Exception innerException) -> void
+SharpDTLS.DtlsServer
+SharpDTLS.DtlsServer.AlertReceived -> System.EventHandler<SharpDTLS.TlsAlertEventArgs>
+SharpDTLS.DtlsServer.ApplicationDataReceived -> System.EventHandler<SharpDTLS.DtlsDataReceivedEventArgs>
+SharpDTLS.DtlsServer.AutoUpdatePeerAddress.get -> bool
+SharpDTLS.DtlsServer.AutoUpdatePeerAddress.set -> void
+SharpDTLS.DtlsServer.Close(System.Net.EndPoint endpoint) -> void
+SharpDTLS.DtlsServer.ConnectionClosed -> System.EventHandler<SharpDTLS.TlsConnectionBase>
+SharpDTLS.DtlsServer.ConnectionCreated -> System.EventHandler<SharpDTLS.TlsConnectionBase>
+SharpDTLS.DtlsServer.ConnectionIdLength.get -> int
+SharpDTLS.DtlsServer.ConnectionIdLength.set -> void
+SharpDTLS.DtlsServer.Connections.get -> System.Collections.Generic.IReadOnlyCollection<SharpDTLS.TlsConnectionBase>
+SharpDTLS.DtlsServer.DtlsServer(SharpDTLS.UDP.IServerTransport serverTransport) -> void
+SharpDTLS.DtlsServer.DtlsServer(SharpDTLS.UDP.IServerTransport serverTransport, Org.BouncyCastle.Crypto.AsymmetricCipherKeyPair keyPair, Org.BouncyCastle.X509.X509Certificate certificate) -> void
+SharpDTLS.DtlsServer.EarlyDataReceived -> System.EventHandler<SharpDTLS.DtlsDataReceivedEventArgs>
+SharpDTLS.DtlsServer.GetConnection(System.Net.EndPoint endpoint) -> SharpDTLS.TlsConnectionBase
+SharpDTLS.DtlsServer.HandshakeFinished -> System.EventHandler<SharpDTLS.TlsConnectionBase>
+SharpDTLS.DtlsServer.InitialRetransmitTimeout.get -> System.TimeSpan
+SharpDTLS.DtlsServer.InitialRetransmitTimeout.set -> void
+SharpDTLS.DtlsServer.MaximumVersion.get -> ushort
+SharpDTLS.DtlsServer.MaximumVersion.set -> void
+SharpDTLS.DtlsServer.MinimumVersion.get -> ushort
+SharpDTLS.DtlsServer.MinimumVersion.set -> void
+SharpDTLS.DtlsServer.RequireCookie.get -> bool
+SharpDTLS.DtlsServer.RequireCookie.set -> void
+SharpDTLS.DtlsServer.SendApplicationData(System.Net.EndPoint endpoint, byte[] data) -> void
+SharpDTLS.DtlsServer.ServerTransport.get -> SharpDTLS.UDP.IServerTransport
+SharpDTLS.DtlsServer.SrtpDisableMki.get -> bool
+SharpDTLS.DtlsServer.SrtpDisableMki.set -> void
+SharpDTLS.DtlsServer.SrtpProtectionProfiles.get -> ushort[]
+SharpDTLS.DtlsServer.SrtpProtectionProfiles.set -> void
+SharpDTLS.DtlsServer.UseConnectionIds.get -> bool
+SharpDTLS.DtlsServer.UseConnectionIds.set -> void
+SharpDTLS.DtlsServer.VerifyClientHello(System.Net.EndPoint endpoint, byte[] datagram) -> bool
+SharpDTLS.DtlsSrtp
+SharpDTLS.DtlsSrtpKeys
+SharpDTLS.DtlsSrtpKeys.ClientWriteKey.get -> byte[]
+SharpDTLS.DtlsSrtpKeys.ClientWriteSalt.get -> byte[]
+SharpDTLS.DtlsSrtpKeys.DtlsSrtpKeys(ushort profile, byte[] clientWriteKey, byte[] serverWriteKey, byte[] clientWriteSalt, byte[] serverWriteSalt, byte[] mki = null) -> void
+SharpDTLS.DtlsSrtpKeys.Mki.get -> byte[]
+SharpDTLS.DtlsSrtpKeys.Profile.get -> ushort
+SharpDTLS.DtlsSrtpKeys.ServerWriteKey.get -> byte[]
+SharpDTLS.DtlsSrtpKeys.ServerWriteSalt.get -> byte[]
+SharpDTLS.DtlsVersion
+SharpDTLS.ITlsSessionCache
+SharpDTLS.ITlsSessionCache.Find(byte[] sessionId) -> SharpDTLS.TlsSession
+SharpDTLS.ITlsSessionCache.Remove(byte[] sessionId) -> void
+SharpDTLS.ITlsSessionCache.Store(byte[] sessionId, SharpDTLS.TlsSession session) -> void
+SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.DHE_DSS = 6 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.DHE_DSS_EXPORT = 11 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.DHE_PSK = 17 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.DHE_RSA = 7 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.DHE_RSA_EXPORT = 12 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.DH_anon = 8 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.DH_anon_EXPORT = 13 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.DH_DSS = 4 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.DH_DSS_EXPORT = 9 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.DH_RSA = 5 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.DH_RSA_EXPORT = 10 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.ECCPWD = 29 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.ECDHE_ECDSA = 22 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.ECDHE_PSK = 19 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.ECDHE_RSA = 24 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.ECDH_anon = 25 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.ECDH_ECDSA = 21 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.ECDH_RSA = 23 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.KRB5 = 14 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.KRB5_EXPORT = 15 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.NULL = 1 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.PSK = 16 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.PSK_DHE = 20 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.RSA = 2 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.RSA_EXPORT = 3 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.RSA_PSK = 18 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.SRP_SHA = 26 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.SRP_SHA_DSS = 28 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.SRP_SHA_RSA = 27 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.TLS13 = 30 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.KeyExchangeAlgorithm.Unknown = 0 -> SharpDTLS.KeyExchangeAlgorithm
+SharpDTLS.MacAlgorithm
+SharpDTLS.MacAlgorithm.Aead = 1 -> SharpDTLS.MacAlgorithm
+SharpDTLS.MacAlgorithm.HmacMd5 = 3 -> SharpDTLS.MacAlgorithm
+SharpDTLS.MacAlgorithm.HmacSha1 = 4 -> SharpDTLS.MacAlgorithm
+SharpDTLS.MacAlgorithm.HmacSha256 = 5 -> SharpDTLS.MacAlgorithm
+SharpDTLS.MacAlgorithm.HmacSha384 = 6 -> SharpDTLS.MacAlgorithm
+SharpDTLS.MacAlgorithm.None = 2 -> SharpDTLS.MacAlgorithm
+SharpDTLS.MacAlgorithm.Unknown = 0 -> SharpDTLS.MacAlgorithm
+SharpDTLS.NamedGroups
+SharpDTLS.OcspStapleValidator
+SharpDTLS.OcspStapleValidator.ClockSkew.get -> System.TimeSpan
+SharpDTLS.OcspStapleValidator.ClockSkew.set -> void
+SharpDTLS.OcspStapleValidator.ForServer() -> System.Func<byte[], System.Collections.Generic.IReadOnlyList<byte[]>, bool>
+SharpDTLS.OcspStapleValidator.OcspStapleValidator(System.Collections.Generic.IEnumerable<Org.BouncyCastle.X509.X509Certificate> issuers = null) -> void
+SharpDTLS.OcspStapleValidator.Required.get -> bool
+SharpDTLS.OcspStapleValidator.Required.set -> void
+SharpDTLS.OcspStapleValidator.Validate(byte[] ocspResponse, System.Collections.Generic.IReadOnlyList<byte[]> chain) -> void
+SharpDTLS.OcspStapleValidator.VerificationTime.get -> System.DateTime?
+SharpDTLS.OcspStapleValidator.VerificationTime.set -> void
+SharpDTLS.PrfHashAlgorithm
+SharpDTLS.PrfHashAlgorithm.Sha256 = 0 -> SharpDTLS.PrfHashAlgorithm
+SharpDTLS.PrfHashAlgorithm.Sha384 = 1 -> SharpDTLS.PrfHashAlgorithm
+SharpDTLS.PwdCredential
+SharpDTLS.PwdCredential.Base.get -> byte[]
+SharpDTLS.PwdCredential.PwdCredential(byte[] salt, byte[] passwordBase) -> void
+SharpDTLS.PwdCredential.Salt.get -> byte[]
+SharpDTLS.ServerCredentials
+SharpDTLS.ServerCredentials.OcspResponse.get -> byte[]
+SharpDTLS.ServerCredentials.OcspResponse.set -> void
+SharpDTLS.ServerCredentials.ServerCredentials(Org.BouncyCastle.Crypto.AsymmetricCipherKeyPair keyPair, Org.BouncyCastle.X509.X509Certificate certificate, System.Collections.Generic.IList<Org.BouncyCastle.X509.X509Certificate> intermediateCertificates = null) -> void
+SharpDTLS.SessionTicketKeys
+SharpDTLS.SessionTicketKeys.Lifetime.get -> System.TimeSpan
+SharpDTLS.SessionTicketKeys.Lifetime.set -> void
+SharpDTLS.SessionTicketKeys.Rotate() -> void
+SharpDTLS.SessionTicketKeys.SessionTicketKeys() -> void
+SharpDTLS.SignatureSchemes
+SharpDTLS.SrpVerifier
+SharpDTLS.SrpVerifier.Group.get -> Org.BouncyCastle.Crypto.Parameters.Srp6GroupParameters
+SharpDTLS.SrpVerifier.Salt.get -> byte[]
+SharpDTLS.SrpVerifier.SrpVerifier(Org.BouncyCastle.Crypto.Parameters.Srp6GroupParameters group, byte[] salt, Org.BouncyCastle.Math.BigInteger verifier) -> void
+SharpDTLS.SrpVerifier.Verifier.get -> Org.BouncyCastle.Math.BigInteger
+SharpDTLS.TlsAlertEventArgs
+SharpDTLS.TlsAlertEventArgs.Connection.get -> SharpDTLS.TlsConnectionBase
+SharpDTLS.TlsAlertEventArgs.Description.get -> SharpDTLS.AlertDescription
+SharpDTLS.TlsAlertEventArgs.TlsAlertEventArgs(SharpDTLS.TlsConnectionBase connection, SharpDTLS.AlertDescription description) -> void
+SharpDTLS.TlsClient
+SharpDTLS.TlsClient.AlertReceived -> System.EventHandler<SharpDTLS.AlertDescription>
+SharpDTLS.TlsClient.ApplicationDataReceived -> System.EventHandler<byte[]>
+SharpDTLS.TlsClient.ApplicationProtocol.get -> string
+SharpDTLS.TlsClient.BeginHandshake() -> void
+SharpDTLS.TlsClient.Close() -> void
+SharpDTLS.TlsClient.Closed -> System.EventHandler
+SharpDTLS.TlsClient.Connection.get -> SharpDTLS.TlsConnectionBase
+SharpDTLS.TlsClient.ExportKeyingMaterial(string label, byte[] context, int length) -> byte[]
+SharpDTLS.TlsClient.Failed -> System.EventHandler<System.Exception>
+SharpDTLS.TlsClient.HandshakeFinished -> System.EventHandler
+SharpDTLS.TlsClient.IsHandshakeComplete.get -> bool
+SharpDTLS.TlsClient.MaxApplicationDataSize.get -> int
+SharpDTLS.TlsClient.MaximumVersion.get -> ushort
+SharpDTLS.TlsClient.MaximumVersion.set -> void
+SharpDTLS.TlsClient.MinimumVersion.get -> ushort
+SharpDTLS.TlsClient.MinimumVersion.set -> void
+SharpDTLS.TlsClient.NegotiatedVersion.get -> ushort
+SharpDTLS.TlsClient.SendApplicationData(byte[] data) -> void
+SharpDTLS.TlsClient.TlsClient(System.IO.Stream stream, bool leaveStreamOpen = false) -> void
+SharpDTLS.TlsClientBase
+SharpDTLS.TlsClientBase.AllowPostHandshakeAuthentication.get -> bool
+SharpDTLS.TlsClientBase.AllowPostHandshakeAuthentication.set -> void
+SharpDTLS.TlsClientBase.ApplicationProtocols.get -> System.Collections.Generic.IList<string>
+SharpDTLS.TlsClientBase.ApplicationProtocols.set -> void
+SharpDTLS.TlsClientBase.CertificateAuthorities.get -> System.Collections.Generic.IList<Org.BouncyCastle.X509.X509Certificate>
+SharpDTLS.TlsClientBase.CertificateAuthorities.set -> void
+SharpDTLS.TlsClientBase.CertificateCompressionAlgorithms.get -> System.Collections.Generic.IList<ushort>
+SharpDTLS.TlsClientBase.CertificateCompressionAlgorithms.set -> void
+SharpDTLS.TlsClientBase.CipherSuites.get -> System.Collections.Generic.IList<ushort>
+SharpDTLS.TlsClientBase.CipherSuites.set -> void
+SharpDTLS.TlsClientBase.ClientCertificate.get -> Org.BouncyCastle.X509.X509Certificate
+SharpDTLS.TlsClientBase.ClientCertificate.set -> void
+SharpDTLS.TlsClientBase.ClientCertificateKeyPair.get -> Org.BouncyCastle.Crypto.AsymmetricCipherKeyPair
+SharpDTLS.TlsClientBase.ClientCertificateKeyPair.set -> void
+SharpDTLS.TlsClientBase.ClientCertificateTypes.get -> System.Collections.Generic.IList<SharpDTLS.CertificateType>
+SharpDTLS.TlsClientBase.ClientCertificateTypes.set -> void
+SharpDTLS.TlsClientBase.ClientCredentialsSelector.get -> System.Func<SharpDTLS.CertificateSelectionContext, SharpDTLS.CertificateCredentials>
+SharpDTLS.TlsClientBase.ClientCredentialsSelector.set -> void
+SharpDTLS.TlsClientBase.ClientIntermediateCertificates.get -> System.Collections.Generic.IList<Org.BouncyCastle.X509.X509Certificate>
+SharpDTLS.TlsClientBase.ClientIntermediateCertificates.set -> void
+SharpDTLS.TlsClientBase.EarlyData.get -> byte[]
+SharpDTLS.TlsClientBase.EarlyData.set -> void
+SharpDTLS.TlsClientBase.ExternalPsk.get -> SharpDTLS.TlsExternalPsk
+SharpDTLS.TlsClientBase.ExternalPsk.set -> void
+SharpDTLS.TlsClientBase.IsFallback.get -> bool
+SharpDTLS.TlsClientBase.IsFallback.set -> void
+SharpDTLS.TlsClientBase.KeyLogWriter.get -> System.Action<string>
+SharpDTLS.TlsClientBase.KeyLogWriter.set -> void
+SharpDTLS.TlsClientBase.KeyShareGroups.get -> System.Collections.Generic.IList<ushort>
+SharpDTLS.TlsClientBase.KeyShareGroups.set -> void
+SharpDTLS.TlsClientBase.MaxFragmentLength.get -> int?
+SharpDTLS.TlsClientBase.MaxFragmentLength.set -> void
+SharpDTLS.TlsClientBase.MinimumDhPrimeBits.get -> int
+SharpDTLS.TlsClientBase.MinimumDhPrimeBits.set -> void
+SharpDTLS.TlsClientBase.PostHandshakeCertificateRequested -> System.EventHandler
+SharpDTLS.TlsClientBase.PskIdentity.get -> byte[]
+SharpDTLS.TlsClientBase.PskIdentity.set -> void
+SharpDTLS.TlsClientBase.PskKey.get -> byte[]
+SharpDTLS.TlsClientBase.PskKey.set -> void
+SharpDTLS.TlsClientBase.PskKeyExchangeModes.get -> byte[]
+SharpDTLS.TlsClientBase.PskKeyExchangeModes.set -> void
+SharpDTLS.TlsClientBase.PskProvider.get -> System.Func<byte[], (byte[] Identity, byte[] Key)>
+SharpDTLS.TlsClientBase.PskProvider.set -> void
+SharpDTLS.TlsClientBase.PwdPassword.get -> string
+SharpDTLS.TlsClientBase.PwdPassword.set -> void
+SharpDTLS.TlsClientBase.PwdProtectionKey.get -> Org.BouncyCastle.Crypto.Parameters.ECPublicKeyParameters
+SharpDTLS.TlsClientBase.PwdProtectionKey.set -> void
+SharpDTLS.TlsClientBase.PwdUsername.get -> string
+SharpDTLS.TlsClientBase.PwdUsername.set -> void
+SharpDTLS.TlsClientBase.RecordSizeLimit.get -> int?
+SharpDTLS.TlsClientBase.RecordSizeLimit.set -> void
+SharpDTLS.TlsClientBase.RequestOcspStapling.get -> bool
+SharpDTLS.TlsClientBase.RequestOcspStapling.set -> void
+SharpDTLS.TlsClientBase.ResumptionSession.get -> SharpDTLS.TlsSession
+SharpDTLS.TlsClientBase.ResumptionSession.set -> void
+SharpDTLS.TlsClientBase.ServerCertificateStatusValidator.get -> System.Func<byte[], System.Collections.Generic.IReadOnlyList<byte[]>, bool>
+SharpDTLS.TlsClientBase.ServerCertificateStatusValidator.set -> void
+SharpDTLS.TlsClientBase.ServerCertificateTypes.get -> System.Collections.Generic.IList<SharpDTLS.CertificateType>
+SharpDTLS.TlsClientBase.ServerCertificateTypes.set -> void
+SharpDTLS.TlsClientBase.ServerCertificateValidator.get -> System.Func<Org.BouncyCastle.X509.X509Certificate, System.Collections.Generic.IReadOnlyList<byte[]>, bool>
+SharpDTLS.TlsClientBase.ServerCertificateValidator.set -> void
+SharpDTLS.TlsClientBase.ServerName.get -> string
+SharpDTLS.TlsClientBase.ServerName.set -> void
+SharpDTLS.TlsClientBase.ServerRawPublicKeyValidator.get -> System.Func<byte[], bool>
+SharpDTLS.TlsClientBase.ServerRawPublicKeyValidator.set -> void
+SharpDTLS.TlsClientBase.Session.get -> SharpDTLS.TlsSession
+SharpDTLS.TlsClientBase.SessionReceived -> System.EventHandler<SharpDTLS.TlsSession>
+SharpDTLS.TlsClientBase.SignatureAlgorithmsCert.get -> System.Collections.Generic.IList<ushort>
+SharpDTLS.TlsClientBase.SignatureAlgorithmsCert.set -> void
+SharpDTLS.TlsClientBase.SrpIdentity.get -> byte[]
+SharpDTLS.TlsClientBase.SrpIdentity.set -> void
+SharpDTLS.TlsClientBase.SrpPassword.get -> byte[]
+SharpDTLS.TlsClientBase.SrpPassword.set -> void
+SharpDTLS.TlsClientBase.SupportedGroups.get -> System.Collections.Generic.IList<ushort>
+SharpDTLS.TlsClientBase.SupportedGroups.set -> void
+SharpDTLS.TlsClientBase.UseSessionTickets.get -> bool
+SharpDTLS.TlsClientBase.UseSessionTickets.set -> void
+SharpDTLS.TlsConnectionBase
+SharpDTLS.TlsConnectionBase.AlertReceived -> System.EventHandler<SharpDTLS.AlertDescription>
+SharpDTLS.TlsConnectionBase.ApplicationDataReceived -> System.EventHandler<byte[]>
+SharpDTLS.TlsConnectionBase.ApplicationProtocol.get -> string
+SharpDTLS.TlsConnectionBase.CertificateCompressionAlgorithm.get -> ushort?
+SharpDTLS.TlsConnectionBase.ClientRandom.get -> byte[]
+SharpDTLS.TlsConnectionBase.Close() -> void
+SharpDTLS.TlsConnectionBase.Closed -> System.EventHandler
+SharpDTLS.TlsConnectionBase.ExportKeyingMaterial(string label, byte[] context, int length) -> byte[]
+SharpDTLS.TlsConnectionBase.ExternalPskIdentity.get -> byte[]
+SharpDTLS.TlsConnectionBase.Failed -> System.EventHandler<System.Exception>
+SharpDTLS.TlsConnectionBase.GetSrtpKeys() -> SharpDTLS.DtlsSrtpKeys
+SharpDTLS.TlsConnectionBase.IsClosed.get -> bool
+SharpDTLS.TlsConnectionBase.IsHandshakeComplete.get -> bool
+SharpDTLS.TlsConnectionBase.KeyUpdateReceived -> System.EventHandler
+SharpDTLS.TlsConnectionBase.LocalCertificate.get -> Org.BouncyCastle.X509.X509Certificate
+SharpDTLS.TlsConnectionBase.NegotiatedVersion.get -> ushort
+SharpDTLS.TlsConnectionBase.OcspResponse.get -> byte[]
+SharpDTLS.TlsConnectionBase.PeerAddressChanged -> System.EventHandler<(System.Net.EndPoint Old, System.Net.EndPoint New)>
+SharpDTLS.TlsConnectionBase.PostHandshakeAuthenticationCompleted -> System.EventHandler
+SharpDTLS.TlsConnectionBase.SelectedSrtpMki.get -> byte[]
+SharpDTLS.TlsConnectionBase.SelectedSrtpProtectionProfile.get -> ushort?
+SharpDTLS.TlsConnectionBase.SendApplicationData(byte[] data) -> void
+SharpDTLS.TlsConnectionBase.ServerName.get -> string
+SharpDTLS.TlsConnectionBase.ServerRandom.get -> byte[]
+SharpDTLS.TlsDataReceivedEventArgs
+SharpDTLS.TlsDataReceivedEventArgs.Connection.get -> SharpDTLS.TlsConnectionBase
+SharpDTLS.TlsDataReceivedEventArgs.Data.get -> byte[]
+SharpDTLS.TlsDataReceivedEventArgs.TlsDataReceivedEventArgs(SharpDTLS.TlsConnectionBase connection, byte[] data) -> void
+SharpDTLS.TlsExternalPsk
+SharpDTLS.TlsExternalPsk.CipherSuite.get -> ushort
+SharpDTLS.TlsExternalPsk.Identity.get -> byte[]
+SharpDTLS.TlsExternalPsk.Key.get -> byte[]
+SharpDTLS.TlsExternalPsk.TlsExternalPsk(byte[] identity, byte[] key, ushort cipherSuite = 4865) -> void
+SharpDTLS.TlsInspector
+SharpDTLS.TlsInspector.TlsInspector() -> void
+SharpDTLS.TlsServer
+SharpDTLS.TlsServer.AcceptAsync(System.IO.Stream stream, System.Net.EndPoint remoteEndPoint = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SharpDTLS.TlsConnectionBase>
+SharpDTLS.TlsServer.AlertReceived -> System.EventHandler<SharpDTLS.TlsAlertEventArgs>
+SharpDTLS.TlsServer.ApplicationDataReceived -> System.EventHandler<SharpDTLS.TlsDataReceivedEventArgs>
+SharpDTLS.TlsServer.ConnectionClosed -> System.EventHandler<SharpDTLS.TlsConnectionBase>
+SharpDTLS.TlsServer.ConnectionCreated -> System.EventHandler<SharpDTLS.TlsConnectionBase>
+SharpDTLS.TlsServer.Connections.get -> System.Collections.Generic.IReadOnlyCollection<SharpDTLS.TlsConnectionBase>
+SharpDTLS.TlsServer.Dispose() -> void
+SharpDTLS.TlsServer.EarlyDataReceived -> System.EventHandler<SharpDTLS.TlsDataReceivedEventArgs>
+SharpDTLS.TlsServer.HandshakeFinished -> System.EventHandler<SharpDTLS.TlsConnectionBase>
+SharpDTLS.TlsServer.LocalEndpoint.get -> System.Net.IPEndPoint
+SharpDTLS.TlsServer.MaximumVersion.get -> ushort
+SharpDTLS.TlsServer.MaximumVersion.set -> void
+SharpDTLS.TlsServer.MinimumVersion.get -> ushort
+SharpDTLS.TlsServer.MinimumVersion.set -> void
+SharpDTLS.TlsServer.Start(System.Net.IPEndPoint endpoint) -> void
+SharpDTLS.TlsServer.TlsServer() -> void
+SharpDTLS.TlsServer.TlsServer(Org.BouncyCastle.Crypto.AsymmetricCipherKeyPair keyPair, Org.BouncyCastle.X509.X509Certificate certificate) -> void
+SharpDTLS.TlsServerBase
+SharpDTLS.TlsServerBase.AllowPskOnlyKeyExchange.get -> bool
+SharpDTLS.TlsServerBase.AllowPskOnlyKeyExchange.set -> void
+SharpDTLS.TlsServerBase.ApplicationProtocols.get -> System.Collections.Generic.IList<string>
+SharpDTLS.TlsServerBase.ApplicationProtocols.set -> void
+SharpDTLS.TlsServerBase.CertificateCompressionAlgorithms.get -> System.Collections.Generic.IList<ushort>
+SharpDTLS.TlsServerBase.CertificateCompressionAlgorithms.set -> void
+SharpDTLS.TlsServerBase.CertificateSelector.get -> System.Func<string, SharpDTLS.ServerCredentials>
+SharpDTLS.TlsServerBase.CertificateSelector.set -> void
+SharpDTLS.TlsServerBase.CipherSuites.get -> System.Collections.Generic.IList<ushort>
+SharpDTLS.TlsServerBase.CipherSuites.set -> void
+SharpDTLS.TlsServerBase.ClientCertificateAuthorities.get -> System.Collections.Generic.IList<Org.BouncyCastle.X509.X509Certificate>
+SharpDTLS.TlsServerBase.ClientCertificateAuthorities.set -> void
+SharpDTLS.TlsServerBase.ClientCertificateTypes.get -> System.Collections.Generic.IList<SharpDTLS.CertificateType>
+SharpDTLS.TlsServerBase.ClientCertificateTypes.set -> void
+SharpDTLS.TlsServerBase.ClientCertificateValidator.get -> System.Func<Org.BouncyCastle.X509.X509Certificate, System.Collections.Generic.IReadOnlyList<byte[]>, bool>
+SharpDTLS.TlsServerBase.ClientCertificateValidator.set -> void
+SharpDTLS.TlsServerBase.ClientRawPublicKeyValidator.get -> System.Func<byte[], bool>
+SharpDTLS.TlsServerBase.ClientRawPublicKeyValidator.set -> void
+SharpDTLS.TlsServerBase.CredentialsSelector.get -> System.Func<SharpDTLS.CertificateSelectionContext, SharpDTLS.ServerCredentials>
+SharpDTLS.TlsServerBase.CredentialsSelector.set -> void
+SharpDTLS.TlsServerBase.EarlyDataFreshnessWindow.get -> System.TimeSpan
+SharpDTLS.TlsServerBase.EarlyDataFreshnessWindow.set -> void
+SharpDTLS.TlsServerBase.ExternalPskResolver.get -> System.Func<byte[], SharpDTLS.TlsExternalPsk>
+SharpDTLS.TlsServerBase.ExternalPskResolver.set -> void
+SharpDTLS.TlsServerBase.IntermediateCertificates.get -> System.Collections.Generic.IList<Org.BouncyCastle.X509.X509Certificate>
+SharpDTLS.TlsServerBase.IntermediateCertificates.set -> void
+SharpDTLS.TlsServerBase.KeyLogWriter.get -> System.Action<string>
+SharpDTLS.TlsServerBase.KeyLogWriter.set -> void
+SharpDTLS.TlsServerBase.MaxEarlyDataSize.get -> uint
+SharpDTLS.TlsServerBase.MaxEarlyDataSize.set -> void
+SharpDTLS.TlsServerBase.OcspResponse.get -> byte[]
+SharpDTLS.TlsServerBase.OcspResponse.set -> void
+SharpDTLS.TlsServerBase.PskIdentityHint.get -> byte[]
+SharpDTLS.TlsServerBase.PskIdentityHint.set -> void
+SharpDTLS.TlsServerBase.PskIdentityResolver.get -> System.Func<byte[], byte[]>
+SharpDTLS.TlsServerBase.PskIdentityResolver.set -> void
+SharpDTLS.TlsServerBase.PwdCredentialProvider.get -> System.Func<string, SharpDTLS.PwdCredential>
+SharpDTLS.TlsServerBase.PwdCredentialProvider.set -> void
+SharpDTLS.TlsServerBase.PwdProtectionKey.get -> Org.BouncyCastle.Crypto.Parameters.ECPrivateKeyParameters
+SharpDTLS.TlsServerBase.PwdProtectionKey.set -> void
+SharpDTLS.TlsServerBase.RecordSizeLimit.get -> int?
+SharpDTLS.TlsServerBase.RecordSizeLimit.set -> void
+SharpDTLS.TlsServerBase.RequireClientCertificate.get -> bool
+SharpDTLS.TlsServerBase.RequireClientCertificate.set -> void
+SharpDTLS.TlsServerBase.ServerCertificateTypes.get -> System.Collections.Generic.IList<SharpDTLS.CertificateType>
+SharpDTLS.TlsServerBase.ServerCertificateTypes.set -> void
+SharpDTLS.TlsServerBase.SessionCache.get -> SharpDTLS.ITlsSessionCache
+SharpDTLS.TlsServerBase.SessionCache.set -> void
+SharpDTLS.TlsServerBase.SrpVerifierProvider.get -> System.Func<byte[], SharpDTLS.SrpVerifier>
+SharpDTLS.TlsServerBase.SrpVerifierProvider.set -> void
+SharpDTLS.TlsServerBase.SupportedGroups.get -> System.Collections.Generic.IList<ushort>
+SharpDTLS.TlsServerBase.SupportedGroups.set -> void
+SharpDTLS.TlsServerBase.TicketKeys.get -> SharpDTLS.SessionTicketKeys
+SharpDTLS.TlsServerBase.TicketKeys.set -> void
+SharpDTLS.TlsSession
+SharpDTLS.TlsSessionCache
+SharpDTLS.TlsSessionCache.Capacity.get -> int
+SharpDTLS.TlsSessionCache.Capacity.set -> void
+SharpDTLS.TlsSessionCache.Count.get -> int
+SharpDTLS.TlsSessionCache.Find(byte[] sessionId) -> SharpDTLS.TlsSession
+SharpDTLS.TlsSessionCache.Lifetime.get -> System.TimeSpan
+SharpDTLS.TlsSessionCache.Lifetime.set -> void
+SharpDTLS.TlsSessionCache.Remove(byte[] sessionId) -> void
+SharpDTLS.TlsSessionCache.Store(byte[] sessionId, SharpDTLS.TlsSession session) -> void
+SharpDTLS.TlsSessionCache.TlsSessionCache() -> void
+SharpDTLS.TlsStream
+SharpDTLS.TlsStream.Connection.get -> SharpDTLS.TlsConnectionBase
+SharpDTLS.TlsStream.NegotiatedVersion.get -> ushort
+SharpDTLS.TlsVersion
+SharpDTLS.UDP.ClientTransport
+SharpDTLS.UDP.ClientTransport.ClientTransport() -> void
+SharpDTLS.UDP.ClientTransport.ClientTransport(System.Net.IPEndPoint remoteEndpoint) -> void
+SharpDTLS.UDP.ClientTransport.Dispose() -> void
+SharpDTLS.UDP.ClientTransport.OnDataReceived -> System.EventHandler<byte[]>
+SharpDTLS.UDP.ClientTransport.Send(byte[] buf) -> void
+SharpDTLS.UDP.IClientTransport
+SharpDTLS.UDP.IClientTransport.OnDataReceived -> System.EventHandler<byte[]>
+SharpDTLS.UDP.IClientTransport.Send(byte[] buf) -> void
+SharpDTLS.UDP.IServerTransport
+SharpDTLS.UDP.IServerTransport.OnDataReceived -> System.EventHandler<byte[]>
+SharpDTLS.UDP.IServerTransport.Send(System.Net.EndPoint endpoint, byte[] buf) -> void
+SharpDTLS.UDP.ITransport
+SharpDTLS.UDP.ITransport.Receive(byte[] buf, int off, int len, int waitMillis) -> int
+SharpDTLS.UDP.ITransport.Send(byte[] buf, int off, int len) -> void
+SharpDTLS.UDP.ServerTransport
+SharpDTLS.UDP.ServerTransport.Dispose() -> void
+SharpDTLS.UDP.ServerTransport.LocalEndpoint.get -> System.Net.IPEndPoint
+SharpDTLS.UDP.ServerTransport.OnDataReceived -> System.EventHandler<byte[]>
+SharpDTLS.UDP.ServerTransport.Send(byte[] buf) -> void
+SharpDTLS.UDP.ServerTransport.Send(System.Net.EndPoint endpoint, byte[] buf) -> void
+SharpDTLS.UDP.ServerTransport.ServerTransport() -> void
+SharpDTLS.UDP.ServerTransport.ServerTransport(System.Net.IPEndPoint localEndpoint) -> void
+SharpDTLS.UDP.UdpTransport
+SharpDTLS.UDP.UdpTransport.LastReceived.get -> System.DateTime
+SharpDTLS.UDP.UdpTransport.LastSent.get -> System.DateTime
+SharpDTLS.UDP.UdpTransport.LastUsed.get -> System.DateTime
+SharpDTLS.UDP.UdpTransport.RemoteEndpoint.get -> string
+SharpDTLS.UDP.UdpTransport.TryAddToReceiveQueue(byte[] data, int maxReceiveQueueSize = 32) -> bool
+SharpDTLS.UDP.UdpTransport.UdpTransport(System.Net.Sockets.Socket socket, System.Net.EndPoint remote = null, int mtu = 1472, System.Action<SharpDTLS.UDP.UdpTransport> onClose = null) -> void
+static SharpDTLS.CipherSuites.All.get -> System.Collections.Generic.IReadOnlyList<SharpDTLS.CipherSuiteInfo>
+static SharpDTLS.CipherSuites.DefaultFor(ushort minimumVersion, ushort maximumVersion, bool includePsk = false, bool includeSrp = false, bool includePwd = false) -> System.Collections.Generic.List<ushort>
+static SharpDTLS.CipherSuites.Get(ushort id) -> SharpDTLS.CipherSuiteInfo
+static SharpDTLS.CipherSuites.Registry.get -> System.Collections.Generic.IReadOnlyList<SharpDTLS.CipherSuiteInfo>
+static SharpDTLS.CipherSuites.TryGet(ushort id, out SharpDTLS.CipherSuiteInfo suite) -> bool
+static SharpDTLS.DtlsSrtp.AcceptServerMki(byte[] offered, byte[] received) -> byte[]
+static SharpDTLS.DtlsSrtp.CheckMki(byte[] mki) -> byte[]
+static SharpDTLS.DtlsSrtp.IsSupported(ushort profile) -> bool
+static SharpDTLS.DtlsSrtp.KeyingMaterialLength(ushort profile) -> int
+static SharpDTLS.DtlsSrtp.Select(System.Collections.Generic.IEnumerable<ushort> serverPreference, System.Collections.Generic.IEnumerable<ushort> offered) -> ushort?
+static SharpDTLS.DtlsSrtp.Split(ushort profile, byte[] material, byte[] mki = null) -> SharpDTLS.DtlsSrtpKeys
+static SharpDTLS.DtlsVersion.IsAtLeast(ushort version, ushort minimum) -> bool
+static SharpDTLS.DtlsVersion.Name(ushort version) -> string
+static SharpDTLS.PwdCredential.ComputeBase(byte[] salt, string username, string password) -> byte[]
+static SharpDTLS.PwdCredential.Create(string username, string password) -> SharpDTLS.PwdCredential
+static SharpDTLS.PwdCredential.GenerateProtectionKeyPair(string curveName = "P-256") -> Org.BouncyCastle.Crypto.AsymmetricCipherKeyPair
+static SharpDTLS.SrpVerifier.Create(byte[] identity, byte[] password, Org.BouncyCastle.Crypto.Parameters.Srp6GroupParameters group = null) -> SharpDTLS.SrpVerifier
+static SharpDTLS.SrpVerifier.StandardGroups.get -> System.Collections.Generic.IReadOnlyList<Org.BouncyCastle.Crypto.Parameters.Srp6GroupParameters>
+static SharpDTLS.TlsInspector.Current.get -> SharpDTLS.TlsInspector
+static SharpDTLS.TlsInspector.Current.set -> void
+static SharpDTLS.TlsStream.AcceptAsync(SharpDTLS.TlsServer server, System.IO.Stream inner, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SharpDTLS.TlsStream>
+static SharpDTLS.TlsStream.ConnectAsync(System.IO.Stream inner, System.Action<SharpDTLS.TlsClient> configure = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SharpDTLS.TlsStream>
+virtual SharpDTLS.TlsConnectionBase.AllowsPostHandshakeAuthentication.get -> bool
+virtual SharpDTLS.TlsConnectionBase.ConfirmPeerAddress(System.Net.EndPoint address) -> void
+virtual SharpDTLS.TlsConnectionBase.EarlyDataAccepted.get -> bool
+virtual SharpDTLS.TlsConnectionBase.IsEncryptThenMac.get -> bool
+virtual SharpDTLS.TlsConnectionBase.IsExtendedMasterSecret.get -> bool
+virtual SharpDTLS.TlsConnectionBase.IsExternalPsk.get -> bool
+virtual SharpDTLS.TlsConnectionBase.IsPskOnlyKeyExchange.get -> bool
+virtual SharpDTLS.TlsConnectionBase.IssueConnectionIds(int count, bool immediate = false) -> void
+virtual SharpDTLS.TlsConnectionBase.MaxApplicationDataSize.get -> int
+virtual SharpDTLS.TlsConnectionBase.NegotiatedGroup.get -> ushort
+virtual SharpDTLS.TlsConnectionBase.PeerRawPublicKey.get -> byte[]
+virtual SharpDTLS.TlsConnectionBase.PendingPeerAddress.get -> System.Net.EndPoint
+virtual SharpDTLS.TlsConnectionBase.RemoteEndPoint.get -> System.Net.EndPoint
+virtual SharpDTLS.TlsConnectionBase.RequestClientCertificate(bool required = true) -> void
+virtual SharpDTLS.TlsConnectionBase.RequestConnectionIds(byte count) -> void
+virtual SharpDTLS.TlsConnectionBase.SendKeyUpdate(bool requestUpdate = false) -> void
+virtual SharpDTLS.TlsConnectionBase.SendNewSessionTicket() -> void
+virtual SharpDTLS.TlsConnectionBase.ServerCertificateType.get -> SharpDTLS.CertificateType
+virtual SharpDTLS.TlsConnectionBase.SpareConnectionIdCount.get -> int
+virtual SharpDTLS.TlsConnectionBase.UseSpareConnectionId() -> bool
+virtual SharpDTLS.TlsInspector.OnHandshakeReceived(SharpDTLS.TlsConnectionBase connection, bool isClient, int messageSeq, System.ReadOnlySpan<byte> message) -> void
+virtual SharpDTLS.TlsInspector.OnHandshakeSending(SharpDTLS.TlsConnectionBase connection, bool isClient, int messageSeq, byte[] message) -> byte[]
+virtual SharpDTLS.TlsInspector.OnKeyExchange(SharpDTLS.TlsConnectionBase connection, bool isClient, ushort group, System.ReadOnlySpan<byte> privateKey, System.ReadOnlySpan<byte> publicKey) -> void
+virtual SharpDTLS.TlsInspector.OnProtectedRecord(SharpDTLS.TlsConnectionBase connection, bool isClient, bool sent, byte contentType, ulong epoch, ulong sequenceNumber, System.ReadOnlySpan<byte> content) -> void
+virtual SharpDTLS.TlsInspector.OnSecret(SharpDTLS.TlsConnectionBase connection, bool isClient, string name, System.ReadOnlySpan<byte> value) -> void
+virtual SharpDTLS.TlsSession.MaxEarlyDataSize.get -> uint
+virtual SharpDTLS.UDP.UdpTransport.Close() -> void
+virtual SharpDTLS.UDP.UdpTransport.GetReceiveLimit() -> int
+virtual SharpDTLS.UDP.UdpTransport.GetSendLimit() -> int
+virtual SharpDTLS.UDP.UdpTransport.Receive(byte[] buf, int off, int len, int waitMillis) -> int
+virtual SharpDTLS.UDP.UdpTransport.Receive(System.Span<byte> buffer, int waitMillis) -> int
+virtual SharpDTLS.UDP.UdpTransport.Send(byte[] buf, int off, int len) -> void
+virtual SharpDTLS.UDP.UdpTransport.Send(System.ReadOnlySpan<byte> buffer) -> void

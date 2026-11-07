@@ -22,4 +22,23 @@
 		<InternalsVisibleTo Include="Dtls13Test.Tests" />
 	</ItemGroup>
 
+	<!-- the public API: listed in PublicAPI.*.txt, and checked against the last release (doc/public-api.md) -->
+	<!-- what every target framework offers is in PublicAPI.*.txt here, what only some do in PublicAPI\<framework>\ -->
+	<ItemGroup Condition="Exists('PublicAPI\$(TargetFramework)')">
+		<AdditionalFiles Include="PublicAPI\$(TargetFramework)\PublicAPI.Shipped.txt" />
+		<AdditionalFiles Include="PublicAPI\$(TargetFramework)\PublicAPI.Unshipped.txt" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="5.6.0" PrivateAssets="all" />
+	</ItemGroup>
+
+	<PropertyGroup>
+		<WarningsAsErrors>$(WarningsAsErrors);RS0016;RS0017</WarningsAsErrors>
+		<!-- overloads with optional parameters are a style choice here, not a break -->
+		<NoWarn>$(NoWarn);RS0026;RS0027</NoWarn>
+		<EnablePackageValidation>true</EnablePackageValidation>
+		<!-- no baseline until SharpDTLS has a published version; still checks its target frameworks agree -->
+	</PropertyGroup>
+
 </Project>
