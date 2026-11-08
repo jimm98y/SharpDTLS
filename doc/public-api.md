@@ -1,14 +1,13 @@
 # Public API
 
-What SharpDTLS exposes is written down, and a change to it does not build until it is written down
-too. Two checks do this, both on every `dotnet build` of the library:
+What SharpDTLS exposes is written down, and a removal from it does not build until it is written down too, an addition warns until it is. Two checks do this, both on every `dotnet build` of the library:
 
 - **The API files.** `PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt` in `src/SharpDTLS` list
   every public type and member that all three target frameworks share. What only some of them offer
   is in `src/SharpDTLS/PublicAPI/<framework>/`: the `Span` and `Memory` overrides of `TlsStream` that
   net8.0 and net10.0 have and netstandard2.0's `Stream` does not. Shipped is the API as released;
-  Unshipped is what changed since. A public symbol missing from them fails the build with RS0016, a
-  listed one that is gone with RS0017.
+  Unshipped is what changed since. A public symbol missing from them is a warning, RS0016, until it is
+  listed - an addition breaks no one - and a listed one that is gone fails the build with RS0017.
 - **Package validation.** The package being built is checked for its target frameworks agreeing
   with one another: what netstandard2.0 offers, net8.0 and net10.0 have to offer too. Once SharpDTLS
   has a release, it is compared with that release as well, and every binary or source breaking
@@ -16,7 +15,7 @@ too. Two checks do this, both on every `dotnet build` of the library:
 
 ## Adding to the API
 
-Build, and accept the RS0016 fix in the IDE ("Add to public API"), or from the command line:
+List what the RS0016 warnings name: accept their fix in the IDE ("Add to public API"), or from the command line:
 
 ```
 dotnet format analyzers src/SharpDTLS/SharpDTLS.csproj --diagnostics RS0016 --severity warn
@@ -24,7 +23,7 @@ dotnet format analyzers src/SharpDTLS/SharpDTLS.csproj --diagnostics RS0016 --se
 
 That writes into the `PublicAPI.Unshipped.txt` next to the project, which is right for anything
 every framework has. A member inside `#if !NETSTANDARD2_0` (or similar) belongs in the
-`PublicAPI.Unshipped.txt` of each framework it exists on instead; the RS0016 error says which
+`PublicAPI.Unshipped.txt` of each framework it exists on instead; the RS0016 warning says which
 framework it was reported for. A framework without a folder of its own gets one with both files.
 
 A member that only some frameworks have should be added to the others too where they can have it,
