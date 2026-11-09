@@ -1,5 +1,6 @@
 # SharpDTLS
 DTLS 1.0/1.2/1.3 and TLS 1.0/1.1/1.2/1.3 client and server written in C#. The cryptography comes from [BouncyCastle](https://github.com/bcgit/bc-csharp); the protocols are implemented here. Targets `netstandard2.0`, `net472`, `net8.0` and `net10.0`.
+
 [![NuGet version](https://img.shields.io/nuget/v/SharpDTLS.svg?style=flat-square)](https://www.nuget.org/packages/SharpDTLS)
 
 A client offers every enabled version in one ClientHello and a server answers with the highest one both sides support. DTLS 1.2 and DTLS 1.3 are on by default, and so are TLS 1.2 and TLS 1.3. To enable the older versions, set `MinimumVersion`.
