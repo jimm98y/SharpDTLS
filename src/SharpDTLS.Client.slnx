@@ -3,5 +3,9 @@
     <Project Path="Samples/DtlsClientSample/DtlsClientSample.csproj" />
     <Project Path="Samples/TlsClientSample/TlsClientSample.csproj" />
   </Folder>
+  <Folder Name="/Solution Items/">
+    <File Path="Directory.Build.props" />
+  </Folder>
+  <Project Path="SharpDTLS.Tests/SharpDTLS.Tests.csproj" />
   <Project Path="SharpDTLS/SharpDTLS.csproj" />
 </Solution>

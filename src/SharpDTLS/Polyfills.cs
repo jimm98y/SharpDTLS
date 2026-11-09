@@ -1,4 +1,4 @@
-#if NETSTANDARD2_0
+#if !NETCOREAPP
 // What SharpDTLS uses on netstandard2.0 beyond Meziantou.Polyfill (which covers the rest).
 using System;
 using System.Collections.Concurrent;

@@ -51,7 +51,7 @@ namespace SharpDTLS.Protocol10
 
             public void Update(byte input) { _md5.Update(input); _sha1.Update(input); }
             public void BlockUpdate(byte[] input, int inOff, int inLen) { _md5.BlockUpdate(input, inOff, inLen); _sha1.BlockUpdate(input, inOff, inLen); }
-#if !NETSTANDARD2_0
+#if NETCOREAPP
             public void BlockUpdate(System.ReadOnlySpan<byte> input) { _md5.BlockUpdate(input); _sha1.BlockUpdate(input); }
 #endif
 
@@ -62,7 +62,7 @@ namespace SharpDTLS.Protocol10
                 return 36;
             }
 
-#if !NETSTANDARD2_0
+#if NETCOREAPP
             public int DoFinal(System.Span<byte> output)
             {
                 _md5.DoFinal(output);

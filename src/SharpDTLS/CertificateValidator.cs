@@ -74,7 +74,7 @@ namespace SharpDTLS
             using var x509Chain = new X509Chain();
             var policy = x509Chain.ChainPolicy;
             policy.RevocationMode = RevocationMode;
-#if !NETSTANDARD2_0
+#if NETCOREAPP
             policy.DisableCertificateDownloads = true;
 #endif
             policy.VerificationTime = VerificationTime ?? DateTime.Now;
@@ -83,7 +83,7 @@ namespace SharpDTLS
                 policy.ExtraStore.Add(Load(intermediate));
             if (_trustedRoots != null)
             {
-#if NETSTANDARD2_0
+#if !NETCOREAPP
                 // No custom root trust here: build with the roots as extra certificates, then require one of them at the top.
                 policy.ExtraStore.AddRange(_trustedRoots);
                 policy.VerificationFlags |= X509VerificationFlags.AllowUnknownCertificateAuthority;
@@ -107,7 +107,7 @@ namespace SharpDTLS
         {
             bool built = x509Chain.Build(leaf);
             problems = x509Chain.ChainStatus.Select(s => s.Status).Aggregate(X509ChainStatusFlags.NoError, (a, b) => a | b);
-#if NETSTANDARD2_0
+#if !NETCOREAPP
             if (_trustedRoots != null)
             {
                 // Allowed unknown authority: the chain must still end at one of our roots, and nothing else may be wrong.
@@ -126,7 +126,7 @@ namespace SharpDTLS
         {
             if (HostNameValidator != null)
                 return HostNameValidator(new BcX509Certificate(der), hostName);
-#if NETSTANDARD2_0
+#if !NETCOREAPP
             return HostNameMatcher.Matches(der, hostName, AllowCommonNameFallback);
 #else
             return leaf.MatchesHostname(hostName, allowWildcards: true, allowCommonName: AllowCommonNameFallback);

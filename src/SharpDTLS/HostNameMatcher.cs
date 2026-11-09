@@ -1,4 +1,4 @@
-#if NETSTANDARD2_0
+#if !NETCOREAPP
 using Org.BouncyCastle.Asn1;
 using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.X509.Extension;

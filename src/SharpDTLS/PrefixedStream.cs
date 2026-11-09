@@ -26,7 +26,7 @@ namespace SharpDTLS
         public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
             => _offset < prefix.Length ? Task.FromResult(ReadPrefix(buffer.AsSpan(offset, count))) : inner.ReadAsync(buffer, offset, count, cancellationToken);
 
-#if !NETSTANDARD2_0
+#if NETCOREAPP
         public override int Read(Span<byte> buffer) => _offset < prefix.Length ? ReadPrefix(buffer) : inner.Read(buffer);
 
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)

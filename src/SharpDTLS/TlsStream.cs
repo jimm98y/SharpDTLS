@@ -105,7 +105,7 @@ namespace SharpDTLS
         public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
             => ReadCoreAsync(buffer.AsMemory(offset, count), cancellationToken);
 
-#if !NETSTANDARD2_0
+#if NETCOREAPP
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
             => new ValueTask<int>(ReadCoreAsync(buffer, cancellationToken));
 #endif
@@ -146,7 +146,7 @@ namespace SharpDTLS
 
         public override void Write(byte[] buffer, int offset, int count) => WriteCore(buffer.AsSpan(offset, count));
 
-#if !NETSTANDARD2_0
+#if NETCOREAPP
         public override void Write(ReadOnlySpan<byte> buffer) => WriteCore(buffer);
 
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)

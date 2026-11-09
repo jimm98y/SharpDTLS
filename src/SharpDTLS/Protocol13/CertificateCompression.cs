@@ -18,7 +18,7 @@ namespace SharpDTLS.Protocol13
         public const ushort Zstd = 3;
 
         /// <summary>The implemented algorithms, in default preference order.</summary>
-#if NETSTANDARD2_0
+#if !NETCOREAPP
         public static IReadOnlyList<ushort> Supported { get; } = new[] { Zlib };
 #else
         public static IReadOnlyList<ushort> Supported { get; } = new[] { Brotli, Zlib };
@@ -56,7 +56,7 @@ namespace SharpDTLS.Protocol13
             using (Stream compressor = algorithm switch
             {
                 Zlib => new ZLibStream(output, CompressionLevel.Optimal, leaveOpen: true),
-#if !NETSTANDARD2_0
+#if NETCOREAPP
                 Brotli => new BrotliStream(output, CompressionLevel.Optimal, leaveOpen: true),
 #endif
                 _ => throw new ArgumentOutOfRangeException(nameof(algorithm)),
@@ -81,7 +81,7 @@ namespace SharpDTLS.Protocol13
                 using Stream decompressor = algorithm switch
                 {
                     Zlib => new ZLibStream(input, CompressionMode.Decompress),
-#if !NETSTANDARD2_0
+#if NETCOREAPP
                     Brotli => new BrotliStream(input, CompressionMode.Decompress),
 #endif
                     _ => throw new DtlsException(AlertDescription.IllegalParameter, $"Unknown certificate compression algorithm {algorithm}."),

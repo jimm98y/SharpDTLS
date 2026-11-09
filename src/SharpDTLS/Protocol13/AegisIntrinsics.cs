@@ -1,4 +1,4 @@
-﻿#if NETSTANDARD2_0
+﻿#if !NETCOREAPP
 // netstandard2.0 has no hardware intrinsics: the 16-byte block type and the (unsupported) AES instructions AEGIS is
 // written against, so it runs its software AES round there.
 using System;
