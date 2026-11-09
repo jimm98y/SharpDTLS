@@ -202,6 +202,10 @@ namespace SharpDTLS.Tests
             Assert.AreEqual(328, CipherSuites.Registry.Count(s => s.DtlsOk));
             Assert.IsTrue(CipherSuites.All.All(s => s.DtlsOk), "stream-cipher (non DTLS-OK) suites must never be implemented");
             Assert.IsFalse(CipherSuites.DefaultFor(DtlsVersion.Dtls10, DtlsVersion.Dtls12).Any(id => CipherSuites.Get(id).Security == CipherSuiteSecurity.Weak));
+            // RFC 9846 §4.3.3: DSA is neither offered nor negotiated by default.
+            Assert.IsTrue(CipherSuites.All.Where(s => s.IsDsa).All(s => s.Security == CipherSuiteSecurity.Weak));
+            Assert.IsFalse(SharpDTLS.Protocol12.Dtls12Signatures.Offered(dsa: false).Any(s => (s & 0xFF) == 0x02));
+            Assert.IsTrue(SharpDTLS.Protocol12.Dtls12Signatures.Offered(dsa: true).Contains(SharpDTLS.Protocol12.Dtls12Signatures.DsaSha256));
             Assert.IsFalse(CipherSuites.DefaultFor(DtlsVersion.Dtls10, DtlsVersion.Dtls12).Any(id => CipherSuites.Get(id).RequiresSrp), "SRP suites need credentials");
             Assert.IsTrue(CipherSuites.DefaultFor(DtlsVersion.Dtls10, DtlsVersion.Dtls12, includeSrp: true).Any(id => CipherSuites.Get(id).RequiresSrp));
 

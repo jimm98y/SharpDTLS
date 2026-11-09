@@ -543,7 +543,11 @@ namespace SharpDTLS.Protocol12
 
             if (_settings.RequireClientCertificate && certificateBased)
             {
-                _certificateRequest = new CertificateRequestMessage { CertificateAuthorities = CertificateSelectionContext.Encode(_settings.ClientCertificateAuthorities) };
+                _certificateRequest = new CertificateRequestMessage
+                {
+                    CertificateAuthorities = CertificateSelectionContext.Encode(_settings.ClientCertificateAuthorities),
+                    SignatureAlgorithms = Dtls12Signatures.Offered(_settings.CipherSuites?.Any(id => SharpDTLS.CipherSuites.TryGet(id, out var s) && s.IsDsa) ?? false),
+                };
                 if (CipherSuite.IsStaticKeyAgreement)
                     _certificateRequest.CertificateTypes = new byte[] { 1, 2, 64, 3, 4, 65, 66 }; // also the fixed (EC)DH types
                 SendHandshake(HandshakeType.CertificateRequest, _certificateRequest.Encode(NegotiatedVersion));

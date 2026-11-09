@@ -88,6 +88,18 @@ namespace SharpDTLS.Protocol13
         /// <summary>Whether this is the TLS 1.3 variant of the suite.</summary>
         public bool IsTls => LabelPrefix == "tls13 ";
 
+        /// <summary>
+        /// How many records one key may protect (RFC 9846 §5.5, RFC 9147 §4.5.3): 2^24.5 full-size records for the AES
+        /// suites (GCM and CCM). For ChaCha20-Poly1305, AEGIS and the integrity-only suites only the 48-bit record
+        /// sequence number bounds it.
+        /// </summary>
+        public ulong RecordLimit => Id is TLS_AES_128_GCM_SHA256 or TLS_AES_256_GCM_SHA384 or TLS_AES_128_CCM_SHA256 or TLS_AES_128_CCM_8_SHA256
+            ? 23_726_566UL
+            : (1UL << 48) - 1;
+
+        /// <summary>After this many records under one key a KeyUpdate starts, leaving time for its ACK (DTLS) before <see cref="RecordLimit"/>.</summary>
+        public ulong RekeyThreshold => RecordLimit / 4 * 3;
+
         private Dtls13CipherSuite _tls;
 
         /// <summary>The same suite for TLS 1.3, whose key schedule labels start with "tls13 ".</summary>

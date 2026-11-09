@@ -356,7 +356,7 @@ namespace SharpDTLS.Protocol12
             ch.Extensions.Add(new SupportedGroupsExtension(groups.ToArray()));
             ch.Extensions.Add(new EcPointFormatsExtension(new byte[] { 0 })); // uncompressed
             if (ProtocolVersions.Level(MaximumVersion) >= 3)
-                ch.Extensions.Add(new SignatureAlgorithmsExtension(Dtls12Signatures.Supported));
+                ch.Extensions.Add(new SignatureAlgorithmsExtension(Dtls12Signatures.Offered(offeredSuites.Any(s => s.IsDsa))));
             if (offeredSuites.Any(s => s.IsCbc))
                 ch.Extensions.Add(new EncryptThenMacExtension());
             ch.Extensions.Add(new ExtendedMasterSecretExtension());

@@ -74,7 +74,7 @@ namespace SharpDTLS
         Recommended,
         /// <summary>Sound but dated: CBC ciphers, or RSA key transport without forward secrecy.</summary>
         Legacy,
-        /// <summary>Broken or obsolete (export, DES, 3DES, IDEA, NULL encryption, anonymous): never offered by default.</summary>
+        /// <summary>Broken or obsolete (export, DES, 3DES, IDEA, NULL encryption, anonymous, DSA): never offered by default.</summary>
         Weak,
     }
 
@@ -142,6 +142,10 @@ namespace SharpDTLS
 
         public bool IsCbc => Cipher is not (BulkCipherAlgorithm.Null or BulkCipherAlgorithm.Unknown or BulkCipherAlgorithm.Rc4_40
             or BulkCipherAlgorithm.Rc4_128) && !IsAead;
+
+        /// <summary>The server signs with DSA, which RFC 9846 §4.3.3 forbids in TLS 1.2: such suites are never in the defaults.</summary>
+        internal bool IsDsa => KeyExchange is KeyExchangeAlgorithm.DHE_DSS or KeyExchangeAlgorithm.DHE_DSS_EXPORT
+            or KeyExchangeAlgorithm.DH_DSS or KeyExchangeAlgorithm.DH_DSS_EXPORT or KeyExchangeAlgorithm.SRP_SHA_DSS;
 
         public bool IsAnonymous => KeyExchange is KeyExchangeAlgorithm.DH_anon or KeyExchangeAlgorithm.DH_anon_EXPORT or KeyExchangeAlgorithm.ECDH_anon;
 
@@ -218,7 +222,7 @@ namespace SharpDTLS
         {
             get
             {
-                if (IsExport || IsAnonymous || Cipher is BulkCipherAlgorithm.Null or BulkCipherAlgorithm.DesCbc or BulkCipherAlgorithm.TripleDesEdeCbc
+                if (IsExport || IsAnonymous || IsDsa || Cipher is BulkCipherAlgorithm.Null or BulkCipherAlgorithm.DesCbc or BulkCipherAlgorithm.TripleDesEdeCbc
                     or BulkCipherAlgorithm.IdeaCbc or BulkCipherAlgorithm.Rc2Cbc40 or BulkCipherAlgorithm.Des40Cbc or BulkCipherAlgorithm.DesCbc40
                     or BulkCipherAlgorithm.Rc4_40 or BulkCipherAlgorithm.Rc4_128 || Mac == MacAlgorithm.HmacMd5)
                     return CipherSuiteSecurity.Weak;

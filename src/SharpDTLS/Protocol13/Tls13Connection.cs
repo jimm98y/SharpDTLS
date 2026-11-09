@@ -31,6 +31,10 @@ namespace SharpDTLS.Protocol13
         private List<(ulong Epoch, ulong SequenceNumber)> _pendingKeyUpdateRecords;
         // A KeyUpdate asked for while one was pending: sent once that one is ACKed (null when none).
         private bool? _queuedKeyUpdateRequest;
+        // We sent update_requested and the peer's KeyUpdate has not arrived yet: we must not request another (RFC 9846 §4.7.3).
+        private bool _peerKeyUpdateRequested;
+        // The largest epoch a KeyUpdate may move to (RFC 9846 §4.7.3).
+        private const ulong MaxEpoch = (1UL << 48) - 1;
         private AcknowledgementDatagram _lastAck;
         private ushort _plaintextRecordSequence;
 
@@ -176,14 +180,31 @@ namespace SharpDTLS.Protocol13
         {
             if (!IsHandshakeComplete || IsClosed)
                 throw new InvalidOperationException("The handshake has not completed.");
+            if (!CanUpdateWriteKeys)
+                throw new InvalidOperationException("The write keys have reached the last epoch.");
+            QueueKeyUpdate(requestUpdate);
+        });
+
+        private void QueueKeyUpdate(bool requestUpdate)
+        {
             if (_pendingKeyUpdateRecords != null)
                 _queuedKeyUpdateRequest = (_queuedKeyUpdateRequest ?? false) || requestUpdate;
             else
                 StartKeyUpdate(requestUpdate);
-        });
+        }
+
+        // Another KeyUpdate (sent or still awaiting its ACK) must not move the write epoch past MaxEpoch.
+        private bool CanUpdateWriteKeys => Session.WriteKeys.Epoch + (_pendingKeyUpdateRecords != null ? 1UL : 0UL) < MaxEpoch;
 
         protected override void WriteApplicationData(byte[] data)
-            => SendProtected(Session.WriteKeys, new ApplicationDataDatagram(data).ToBytes());
+        {
+            // Rekey well before the AEAD's limit on records per key (RFC 9846 §5.5); Protect closes the connection at the limit.
+            var keys = Session.WriteKeys;
+            ulong used = IsClient ? keys.ClientKeyUseCounter : keys.ServerKeyUseCounter;
+            if (used >= keys.Suite.RekeyThreshold && _pendingKeyUpdateRecords == null && _queuedKeyUpdateRequest == null && CanUpdateWriteKeys)
+                StartKeyUpdate(requestUpdate: false);
+            SendProtected(Session.WriteKeys, new ApplicationDataDatagram(data).ToBytes());
+        }
 
         protected override byte[] ExportKeyingMaterialCore(string label, byte[] context, int length)
         {
@@ -649,7 +670,9 @@ namespace SharpDTLS.Protocol13
 
                     RaiseEvent(() => KeyUpdateMessageReceived?.Invoke(this, keyUpdate));
                     RaiseKeyUpdateReceived();
-                    if (keyUpdate.UpdateRequest == 1 && _pendingKeyUpdateRecords == null)
+                    _peerKeyUpdateRequested = false;
+                    // A sender at the last epoch SHOULD ignore update_requested (RFC 9846 §4.7.3).
+                    if (keyUpdate.UpdateRequest == 1 && _pendingKeyUpdateRecords == null && CanUpdateWriteKeys)
                         StartKeyUpdate(requestUpdate: false);
                     break;
 
@@ -696,6 +719,9 @@ namespace SharpDTLS.Protocol13
 
         private void StartKeyUpdate(bool requestUpdate)
         {
+            // Until the peer's KeyUpdate arrives, a second update_requested would ask for nothing new (RFC 9846 §4.7.3).
+            requestUpdate &= !_peerKeyUpdateRequested;
+            _peerKeyUpdateRequested |= requestUpdate;
             var keyUpdate = new KeyUpdateDatagram(requestUpdate ? (byte)0x01 : (byte)0x00);
             keyUpdate.SequenceNumber = NextSendMessageSeq++;
             if (!IsDatagram)
@@ -899,8 +925,8 @@ namespace SharpDTLS.Protocol13
         private (byte[] Record, (ulong Epoch, ulong SequenceNumber) Number) Protect(Dtls13CryptoContext keys, byte[] innerPlaintext)
         {
             ulong seq = IsClient ? keys.ClientKeyUseCounter++ : keys.ServerKeyUseCounter++;
-            if (seq >= (1UL << 48) - 1)
-                throw new DtlsException(AlertDescription.InternalError, "Record sequence number space exhausted; a KeyUpdate is required");
+            if (seq >= keys.Suite.RecordLimit)
+                throw new DtlsException(AlertDescription.InternalError, "The key has protected as many records as its AEAD allows; a KeyUpdate is required");
             TlsInspector.Current?.OnProtectedRecord(this, IsClient, true, innerPlaintext[^1], keys.Epoch, seq, innerPlaintext.AsSpan(0, innerPlaintext.Length - 1));
 
             if (!IsDatagram)

@@ -3,7 +3,7 @@ using System;
 namespace SharpDTLS
 {
     /// <summary>
-    /// TLS/DTLS alert descriptions (RFC 8446 §6, plus legacy values from RFC 5246).
+    /// TLS/DTLS alert descriptions (RFC 9846 §6, plus legacy values from RFC 5246).
     /// </summary>
     public enum AlertDescription : byte
     {
@@ -34,6 +34,8 @@ namespace SharpDTLS
         BadCertificateStatusResponse = 113,
         UnknownPskIdentity           = 115,
         CertificateRequired          = 116,
+        /// <summary>An error with no more specific alert (RFC 9846 §6.2).</summary>
+        GeneralError                 = 117,
         NoApplicationProtocol        = 120,
     }
 

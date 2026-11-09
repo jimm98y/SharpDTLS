@@ -1,0 +1,1 @@
+SharpDTLS.AlertDescription.GeneralError = 117 -> SharpDTLS.AlertDescription

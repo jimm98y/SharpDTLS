@@ -69,6 +69,37 @@ namespace SharpDTLS.Tests
             Assert.IsTrue(SpinWait.SpinUntil(() => clientReceived.Contains("server after second update"), Timeout));
         }
 
+        // RFC 9846 §4.7.3: until the peer's KeyUpdate arrives, a second KeyUpdate must not ask for another.
+        [TestMethod]
+        public void KeyUpdate_DoesNotRequestAgainBeforeThePeersUpdate()
+        {
+            using var server = new Tls13Server();
+            var requests = new System.Collections.Concurrent.ConcurrentQueue<byte>();
+            var received = new System.Collections.Concurrent.ConcurrentQueue<string>();
+            server.KeyUpdateReceived += (_, k) => requests.Enqueue(k.UpdateRequest);
+            server.ApplicationDataReceived += (_, e) => received.Enqueue(Encoding.UTF8.GetString(e.Data));
+            server.Start(new IPEndPoint(IPAddress.Loopback, 0));
+            var client = TestTls13.Connect(server.LocalEndpoint);
+
+            // Holding the connection's lock keeps the server's answer from being processed between the two.
+            object sync = typeof(TlsConnectionBase).GetField("_sync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).GetValue(client);
+            lock (sync)
+            {
+                client.SendKeyUpdate(requestUpdate: true);
+                client.SendKeyUpdate(requestUpdate: true);
+            }
+            client.SendApplicationData(Encoding.UTF8.GetBytes("after"));
+            Assert.IsTrue(SpinWait.SpinUntil(() => received.Contains("after"), Timeout));
+            CollectionAssert.AreEqual(new byte[] { 1, 0 }, requests.ToArray());
+
+            // Once the server's KeyUpdate has arrived, the client may ask again.
+            Assert.IsTrue(SpinWait.SpinUntil(() => client.Session.ReadKeys.Last().Epoch == 4, Timeout), "the server's KeyUpdate did not arrive");
+            client.SendKeyUpdate(requestUpdate: true);
+            client.SendApplicationData(Encoding.UTF8.GetBytes("again"));
+            Assert.IsTrue(SpinWait.SpinUntil(() => received.Contains("again"), Timeout));
+            CollectionAssert.AreEqual(new byte[] { 1, 0, 1 }, requests.ToArray());
+        }
+
         [TestMethod]
         public void ClientAuthentication_InHandshakeAndPostHandshake()
         {

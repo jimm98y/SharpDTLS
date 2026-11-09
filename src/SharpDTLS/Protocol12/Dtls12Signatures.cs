@@ -39,6 +39,14 @@ namespace SharpDTLS.Protocol12
             EcdsaSha1, RsaPkcs1Sha1, DsaSha1,
         };
 
+        private static readonly ushort[] WithoutDsa = Supported.Where(s => (s & 0xFF) != 0x02).ToArray();
+
+        /// <summary>
+        /// The schemes to offer in signature_algorithms: <see cref="Supported"/> without DSA, which RFC 9846 §4.3.3
+        /// forbids offering, unless <paramref name="dsa"/> because DSA cipher suites were enabled explicitly.
+        /// </summary>
+        public static ushort[] Offered(bool dsa) => dsa ? Supported : WithoutDsa;
+
         public static ushort Scheme(byte hashAlgorithm, byte signatureAlgorithm) => (ushort)((hashAlgorithm << 8) | signatureAlgorithm);
 
         /// <summary>
