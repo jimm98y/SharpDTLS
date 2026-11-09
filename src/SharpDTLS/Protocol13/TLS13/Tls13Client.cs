@@ -27,8 +27,8 @@ namespace SharpDTLS.Protocol13.TLS13
         {
             _stream = stream;
             if (!leaveStreamOpen)
-                Closed += (_, _) => _stream.Dispose();
-            TlsStreamPump.Start(stream, this);
+                Closed += (_, _) => TlsStreamPump.DisposeAfterLinger(_stream);
+            TlsStreamPump.Start(stream, this, ownsStream: !leaveStreamOpen);
         }
     }
 }

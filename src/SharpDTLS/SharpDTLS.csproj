@@ -19,7 +19,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<InternalsVisibleTo Include="Dtls13Test.Tests" />
+		<InternalsVisibleTo Include="SharpDTLS.Tests" />
 	</ItemGroup>
 
 	<!-- the public API: listed in PublicAPI.*.txt, and checked against the last release (doc/public-api.md) -->
