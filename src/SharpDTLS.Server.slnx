@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/Samples/">
+    <Project Path="Samples/DtlsServerSample/DtlsServerSample.csproj" />
+    <Project Path="Samples/TlsServerSample/TlsServerSample.csproj" />
+  </Folder>
+  <Project Path="SharpDTLS/SharpDTLS.csproj" />
+</Solution>

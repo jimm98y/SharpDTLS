@@ -39,7 +39,7 @@ namespace SharpDTLS.Tests
 
             public override void OnSecret(TlsConnectionBase connection, bool isClient, string name, ReadOnlySpan<byte> value)
             {
-                Assert.IsTrue(value.Length > 0, name);
+                Assert.IsGreaterThan(0, value.Length, name);
                 lock (this)
                 {
                     Secrets.Add((isClient, name));
@@ -154,8 +154,8 @@ namespace SharpDTLS.Tests
             foreach (bool isClient in new[] { true, false })
                 foreach (string name in new[] { TlsInspector.SharedSecret, TlsInspector.HelloHash, TlsInspector.HandshakeSecret, TlsInspector.ClientHandshakeKey,
                                                 TlsInspector.ServerHandshakeSnKey, TlsInspector.MasterSecret, TlsInspector.ServerApplicationIv, TlsInspector.ExporterMasterSecret })
-                    Assert.IsTrue(recorder.Secrets.Contains((isClient, name)), $"{name} ({(isClient ? "client" : "server")})");
-            Assert.IsTrue(recorder.Records >= 8);
+                    Assert.Contains((isClient, name), recorder.Secrets, $"{name} ({(isClient ? "client" : "server")})");
+            Assert.IsGreaterThanOrEqualTo(8, recorder.Records);
         }
 
         [DataRow(true)]
@@ -171,7 +171,7 @@ namespace SharpDTLS.Tests
             CollectionAssert.AreEqual(new byte[] { 3, 2, 11, 12, 14, 4, 20 }, recorder.Types(true, false));
             CollectionAssert.AreEqual(new byte[] { 3, 2, 11, 12, 14, 4, 20 }, recorder.Types(false, true));
             foreach (string name in new[] { TlsInspector.PreMasterSecret, TlsInspector.MasterSecret, TlsInspector.KeyBlock })
-                Assert.IsTrue(recorder.Secrets.Contains((false, name)), name);
+                Assert.Contains((false, name), recorder.Secrets, name);
         }
 
         [DataRow(true)]
@@ -185,8 +185,8 @@ namespace SharpDTLS.Tests
 
             CollectionAssert.AreEqual(new byte[] { 1, 20 }, recorder.Types(true, true));
             CollectionAssert.AreEqual(new byte[] { 2, 8, 11, 15, 20 }, recorder.Types(true, false).Take(5).ToArray());
-            Assert.IsTrue(recorder.Secrets.Contains((true, TlsInspector.ClientApplicationTrafficSecret)));
-            Assert.IsFalse(recorder.Secrets.Contains((true, TlsInspector.ClientHandshakeSnKey)), "TLS has no record number encryption");
+            Assert.Contains((true, TlsInspector.ClientApplicationTrafficSecret), recorder.Secrets);
+            Assert.DoesNotContain((true, TlsInspector.ClientHandshakeSnKey), recorder.Secrets, "TLS has no record number encryption");
         }
 
         [DataRow(true)]
@@ -202,8 +202,8 @@ namespace SharpDTLS.Tests
             CollectionAssert.AreEqual(new byte[] { 1, 16, 20 }, sent);
             CollectionAssert.AreEqual(new byte[] { 2, 11, 12, 14 }, recorder.Types(true, false).Take(4).ToArray());
             foreach (string name in new[] { TlsInspector.PreMasterSecret, TlsInspector.MasterSecret, TlsInspector.KeyBlock })
-                Assert.IsTrue(recorder.Secrets.Contains((true, name)), name);
-            Assert.IsTrue(recorder.Records >= 2, "the Finished messages are protected");
+                Assert.Contains((true, name), recorder.Secrets, name);
+            Assert.IsGreaterThanOrEqualTo(2, recorder.Records, "the Finished messages are protected");
         }
 
         [TestMethod]
@@ -257,7 +257,7 @@ namespace SharpDTLS.Tests
             string secret = version == 0x0304 ? TlsInspector.SharedSecret : TlsInspector.PreMasterSecret;
             var client = recorder.KeyPairs.Single(k => k.IsClient && k.Group == NamedGroups.X25519
                 && X25519(k.Private, server.Public).AsSpan().SequenceEqual(recorder.SecretValues[(true, secret)]));
-            Assert.AreEqual(32, client.Private.Length);
+            Assert.HasCount(32, client.Private);
             CollectionAssert.AreEqual(recorder.SecretValues[(false, secret)], X25519(server.Private, client.Public));
         }
 
