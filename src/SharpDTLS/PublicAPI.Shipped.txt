@@ -197,8 +197,6 @@ SharpDTLS.CertificateValidator
 SharpDTLS.CertificateValidator.AllowCommonNameFallback.get -> bool
 SharpDTLS.CertificateValidator.AllowCommonNameFallback.set -> void
 SharpDTLS.CertificateValidator.CertificateValidator(System.Collections.Generic.IEnumerable<Org.BouncyCastle.X509.X509Certificate> trustedRoots = null) -> void
-SharpDTLS.CertificateValidator.ForClient() -> System.Func<Org.BouncyCastle.X509.X509Certificate, System.Collections.Generic.IReadOnlyList<byte[]>, bool>
-SharpDTLS.CertificateValidator.ForServer(string hostName) -> System.Func<Org.BouncyCastle.X509.X509Certificate, System.Collections.Generic.IReadOnlyList<byte[]>, bool>
 SharpDTLS.CertificateValidator.HostNameValidator.get -> System.Func<Org.BouncyCastle.X509.X509Certificate, string, bool>
 SharpDTLS.CertificateValidator.HostNameValidator.set -> void
 SharpDTLS.CertificateValidator.RevocationMode.get -> System.Security.Cryptography.X509Certificates.X509RevocationMode

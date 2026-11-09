@@ -72,3 +72,8 @@ By default, a client accepts any certificate from the server and only checks tha
 client.ServerCertificateValidator = new CertificateValidator().ForServer("example.com");
 ```
 To trust only your own CA, pass its certificate: `new CertificateValidator(new[] { caCertificate })`. A server checks client certificates the same way with `ForClient()`.
+
+`CertificateValidator` is the default implementation of `ICertificateValidator`. To validate some other way, implement `Validate`, which throws a `DtlsException` with the alert to send when the chain is not acceptable, and plug it in the same way:
+```cs
+client.ServerCertificateValidator = new MyCertificateValidator().ForServer("example.com");
+```

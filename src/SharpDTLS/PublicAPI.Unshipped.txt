@@ -1,1 +1,10 @@
 SharpDTLS.AlertDescription.GeneralError = 117 -> SharpDTLS.AlertDescription
+*REMOVED*SharpDTLS.CertificateValidator.ForClient() -> System.Func<Org.BouncyCastle.X509.X509Certificate, System.Collections.Generic.IReadOnlyList<byte[]>, bool>
+*REMOVED*SharpDTLS.CertificateValidator.ForServer(string hostName) -> System.Func<Org.BouncyCastle.X509.X509Certificate, System.Collections.Generic.IReadOnlyList<byte[]>, bool>
+const SharpDTLS.CertificateValidator.ClientAuthentication = "1.3.6.1.5.5.7.3.2" -> string
+const SharpDTLS.CertificateValidator.ServerAuthentication = "1.3.6.1.5.5.7.3.1" -> string
+SharpDTLS.CertificateValidatorExtensions
+SharpDTLS.ICertificateValidator
+SharpDTLS.ICertificateValidator.Validate(System.Collections.Generic.IReadOnlyList<byte[]> chain, string usage, string hostName) -> void
+static SharpDTLS.CertificateValidatorExtensions.ForClient(this SharpDTLS.ICertificateValidator validator) -> System.Func<Org.BouncyCastle.X509.X509Certificate, System.Collections.Generic.IReadOnlyList<byte[]>, bool>
+static SharpDTLS.CertificateValidatorExtensions.ForServer(this SharpDTLS.ICertificateValidator validator, string hostName) -> System.Func<Org.BouncyCastle.X509.X509Certificate, System.Collections.Generic.IReadOnlyList<byte[]>, bool>

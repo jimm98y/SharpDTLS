@@ -8,16 +8,20 @@ using BcX509Certificate = Org.BouncyCastle.X509.X509Certificate;
 namespace SharpDTLS
 {
     /// <summary>
-    /// Validates peer certificate chains with the platform's path validation (<see cref="X509Chain"/>): signatures,
-    /// validity periods, basic constraints, key usage for the peer's role (serverAuth or clientAuth) and, for
-    /// servers, the host name (RFC 6125). Plug it into a ServerCertificateValidator or ClientCertificateValidator
-    /// with <see cref="ForServer"/> or <see cref="ForClient"/>. Failures abort the handshake with
-    /// certificate_expired, unknown_ca or bad_certificate.
+    /// The default <see cref="ICertificateValidator"/>: validates peer certificate chains with the platform's path
+    /// validation (<see cref="X509Chain"/>): signatures, validity periods, basic constraints, key usage for the peer's
+    /// role (serverAuth or clientAuth) and, for servers, the host name (RFC 6125). Plug it into a
+    /// ServerCertificateValidator or ClientCertificateValidator with
+    /// <see cref="CertificateValidatorExtensions.ForServer"/> or <see cref="CertificateValidatorExtensions.ForClient"/>.
+    /// Failures abort the handshake with certificate_expired, unknown_ca or bad_certificate.
     /// </summary>
-    public sealed class CertificateValidator
+    public sealed class CertificateValidator : ICertificateValidator
     {
-        private const string ServerAuth = "1.3.6.1.5.5.7.3.1";
-        private const string ClientAuth = "1.3.6.1.5.5.7.3.2";
+        /// <summary>The serverAuth extended key usage (RFC 5280 §4.2.1.12): the usage a server's chain is validated for.</summary>
+        public const string ServerAuthentication = "1.3.6.1.5.5.7.3.1";
+
+        /// <summary>The clientAuth extended key usage (RFC 5280 §4.2.1.12): the usage a client's chain is validated for.</summary>
+        public const string ClientAuthentication = "1.3.6.1.5.5.7.3.2";
 
         private readonly X509Certificate2Collection _trustedRoots;
 
@@ -51,19 +55,9 @@ namespace SharpDTLS
         public Func<BcX509Certificate, string, bool> HostNameValidator { get; set; }
 
         /// <summary>
-        /// A server certificate validator: the chain must lead to a trusted root, allow serverAuth and match
-        /// <paramref name="hostName"/> (a DNS name or IP address; null skips the name check).
-        /// </summary>
-        public Func<BcX509Certificate, IReadOnlyList<byte[]>, bool> ForServer(string hostName)
-            => (certificate, chain) => { Validate(chain, ServerAuth, hostName); return true; };
-
-        /// <summary>A client certificate validator: the chain must lead to a trusted root and allow clientAuth.</summary>
-        public Func<BcX509Certificate, IReadOnlyList<byte[]>, bool> ForClient()
-            => (certificate, chain) => { Validate(chain, ClientAuth, null); return true; };
-
-        /// <summary>
-        /// Validates <paramref name="chain"/> (DER, end entity first, as received) and throws a
-        /// <see cref="DtlsException"/> with the matching alert when it is not acceptable.
+        /// Validates <paramref name="chain"/> (DER, end entity first, as received): it must lead to a trusted root and
+        /// allow <paramref name="usage"/>, and the end entity must match <paramref name="hostName"/> unless it is null.
+        /// Throws a <see cref="DtlsException"/> with the matching alert when it is not acceptable.
         /// </summary>
         public void Validate(IReadOnlyList<byte[]> chain, string usage, string hostName)
         {

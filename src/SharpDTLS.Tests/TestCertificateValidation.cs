@@ -123,7 +123,7 @@ namespace SharpDTLS.Tests
 
         // ── Handshakes ───────────────────────────────────────────────────────────────────────
 
-        private static Exception Handshake12(bool sendIntermediate, string hostName, bool clientAuth = false)
+        private static Exception Handshake12(bool sendIntermediate, string hostName, bool clientAuth = false, ICertificateValidator serverValidator = null)
         {
             var pair = new ScriptedTransportPair();
             var server = Pki.Leaf(new[] { "server.test" });
@@ -134,7 +134,7 @@ namespace SharpDTLS.Tests
                 RequireClientCertificate = clientAuth,
                 ClientCertificateValidator = clientAuth ? Validator().ForClient() : null,
             };
-            var dtlsClient = new Dtls12Client(pair.Client) { ServerCertificateValidator = Validator().ForServer(hostName) };
+            var dtlsClient = new Dtls12Client(pair.Client) { ServerCertificateValidator = (serverValidator ?? Validator()).ForServer(hostName) };
             if (clientAuth)
             {
                 dtlsClient.ClientCertificate = client.Cert;
@@ -144,7 +144,7 @@ namespace SharpDTLS.Tests
             return Run(dtlsClient.BeginHandshake, h => dtlsClient.HandshakeFinished += (_, _) => h(null), f => dtlsClient.Failed += (_, ex) => f(ex));
         }
 
-        private static Exception Handshake13(bool sendIntermediate, string hostName, bool clientAuth = false)
+        private static Exception Handshake13(bool sendIntermediate, string hostName, bool clientAuth = false, ICertificateValidator serverValidator = null)
         {
             var pair = new ScriptedTransportPair();
             var server = Pki.Leaf(new[] { "server.test" });
@@ -155,7 +155,7 @@ namespace SharpDTLS.Tests
                 RequireClientCertificate = clientAuth,
                 ClientCertificateValidator = clientAuth ? Validator().ForClient() : null,
             };
-            var dtlsClient = new Dtls13Client(pair.Client) { ServerCertificateValidator = Validator().ForServer(hostName) };
+            var dtlsClient = new Dtls13Client(pair.Client) { ServerCertificateValidator = (serverValidator ?? Validator()).ForServer(hostName) };
             if (clientAuth)
             {
                 dtlsClient.ClientCertificate = client.Cert;
@@ -211,6 +211,38 @@ namespace SharpDTLS.Tests
         {
             Exception error = version == 12 ? Handshake12(true, "server.test", clientAuth: true) : Handshake13(true, "server.test", clientAuth: true);
             Assert.IsNull(error, error?.ToString());
+        }
+
+        /// <summary>A custom validator that accepts or rejects every chain, and records what it was asked.</summary>
+        private sealed class RecordingValidator : ICertificateValidator
+        {
+            public bool Accept;
+            public readonly List<(int Certificates, string Usage, string HostName)> Calls = new();
+
+            public void Validate(IReadOnlyList<byte[]> chain, string usage, string hostName)
+            {
+                Calls.Add((chain.Count, usage, hostName));
+                if (!Accept)
+                    throw new DtlsException(AlertDescription.AccessDenied, "Rejected by the custom validator.");
+            }
+        }
+
+        [DataRow(12)]
+        [DataRow(13)]
+        [TestMethod]
+        public void Handshake_CustomValidator_DecidesInsteadOfTheDefault(int version)
+        {
+            var rejecting = new RecordingValidator();
+            Exception error = version == 12 ? Handshake12(false, "server.test", serverValidator: rejecting) : Handshake13(false, "server.test", serverValidator: rejecting);
+            Assert.AreEqual(AlertDescription.AccessDenied, (error as DtlsException)?.Alert, error?.ToString());
+            Assert.HasCount(1, rejecting.Calls);
+            Assert.AreEqual((1, CertificateValidator.ServerAuthentication, "server.test"), rejecting.Calls[0]);
+
+            // without the intermediate the default validator fails with unknown_ca; the custom one decides alone
+            var accepting = new RecordingValidator { Accept = true };
+            error = version == 12 ? Handshake12(false, "server.test", serverValidator: accepting) : Handshake13(false, "server.test", serverValidator: accepting);
+            Assert.IsNull(error, error?.ToString());
+            Assert.HasCount(1, accepting.Calls);
         }
     }
 }
