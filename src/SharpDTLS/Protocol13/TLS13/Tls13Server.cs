@@ -96,7 +96,7 @@ namespace SharpDTLS.Protocol13.TLS13
                 record => TlsStreamPump.Write(stream, record));
             _connections[connection] = stream;
             OnConnectionCreated(connection);
-            TlsStreamPump.Start(stream, connection);
+            TlsStreamPump.Start(stream, connection, ownsStream: true);
             return connection;
         }
 
@@ -122,7 +122,7 @@ namespace SharpDTLS.Protocol13.TLS13
         internal override void OnConnectionClosed(Tls13ServerConnection connection)
         {
             if (_connections.TryRemove(connection, out var stream))
-                stream.Dispose();
+                TlsStreamPump.DisposeAfterLinger(stream);
             ConnectionClosed?.Invoke(this, connection);
         }
     }

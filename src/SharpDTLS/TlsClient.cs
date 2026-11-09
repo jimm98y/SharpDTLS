@@ -16,12 +16,14 @@ namespace SharpDTLS
     public sealed class TlsClient : TlsClientBase
     {
         private readonly Stream _stream;
+        private readonly bool _leaveStreamOpen;
         private TlsConnectionBase _active;
 
         public TlsClient(Stream stream, bool leaveStreamOpen = false)
             : base(new Tls12Client(record => TlsStreamPump.Write(stream, record)), new Tls13Client(record => TlsStreamPump.Write(stream, record)))
         {
             _stream = stream;
+            _leaveStreamOpen = leaveStreamOpen;
             Tls13.LegacyServerHello += pending =>
             {
                 _active = Tls12;
@@ -36,7 +38,7 @@ namespace SharpDTLS
                     if (sender != _active)
                         return;
                     if (!leaveStreamOpen)
-                        _stream.Dispose();
+                        TlsStreamPump.DisposeAfterLinger(_stream);
                     Closed?.Invoke(this, EventArgs.Empty);
                 };
                 engine.AlertReceived += (_, alert) => AlertReceived?.Invoke(this, alert);
@@ -104,28 +106,18 @@ namespace SharpDTLS
 
         public void Close() => _active?.Close();
 
-        private Task Pump() => Task.Run(async () =>
+        private Task Pump() => TlsStreamPump.Run(_stream, () => _active, (buffer, read) =>
         {
-            byte[] buffer = new byte[16384 + 2048 + 5];
-            try
-            {
-                int read;
-                while (!_active.IsClosed && (read = await _stream.ReadAsync(buffer).ConfigureAwait(false)) > 0)
-                {
-                    if (_active is Tls12Connection tls12)
-                        tls12.ProcessStreamData(buffer, 0, read);
-                    else
-                        ((Tls13Connection)_active).ProcessStreamData(buffer, 0, read);
-                }
-            }
-            catch (Exception ex) when (ex is IOException or ObjectDisposedException)
-            {
-                Debug.WriteLine($"[TLS] Read failed: {ex.Message}");
-            }
+            if (_active is Tls12Connection tls12)
+                tls12.ProcessStreamData(buffer, 0, read);
+            else
+                ((Tls13Connection)_active).ProcessStreamData(buffer, 0, read);
+        }, () =>
+        {
             if (_active is Tls12Connection c12)
                 c12.OnTransportClosed();
             else
                 ((Tls13Connection)_active).OnTransportClosed();
-        });
+        }, ownsStream: !_leaveStreamOpen);
     }
 }

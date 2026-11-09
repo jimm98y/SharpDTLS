@@ -27,8 +27,8 @@ namespace SharpDTLS.Protocol12.TLS12
             MinimumVersion = TlsVersion.Tls12;
             MaximumVersion = TlsVersion.Tls12;
             if (!leaveStreamOpen)
-                Closed += (_, _) => _stream.Dispose();
-            TlsStreamPump.Start(stream, this);
+                Closed += (_, _) => TlsStreamPump.DisposeAfterLinger(_stream);
+            TlsStreamPump.Start(stream, this, ownsStream: !leaveStreamOpen);
         }
     }
 }

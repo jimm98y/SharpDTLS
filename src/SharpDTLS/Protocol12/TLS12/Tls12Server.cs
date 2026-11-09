@@ -98,11 +98,11 @@ namespace SharpDTLS.Protocol12.TLS12
             connection.Closed += (_, _) =>
             {
                 if (_connections.TryRemove(connection, out var s))
-                    s.Dispose();
+                    TlsStreamPump.DisposeAfterLinger(s);
                 ConnectionClosed?.Invoke(this, connection);
             };
             OnConnectionCreated(connection);
-            TlsStreamPump.Start(stream, connection);
+            TlsStreamPump.Start(stream, connection, ownsStream: true);
             return connection;
         }
 
