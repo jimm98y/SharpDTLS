@@ -6,7 +6,7 @@ DTLS 1.0/1.2/1.3 and TLS 1.0/1.1/1.2/1.3 client and server written in C#. The cr
 A client offers every enabled version in one ClientHello and a server answers with the highest one both sides support. DTLS 1.2 and DTLS 1.3 are on by default, and so are TLS 1.2 and TLS 1.3. To enable the older versions, set `MinimumVersion`.
 
 Implements the following RFCs:
-1. The Transport Layer Security (TLS) Protocol Version 1.3 [RFC8446](https://www.rfc-editor.org/rfc/rfc8446)
+1. The Transport Layer Security (TLS) Protocol Version 1.3 [RFC9846](https://www.rfc-editor.org/rfc/rfc9846) (obsoletes RFC8446)
 1. The Datagram Transport Layer Security (DTLS) Protocol Version 1.3 [RFC9147](https://www.rfc-editor.org/rfc/rfc9147)
 1. The Transport Layer Security (TLS) Protocol Version 1.2 [RFC5246](https://www.rfc-editor.org/rfc/rfc5246)
 1. Datagram Transport Layer Security Version 1.2 [RFC6347](https://www.rfc-editor.org/rfc/rfc6347)
