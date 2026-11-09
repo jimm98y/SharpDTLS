@@ -1,6 +1,5 @@
 # SharpDTLS
-DTLS 1.0/1.2/1.3 and TLS 1.0/1.1/1.2/1.3 client and server written in C#. The cryptography comes from [BouncyCastle](https://github.com/bcgit/bc-csharp); the protocols are implemented here. Targets `netstandard2.0`, `net8.0` and `net10.0`, so it runs on .NET Framework, .NET and anywhere else .NET Standard does.
-
+DTLS 1.0/1.2/1.3 and TLS 1.0/1.1/1.2/1.3 client and server written in C#. The cryptography comes from [BouncyCastle](https://github.com/bcgit/bc-csharp); the protocols are implemented here. Targets `netstandard2.0`, `net472`, `net8.0` and `net10.0`.
 [![NuGet version](https://img.shields.io/nuget/v/SharpDTLS.svg?style=flat-square)](https://www.nuget.org/packages/SharpDTLS)
 
 A client offers every enabled version in one ClientHello and a server answers with the highest one both sides support. DTLS 1.2 and DTLS 1.3 are on by default, and so are TLS 1.2 and TLS 1.3. To enable the older versions, set `MinimumVersion`.
@@ -72,6 +71,3 @@ By default, a client accepts any certificate from the server and only checks tha
 client.ServerCertificateValidator = new CertificateValidator().ForServer("example.com");
 ```
 To trust only your own CA, pass its certificate: `new CertificateValidator(new[] { caCertificate })`. A server checks client certificates the same way with `ForClient()`.
-
-## Public API
-The public API is listed and checked on every build. See [doc/public-api.md](doc/public-api.md) for how to add to it or change it.
