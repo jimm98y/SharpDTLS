@@ -116,7 +116,7 @@ namespace SharpDTLS.Protocol13
             }
 
             byte[] plaintext = suite.Cipher.Open(key, BuildNonce(iv, sequenceNumber), aad, record.AsSpan(headerLength).ToArray())
-                ?? throw new DtlsRecordDiscardedException("Record failed authentication");
+                ?? throw new DtlsRecordAuthenticationException("Record failed authentication");
 
             window.Mark(sequenceNumber);
 

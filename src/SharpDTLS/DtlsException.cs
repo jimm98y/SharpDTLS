@@ -66,4 +66,10 @@ namespace SharpDTLS
         public DtlsRecordDiscardedException(string message) : base(message) { }
         public DtlsRecordDiscardedException(string message, Exception innerException) : base(message, innerException) { }
     }
+
+    /// <summary>A DTLS 1.3 record that failed authentication: discarded, but counted against the AEAD's integrity limit.</summary>
+    internal sealed class DtlsRecordAuthenticationException : DtlsRecordDiscardedException
+    {
+        public DtlsRecordAuthenticationException(string message) : base(message) { }
+    }
 }

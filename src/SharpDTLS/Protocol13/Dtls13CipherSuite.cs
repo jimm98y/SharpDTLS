@@ -97,6 +97,19 @@ namespace SharpDTLS.Protocol13
             ? 23_726_566UL
             : (1UL << 48) - 1;
 
+        /// <summary>
+        /// How many records that fail authentication one key may receive over DTLS (RFC 9147 §4.5.3): 2^36 for AES-GCM
+        /// and ChaCha20-Poly1305, 2^23.5 for AES-CCM, 2^7 for AES-CCM_8. AEGIS and the integrity-only suites have no
+        /// limit given, so only the 48-bit record sequence number bounds it.
+        /// </summary>
+        public ulong IntegrityLimit => Id switch
+        {
+            TLS_AES_128_GCM_SHA256 or TLS_AES_256_GCM_SHA384 or TLS_CHACHA20_POLY1305_SHA256 => 1UL << 36,
+            TLS_AES_128_CCM_SHA256 => 11_863_283UL,
+            TLS_AES_128_CCM_8_SHA256 => 1UL << 7,
+            _ => (1UL << 48) - 1,
+        };
+
         /// <summary>After this many records under one key a KeyUpdate starts, leaving time for its ACK (DTLS) before <see cref="RecordLimit"/>.</summary>
         public ulong RekeyThreshold => RecordLimit / 4 * 3;
 

@@ -17,6 +17,9 @@ namespace SharpDTLS.Protocol13
         public ulong ServerKeyUseCounter { get; set; } = 0;
         public ulong ClientKeyUseCounter { get; set; } = 0;
 
+        /// <summary>Records received under these keys that failed authentication (RFC 9147 §4.5.3).</summary>
+        public ulong FailedAuthentications { get; set; }
+
         // Receive state for records sent by each side (replay window + sequence number reconstruction).
         public RecordWindow ClientRecords { get; } = new RecordWindow();
         public RecordWindow ServerRecords { get; } = new RecordWindow();

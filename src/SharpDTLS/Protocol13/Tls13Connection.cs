@@ -478,6 +478,17 @@ namespace SharpDTLS.Protocol13
             }
         }
 
+        // RFC 9147 §4.5.3: past the AEAD's integrity limit the connection closes; before it, ask the peer for new keys.
+        private void OnRecordFailedAuthentication(Dtls13CryptoContext keys)
+        {
+            ulong failed = ++keys.FailedAuthentications;
+            ulong limit = keys.Suite.IntegrityLimit;
+            if (failed > limit)
+                throw new DtlsException(AlertDescription.BadRecordMac, $"{failed} records failed authentication, more than the AEAD's integrity limit");
+            if (failed == limit / 2 && IsHandshakeComplete && keys.Epoch >= 3 && keys == Session.ReadKeys[Session.ReadKeys.Count - 1] && CanUpdateWriteKeys)
+                QueueKeyUpdate(requestUpdate: true);
+        }
+
         private void ProcessProtectedRecord(byte[] record)
         {
             int epochBits = record[0] & 0x03;
@@ -496,7 +507,16 @@ namespace SharpDTLS.Protocol13
             if (keys == null)
                 throw new DtlsRecordDiscardedException($"No keys for epoch bits {epochBits}");
 
-            var unprotected = Dtls13RecordProtection.Unprotect(keys, fromClient: !IsClient, record, ReceiveConnectionIdLength);
+            Dtls13RecordProtection.UnprotectedRecord unprotected;
+            try
+            {
+                unprotected = Dtls13RecordProtection.Unprotect(keys, fromClient: !IsClient, record, ReceiveConnectionIdLength);
+            }
+            catch (DtlsRecordAuthenticationException)
+            {
+                OnRecordFailedAuthentication(keys);
+                throw;
+            }
 
             // With a CID negotiated it is in every record from the handshake epoch on, and must be ours (RFC 9147 §9).
             if (ReadConnectionId is { Length: > 0 } && keys.Epoch >= 2 && !IsOurConnectionId(unprotected.ConnectionId))

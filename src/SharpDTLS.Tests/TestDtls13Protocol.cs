@@ -479,6 +479,50 @@ namespace SharpDTLS.Tests
             Assert.IsFalse(h.ServerConnection.IsClosed);
         }
 
+        // RFC 9147 §4.5.3: AES-CCM_8 allows 2^7 records that fail authentication per key. Halfway the server asks the
+        // client for new keys; under the client's new keys counting starts over, and past the limit the server closes.
+        [TestMethod]
+        public void RecordsFailingAuthentication_PastTheIntegrityLimit_CloseTheConnection()
+        {
+            var ccm8 = new List<ushort> { Dtls13CipherSuite.TLS_AES_128_CCM_8_SHA256 };
+            var h = new Harness(configureServer: s => { s.ShouldSendHelloRetry = false; s.CipherSuites = ccm8; },
+                                configureClient: c => c.CipherSuites = ccm8);
+            h.Handshake();
+            var connection = h.ServerConnection;
+            var clientKeyUpdates = new List<byte>();
+            h.Server.KeyUpdateReceived += (_, k) => clientKeyUpdates.Add(k.UpdateRequest);
+
+            // Only the application data records are forged: the client's answers to the server (ACK, KeyUpdate) go out intact.
+            void SendForged(int count)
+            {
+                int left = count;
+                h.Pair.ClientToServer = d =>
+                {
+                    if (Interlocked.Decrement(ref left) < 0)
+                        return new[] { d };
+                    var copy = (byte[])d.Clone();
+                    copy[^1] ^= 0xFF;
+                    return new[] { copy };
+                };
+                for (int i = 0; i < count; i++)
+                    h.Client.SendApplicationData(Encoding.UTF8.GetBytes("forged"));
+                h.Pair.ClientToServer = d => new[] { d };
+            }
+
+            SendForged(64);
+            // The server's KeyUpdate asked the client to update too; the client's answer moved it to new keys.
+            Assert.IsTrue(SpinWait.SpinUntil(() => clientKeyUpdates.Count == 1, Timeout), "the client did not update its keys");
+            Assert.AreEqual((byte)0, clientKeyUpdates[0]);
+            SendForged(128);
+            h.Client.SendApplicationData(Encoding.UTF8.GetBytes("ok"));
+            Assert.IsTrue(SpinWait.SpinUntil(() => h.ServerReceived.Contains("ok"), Timeout));
+            Assert.IsFalse(connection.IsClosed, "128 forged records under the new keys are within the limit");
+
+            SendForged(1);
+            Assert.IsTrue(connection.IsClosed);
+            Assert.AreEqual(AlertDescription.BadRecordMac, ((DtlsException)h.ServerErrors.Single()).Alert);
+        }
+
         [TestMethod]
         public void Close_SendsCloseNotify_AndPeerCloses()
         {
