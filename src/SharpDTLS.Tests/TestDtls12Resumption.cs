@@ -57,6 +57,32 @@ namespace SharpDTLS.Tests
             return r;
         }
 
+        private const byte ServerHello = 2, Certificate = 11, ServerKeyExchange = 12;
+
+        /// <summary>
+        /// The types of the handshake messages the server sent in the clear (epoch 0: everything before its
+        /// ChangeCipherSpec), each once however often it was retransmitted.
+        /// </summary>
+        private static List<byte> ServerHandshakeTypes(Run r)
+        {
+            var types = new List<byte>();
+            List<byte[]> sent;
+            lock (r.Pair.ServerSent)
+                sent = r.Pair.ServerSent.ToList();
+            foreach (byte[] datagram in sent)
+            {
+                // DTLS 1.0/1.2 records: type, version (2), epoch (2), sequence number (6), length (2), fragment.
+                for (int offset = 0; offset + 13 <= datagram.Length; offset += 13 + (datagram[offset + 11] << 8 | datagram[offset + 12]))
+                {
+                    bool handshake = datagram[offset] == 22;
+                    bool epoch0 = datagram[offset + 3] == 0 && datagram[offset + 4] == 0;
+                    if (handshake && epoch0 && offset + 13 < datagram.Length && !types.Contains(datagram[offset + 13]))
+                        types.Add(datagram[offset + 13]);
+                }
+            }
+            return types;
+        }
+
         private static bool SpinWait(Func<bool> condition)
             => System.Threading.SpinWait.SpinUntil(condition, Timeout);
 
@@ -81,7 +107,7 @@ namespace SharpDTLS.Tests
             Assert.IsNotNull(session, "a full handshake with EMS yields a resumable session");
             Assert.HasCount(32, session.SessionId);
             Assert.AreEqual(1, cache.Count);
-            int fullHandshakeDatagrams = first.Pair.ServerSent.Count;
+            CollectionAssert.Contains(ServerHandshakeTypes(first), Certificate, "the full handshake has the server's certificate");
 
             var second = Connect(version, cache, session, suite);
             Assert.IsTrue(second.Client.IsResumed);
@@ -90,7 +116,11 @@ namespace SharpDTLS.Tests
             Assert.AreEqual(suite, second.Client.CipherSuite.Id);
             Assert.AreEqual(version, second.Client.NegotiatedVersion);
             Assert.AreEqual(session.EncryptThenMac, second.Client.EncryptThenMacNegotiated);
-            Assert.IsLessThan(fullHandshakeDatagrams, second.Pair.ServerSent.Count, "no Certificate or key exchange");
+            // By message, not by datagram count: with the 20 ms retransmit timeout a busy machine retransmits flights.
+            var resumed = ServerHandshakeTypes(second);
+            CollectionAssert.Contains(resumed, ServerHello);
+            CollectionAssert.DoesNotContain(resumed, Certificate, "no Certificate");
+            CollectionAssert.DoesNotContain(resumed, ServerKeyExchange, "no key exchange");
 
             // Same master secret, new randoms: new keys.
             CollectionAssert.AreNotEqual(first.Client.ExportKeyingMaterial("EXPERIMENTAL test", null, 32),
