@@ -10,8 +10,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="MSTest" Version="4.0.1" />
-    <PackageReference Include="Meziantou.Polyfill" Version="1.0.165" Condition="'$(TargetFramework)' == 'net481'">
+    <PackageReference Include="MSTest" Version="4.5.2" />
+    <PackageReference Include="Meziantou.Polyfill" Version="1.0.170" Condition="'$(TargetFramework)' == 'net481'">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>

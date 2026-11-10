@@ -445,7 +445,7 @@ namespace SharpDTLS.Tests
                 Org.BouncyCastle.Tls.TlsServer bcServerPeer = suite.RequiresPsk ? new BcPskTestServer(crypto, id, bcVersion, keyPair.Private, certificate.GetEncoded())
                     : suite.RequiresSrp ? new BcSrpTestServer(crypto, id, bcVersion, keyPair.Private, certificate.GetEncoded())
                     : new BcTestServer(crypto, id, bcVersion, keyPair.Private, certificate.GetEncoded());
-                var dtls = new DtlsServerProtocol().Accept(bcServerPeer, new BcUdpTransport(serverSocket, log));
+                var dtls = new BcDtlsServerProtocol(suite.IsStaticKeyAgreement).Accept(bcServerPeer, new BcUdpTransport(serverSocket, log));
                 byte[] buffer = new byte[2048];
                 int n = dtls.Receive(buffer, 0, buffer.Length, (int)Timeout.TotalMilliseconds);
                 string text = n > 0 ? Encoding.UTF8.GetString(buffer, 0, n) : null;

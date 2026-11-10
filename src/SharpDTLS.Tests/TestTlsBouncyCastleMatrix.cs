@@ -76,7 +76,7 @@ namespace SharpDTLS.Tests
                 Org.BouncyCastle.Tls.TlsServer peer = suite.RequiresPsk ? new BcPskTestServer(crypto, id, bcVersion, keyPair.Private, certificate.GetEncoded())
                     : suite.RequiresSrp ? new BcSrpTestServer(crypto, id, bcVersion, keyPair.Private, certificate.GetEncoded())
                     : new BcTestServer(crypto, id, bcVersion, keyPair.Private, certificate.GetEncoded());
-                var protocol = new TlsServerProtocol(tcp.GetStream());
+                var protocol = new BcTlsServerProtocol(tcp.GetStream(), suite.IsStaticKeyAgreement);
                 protocol.Accept(peer);
                 string text = ReadAtLeast(protocol.Stream, 4);
                 byte[] reply = Encoding.UTF8.GetBytes("pong:" + text);

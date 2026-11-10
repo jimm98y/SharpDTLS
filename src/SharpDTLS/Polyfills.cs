@@ -13,20 +13,9 @@ using System.Threading.Tasks;
 
 internal static class SharpDtlsPolyfills
 {
+    // FixedTimeEquals comes from Meziantou.Polyfill (1.0.170 and later).
     extension(CryptographicOperations)
     {
-        /// <summary>Compares in time that depends only on the length.</summary>
-        [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.NoOptimization)]
-        public static bool FixedTimeEquals(ReadOnlySpan<byte> left, ReadOnlySpan<byte> right)
-        {
-            if (left.Length != right.Length)
-                return false;
-            int difference = 0;
-            for (int i = 0; i < left.Length; i++)
-                difference |= left[i] ^ right[i];
-            return difference == 0;
-        }
-
         [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.NoOptimization)]
         public static void ZeroMemory(Span<byte> buffer) => buffer.Clear();
     }
