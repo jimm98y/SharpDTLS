@@ -8,3 +8,8 @@ SharpDTLS.ICertificateValidator
 SharpDTLS.ICertificateValidator.Validate(System.Collections.Generic.IReadOnlyList<byte[]> chain, string usage, string hostName) -> void
 static SharpDTLS.CertificateValidatorExtensions.ForClient(this SharpDTLS.ICertificateValidator validator) -> System.Func<Org.BouncyCastle.X509.X509Certificate, System.Collections.Generic.IReadOnlyList<byte[]>, bool>
 static SharpDTLS.CertificateValidatorExtensions.ForServer(this SharpDTLS.ICertificateValidator validator, string hostName) -> System.Func<Org.BouncyCastle.X509.X509Certificate, System.Collections.Generic.IReadOnlyList<byte[]>, bool>
+*REMOVED*SharpDTLS.OcspStapleValidator.ForServer() -> System.Func<byte[], System.Collections.Generic.IReadOnlyList<byte[]>, bool>
+SharpDTLS.IOcspStapleValidator
+SharpDTLS.IOcspStapleValidator.Validate(byte[] ocspResponse, System.Collections.Generic.IReadOnlyList<byte[]> chain) -> void
+SharpDTLS.OcspStapleValidatorExtensions
+static SharpDTLS.OcspStapleValidatorExtensions.ForServer(this SharpDTLS.IOcspStapleValidator validator) -> System.Func<byte[], System.Collections.Generic.IReadOnlyList<byte[]>, bool>

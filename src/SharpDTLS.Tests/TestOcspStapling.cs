@@ -109,7 +109,7 @@ namespace SharpDTLS.Tests
 
         private sealed record Result(Exception Error, byte[] Stapled);
 
-        private static Result Run(int version, byte[] serverStaple, bool request, OcspStapleValidator validator,
+        private static Result Run(int version, byte[] serverStaple, bool request, IOcspStapleValidator validator,
             Func<string, ServerCredentials> selector = null, string serverName = null, (Org.BouncyCastle.Crypto.AsymmetricCipherKeyPair Key, X509Certificate Cert)? leaf = null)
         {
             var pair = new ScriptedTransportPair();
@@ -202,6 +202,41 @@ namespace SharpDTLS.Tests
                 name => name == "named.test" ? credentials : null, "named.test", defaultLeaf);
             Assert.IsNull(result.Error, result.Error?.ToString());
             CollectionAssert.AreEqual(namedStaple, result.Stapled);
+        }
+
+        /// <summary>A custom staple validator that accepts or rejects every response, and records what it was given.</summary>
+        private sealed class RecordingStapleValidator : IOcspStapleValidator
+        {
+            public bool Accept;
+            public readonly List<(byte[] Response, int Certificates)> Calls = new();
+
+            public void Validate(byte[] ocspResponse, IReadOnlyList<byte[]> chain)
+            {
+                Calls.Add((ocspResponse, chain.Count));
+                if (!Accept)
+                    throw new DtlsException(AlertDescription.AccessDenied, "Rejected by the custom validator.");
+            }
+        }
+
+        [DataRow(12)]
+        [DataRow(13)]
+        [TestMethod]
+        public void CustomValidator_DecidesInsteadOfTheDefault(int version)
+        {
+            var leaf = Pki.Leaf(new[] { "server.test" });
+
+            var rejecting = new RecordingStapleValidator();
+            var result = Run(version, Pki.OcspResponse(leaf.Cert), request: true, rejecting, leaf: leaf);
+            Assert.AreEqual(AlertDescription.AccessDenied, (result.Error as DtlsException)?.Alert, result.Error?.ToString());
+
+            // the default validator rejects a revoked certificate; the custom one decides alone
+            byte[] revoked = Pki.OcspResponse(leaf.Cert, Revoked);
+            var accepting = new RecordingStapleValidator { Accept = true };
+            result = Run(version, revoked, request: true, accepting, leaf: leaf);
+            Assert.IsNull(result.Error, result.Error?.ToString());
+            Assert.HasCount(1, accepting.Calls);
+            CollectionAssert.AreEqual(revoked, accepting.Calls[0].Response);
+            Assert.AreEqual(2, accepting.Calls[0].Certificates);
         }
 
         // ── Interop ──────────────────────────────────────────────────────────────────────────

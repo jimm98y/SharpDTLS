@@ -8,13 +8,14 @@ using System.Linq;
 namespace SharpDTLS
 {
     /// <summary>
-    /// Checks a stapled OCSP response (RFC 6960) for the server certificate: a successful response signed by the
-    /// certificate's issuer or by a responder the issuer delegated to (id-kp-OCSPSigning), with a "good" status for the
-    /// certificate that is current. Plug <see cref="ForServer"/> into a client's ServerCertificateStatusValidator next
-    /// to a certificate validator: it checks the response, not the chain. Failures are bad_certificate_status_response,
-    /// or certificate_revoked for a revoked certificate.
+    /// The default <see cref="IOcspStapleValidator"/>: checks a stapled OCSP response (RFC 6960) for the server
+    /// certificate: a successful response signed by the certificate's issuer or by a responder the issuer delegated to
+    /// (id-kp-OCSPSigning), with a "good" status for the certificate that is current. Plug
+    /// <see cref="OcspStapleValidatorExtensions.ForServer"/> into a client's ServerCertificateStatusValidator next to a
+    /// certificate validator: it checks the response, not the chain. Failures are bad_certificate_status_response, or
+    /// certificate_revoked for a revoked certificate.
     /// </summary>
-    public sealed class OcspStapleValidator
+    public sealed class OcspStapleValidator : IOcspStapleValidator
     {
         private readonly List<X509Certificate> _issuers;
 
@@ -33,9 +34,10 @@ namespace SharpDTLS
         /// <summary>The time the response must be current at; null for now.</summary>
         public DateTime? VerificationTime { get; set; }
 
-        /// <summary>A ServerCertificateStatusValidator: (OCSP response or null, the server's chain as received).</summary>
-        public Func<byte[], IReadOnlyList<byte[]>, bool> ForServer() => (response, chain) => { Validate(response, chain); return true; };
-
+        /// <summary>
+        /// Checks <paramref name="ocspResponse"/> (null when the server stapled none) for the end entity of
+        /// <paramref name="chain"/> and throws a <see cref="DtlsException"/> with the matching alert when it is not acceptable.
+        /// </summary>
         public void Validate(byte[] ocspResponse, IReadOnlyList<byte[]> chain)
         {
             if (ocspResponse == null)

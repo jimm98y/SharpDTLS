@@ -380,7 +380,6 @@ SharpDTLS.NamedGroups
 SharpDTLS.OcspStapleValidator
 SharpDTLS.OcspStapleValidator.ClockSkew.get -> System.TimeSpan
 SharpDTLS.OcspStapleValidator.ClockSkew.set -> void
-SharpDTLS.OcspStapleValidator.ForServer() -> System.Func<byte[], System.Collections.Generic.IReadOnlyList<byte[]>, bool>
 SharpDTLS.OcspStapleValidator.OcspStapleValidator(System.Collections.Generic.IEnumerable<Org.BouncyCastle.X509.X509Certificate> issuers = null) -> void
 SharpDTLS.OcspStapleValidator.Required.get -> bool
 SharpDTLS.OcspStapleValidator.Required.set -> void
