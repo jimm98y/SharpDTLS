@@ -1,6 +1,8 @@
 <Solution>
   <Folder Name="/Samples/">
+    <Project Path="Samples/DtlsClientSample/DtlsClientSample.csproj" />
     <Project Path="Samples/DtlsServerSample/DtlsServerSample.csproj" />
+    <Project Path="Samples/TlsClientSample/TlsClientSample.csproj" />
     <Project Path="Samples/TlsServerSample/TlsServerSample.csproj" />
   </Folder>
   <Folder Name="/Solution Items/">
