@@ -36,6 +36,10 @@ namespace SharpDTLS
     /// they must not call back into the connection. <c>connection</c> is null for what a DTLS server handles statelessly,
     /// before any connection exists: a ClientHello it answers with HelloVerifyRequest or HelloRetryRequest, and that answer.
     /// Secrets are passed as the engine holds them: never write to them.
+    /// <para>
+    /// An inspector sees every key of every connection in the process and can change what is sent: set one only in a
+    /// tool or a test, never in a deployed service.
+    /// </para>
     /// </remarks>
     public abstract class TlsInspector
     {

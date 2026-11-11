@@ -67,6 +67,8 @@ int read = await tls.ReadAsync(buffer, 0, buffer.Length);
 ```
 On the server side, `TlsStream.AcceptAsync(new TlsServer(), stream)` serves a client connected on the stream. A `TlsServer` listening with `Start` closes a client that has not completed its handshake within `HandshakeTimeout` (30 s), and accepts at most `MaxPendingHandshakes` (1,000) at once.
 
+A read returns 0 when the peer closes, as with `SslStream`, whether it sent close_notify or the TCP connection just ended. Anyone on the path can end a TCP connection, so when the end of the stream is the end of a message, check `tls.Connection.CloseNotifyReceived`.
+
 ## Certificate validation
 By default, a client validates the server's chain against the operating system's trust store and checks it against `ServerName`; a server that asks for a client certificate validates its chain the same way. A raw public key is refused unless `ServerRawPublicKeyValidator` (or `ClientRawPublicKeyValidator`) accepts it.
 

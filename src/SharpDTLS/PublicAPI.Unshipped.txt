@@ -21,3 +21,6 @@ SharpDTLS.TlsServer.MaxPendingHandshakes.get -> int
 SharpDTLS.TlsServer.MaxPendingHandshakes.set -> void
 SharpDTLS.SessionTicketKeys.RotationInterval.get -> System.TimeSpan?
 SharpDTLS.SessionTicketKeys.RotationInterval.set -> void
+SharpDTLS.DtlsServer.MaxConnectionsPerAddress.get -> int
+SharpDTLS.DtlsServer.MaxConnectionsPerAddress.set -> void
+SharpDTLS.TlsConnectionBase.CloseNotifyReceived.get -> bool

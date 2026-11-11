@@ -189,6 +189,98 @@ namespace SharpDTLS.Tests
         }
 
         [TestMethod]
+        public async Task TlsStream_TellsCloseNotifyFromATruncation()
+        {
+            foreach (bool closeNotify in new[] { true, false })
+            {
+                using var server = new TlsServer();
+                var listener = new TcpListener(IPAddress.Loopback, 0);
+                listener.Start();
+                try
+                {
+                    var accepting = Task.Run(async () =>
+                    {
+                        var socket = await listener.AcceptTcpClientAsync();
+                        return (socket, await TlsStream.AcceptAsync(server, socket.GetStream()));
+                    });
+                    using var tcp = new TcpClient();
+                    await tcp.ConnectAsync(IPAddress.Loopback, ((IPEndPoint)listener.LocalEndpoint).Port);
+                    using var client = await TlsStream.ConnectAsync(tcp.GetStream(), c => c.ServerCertificateValidator = (certificate, chain) => true);
+                    var (socket, serverStream) = await accepting;
+                    if (closeNotify)
+                        serverStream.Dispose();
+                    else
+                        socket.Client.Close(); // the TCP connection ends, no close_notify
+                    var read = client.ReadAsync(new byte[16], 0, 16);
+                    Assert.IsTrue(read.Wait(TestTimeouts.InProcess));
+                    Assert.AreEqual(0, read.Result);
+                    Assert.AreEqual(closeNotify, client.Connection.CloseNotifyReceived);
+                }
+                finally
+                {
+                    listener.Stop();
+                }
+            }
+        }
+
+        [TestMethod]
+        public void DtlsServer_CapsTheConnectionsOfOneAddress()
+        {
+            var transport = new MultiSourceServerTransport();
+            var server = new DtlsServer(transport) { MaxConnectionsPerAddress = 2 };
+            int established = 0;
+            server.HandshakeFinished += (_, _) => Interlocked.Increment(ref established);
+            var clients = new List<DtlsClient>();
+            for (int port = 1; port <= 4; port++)
+            {
+                var client = new DtlsClient(transport.ClientAt(new IPEndPoint(IPAddress.Parse("192.0.2.7"), port)));
+                client.BeginHandshake();
+                clients.Add(client);
+            }
+            Assert.IsTrue(SpinWait.SpinUntil(() => Volatile.Read(ref established) >= 2, TestTimeouts.InProcess));
+            Thread.Sleep(500);
+            Assert.AreEqual(2, Volatile.Read(ref established), "two connections of one address at most");
+
+            var other = new DtlsClient(transport.ClientAt(new IPEndPoint(IPAddress.Parse("192.0.2.8"), 1)));
+            other.BeginHandshake();
+            Assert.IsTrue(SpinWait.SpinUntil(() => Volatile.Read(ref established) == 3, TestTimeouts.InProcess), "another address is answered");
+        }
+
+        /// <summary>A server transport of clients at addresses of the test's choosing, delivering in memory.</summary>
+        private sealed class MultiSourceServerTransport : IServerTransport
+        {
+            private readonly Dictionary<string, Client> _clients = new();
+            public event EventHandler<byte[]> OnDataReceived;
+
+            public IClientTransport ClientAt(IPEndPoint endpoint)
+            {
+                var client = new Client(this, endpoint);
+                lock (_clients)
+                    _clients[endpoint.ToString()] = client;
+                return client;
+            }
+
+            public void Send(EndPoint endpoint, byte[] buf)
+            {
+                Client client;
+                lock (_clients)
+                    _clients.TryGetValue(endpoint.ToString(), out client);
+                client?.Deliver(buf);
+            }
+
+            private sealed class Client : IClientTransport
+            {
+                private readonly MultiSourceServerTransport _server;
+                private readonly IPEndPoint _endpoint;
+                public event EventHandler<byte[]> OnDataReceived;
+
+                public Client(MultiSourceServerTransport server, IPEndPoint endpoint) => (_server, _endpoint) = (server, endpoint);
+                public void Send(byte[] buf) => _server.OnDataReceived?.Invoke(_endpoint, buf);
+                public void Deliver(byte[] buf) => OnDataReceived?.Invoke(null, buf);
+            }
+        }
+
+        [TestMethod]
         public void Tls13Parsers_RefuseDuplicateExtensions()
         {
             // EncryptedExtensions (DTLS header) of two supported_groups extensions

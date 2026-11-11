@@ -88,7 +88,7 @@ namespace SharpDTLS
             Dtls13.EarlyDataReceived += (_, e) => EarlyDataReceived?.Invoke(this, new DtlsDataReceivedEventArgs(e.RemoteEndPoint, e.Connection, e.Data));
             Dtls12.ConnectionCreated += OnConnectionCreated;
             Dtls13.ConnectionCreated += OnConnectionCreated;
-            Dtls12.AcceptsConnection = Dtls13.AcceptsConnection = () => MaxConnections <= 0 || Dtls12.ConnectionCount + Dtls13.ConnectionCount < MaxConnections;
+            Dtls12.AcceptsConnection = Dtls13.AcceptsConnection = AcceptsConnection;
 
             serverTransport.OnDataReceived += OnDataReceived;
         }
@@ -114,6 +114,22 @@ namespace SharpDTLS
         /// not answered once it passed its cookie exchange. 10,000 by default; 0 for no limit.
         /// </summary>
         public int MaxConnections { get; set; } = 10_000;
+
+        /// <summary>
+        /// The most connections one IP address may have at once (its cookie exchange proves it owns the address, not that
+        /// it is one peer); a client past that is not answered. 100 by default; 0 for no limit.
+        /// </summary>
+        public int MaxConnectionsPerAddress { get; set; } = 100;
+
+        private bool AcceptsConnection(EndPoint endpoint)
+        {
+            if (MaxConnections > 0 && Dtls12.ConnectionCount + Dtls13.ConnectionCount >= MaxConnections)
+                return false;
+            if (MaxConnectionsPerAddress > 0 && endpoint is IPEndPoint ip
+                && Dtls12.ConnectionsFrom(ip.Address) + Dtls13.ConnectionsFrom(ip.Address) >= MaxConnectionsPerAddress)
+                return false;
+            return true;
+        }
 
         /// <summary>The newest version offered: DTLS 1.3 (the default) or DTLS 1.2 to turn DTLS 1.3 off.</summary>
         public ushort MaximumVersion { get; set; } = DtlsVersion.Dtls13;

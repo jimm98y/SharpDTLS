@@ -64,6 +64,13 @@ namespace SharpDTLS
         public bool IsHandshakeComplete { get; protected set; }
         public bool IsClosed { get; private set; }
 
+        /// <summary>
+        /// Whether the peer ended the connection with close_notify. A stream that ends without it (a TCP FIN or reset)
+        /// reads as closed all the same, as with SslStream, but may have been cut short by anyone on the path: a protocol
+        /// whose messages end where the connection does should check this.
+        /// </summary>
+        public bool CloseNotifyReceived { get; private set; }
+
         /// <summary>Awaited by a stream's reader before each read: completes once the application has room for more data.</summary>
         internal Func<Task> ReceiveGate { get; set; }
 
@@ -404,6 +411,7 @@ namespace SharpDTLS
 
             if (description == AlertDescription.CloseNotify)
             {
+                CloseNotifyReceived = true;
                 // Respond with our own close_notify (RFC 5246 §7.2.1, RFC 8446 §6.1).
                 SendAlert(AlertDescription.CloseNotify, fatal: false);
                 CloseInternal();

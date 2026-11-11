@@ -79,8 +79,10 @@ namespace SharpDTLS.Protocol12
 
         internal int ConnectionCount => _connections.Count;
 
+        internal int ConnectionsFrom(IPAddress address) => _connections.Values.Count(c => c.RemoteEndPoint is IPEndPoint ip && ip.Address.Equals(address));
+
         /// <summary>Whether a client past its cookie exchange may have a connection (see DtlsServer.MaxConnections).</summary>
-        internal Func<bool> AcceptsConnection { get; set; }
+        internal Func<EndPoint, bool> AcceptsConnection { get; set; }
 
         public Tls12ServerConnection GetConnection(EndPoint endpoint)
             => _connections.TryGetValue(endpoint.ToString(), out var connection) ? connection : null;
@@ -160,7 +162,7 @@ namespace SharpDTLS.Protocol12
             if (!CheckCookie(endpoint, record, out ClientHelloMessage clientHello, out byte[] message, out ulong recordSeq))
                 return;
 
-            if (AcceptsConnection != null && !AcceptsConnection())
+            if (AcceptsConnection != null && !AcceptsConnection(endpoint))
                 return;
 
             // Replies go to the connection's current address, which moves with connection IDs.
