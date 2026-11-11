@@ -1,4 +1,4 @@
-// SharpDTLS
+﻿// SharpDTLS
 // Copyright (C) 2026 Lukas Volf
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -67,5 +67,28 @@ namespace SharpDTLS
                 throw new ArgumentNullException(nameof(validator));
             return (certificate, chain) => { validator.Validate(chain, CertificateValidator.ClientAuthentication, null); return true; };
         }
+    }
+
+    /// <summary>The validators used when none is set.</summary>
+    internal static class CertificateValidatorDefaults
+    {
+        /// <summary>
+        /// Set by the tests alone, whose peers' certificates are self-signed: a peer without a validator is then accepted,
+        /// as it was before validation became the default.
+        /// </summary>
+        internal static bool AcceptAnyPeerByDefault;
+
+        private static readonly Func<BcX509Certificate, IReadOnlyList<byte[]>, bool> AcceptAny = (certificate, chain) => true;
+        private static readonly Func<BcX509Certificate, IReadOnlyList<byte[]>, bool> ClientChain = new CertificateValidator().ForClient();
+
+        /// <summary>A server's chain, against the platform's trust store for serverAuth, matching <paramref name="hostName"/>.</summary>
+        public static Func<BcX509Certificate, IReadOnlyList<byte[]>, bool> Server(string hostName)
+            => AcceptAnyPeerByDefault ? AcceptAny : new CertificateValidator().ForServer(hostName);
+
+        /// <summary>A client's chain, against the platform's trust store for clientAuth.</summary>
+        public static Func<BcX509Certificate, IReadOnlyList<byte[]>, bool> Client => AcceptAnyPeerByDefault ? AcceptAny : ClientChain;
+
+        /// <summary>Whether a raw public key is accepted: by its validator, and without one never.</summary>
+        public static bool RawPublicKey(Func<byte[], bool> validator, byte[] spki) => validator != null ? validator(spki) : AcceptAnyPeerByDefault;
     }
 }

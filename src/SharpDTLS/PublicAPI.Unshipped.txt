@@ -13,3 +13,11 @@ SharpDTLS.IOcspStapleValidator
 SharpDTLS.IOcspStapleValidator.Validate(byte[] ocspResponse, System.Collections.Generic.IReadOnlyList<byte[]> chain) -> void
 SharpDTLS.OcspStapleValidatorExtensions
 static SharpDTLS.OcspStapleValidatorExtensions.ForServer(this SharpDTLS.IOcspStapleValidator validator) -> System.Func<byte[], System.Collections.Generic.IReadOnlyList<byte[]>, bool>
+SharpDTLS.DtlsServer.MaxConnections.get -> int
+SharpDTLS.DtlsServer.MaxConnections.set -> void
+SharpDTLS.TlsServer.HandshakeTimeout.get -> System.TimeSpan
+SharpDTLS.TlsServer.HandshakeTimeout.set -> void
+SharpDTLS.TlsServer.MaxPendingHandshakes.get -> int
+SharpDTLS.TlsServer.MaxPendingHandshakes.set -> void
+SharpDTLS.SessionTicketKeys.RotationInterval.get -> System.TimeSpan?
+SharpDTLS.SessionTicketKeys.RotationInterval.set -> void

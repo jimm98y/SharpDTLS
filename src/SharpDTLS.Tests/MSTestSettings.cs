@@ -20,6 +20,9 @@ namespace SharpDTLS.Tests
             ThreadPool.GetMinThreads(out int workers, out int io);
             int wanted = Math.Max(64, Environment.ProcessorCount * 4);
             ThreadPool.SetMinThreads(Math.Max(workers, wanted), Math.Max(io, wanted));
+
+            // The tests' peers have self-signed certificates: accept any where a test sets no validator.
+            CertificateValidatorDefaults.AcceptAnyPeerByDefault = true;
         }
     }
 }

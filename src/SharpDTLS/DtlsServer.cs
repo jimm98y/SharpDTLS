@@ -1,4 +1,4 @@
-// SharpDTLS
+﻿// SharpDTLS
 // Copyright (C) 2026 Lukas Volf
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -88,6 +88,7 @@ namespace SharpDTLS
             Dtls13.EarlyDataReceived += (_, e) => EarlyDataReceived?.Invoke(this, new DtlsDataReceivedEventArgs(e.RemoteEndPoint, e.Connection, e.Data));
             Dtls12.ConnectionCreated += OnConnectionCreated;
             Dtls13.ConnectionCreated += OnConnectionCreated;
+            Dtls12.AcceptsConnection = Dtls13.AcceptsConnection = () => MaxConnections <= 0 || Dtls12.ConnectionCount + Dtls13.ConnectionCount < MaxConnections;
 
             serverTransport.OnDataReceived += OnDataReceived;
         }
@@ -107,6 +108,12 @@ namespace SharpDTLS
 
         /// <summary>The oldest version accepted; DTLS 1.2 by default (RFC 8996 deprecates DTLS 1.0).</summary>
         public ushort MinimumVersion { get => Dtls12.MinimumVersion; set => Dtls12.MinimumVersion = value; }
+
+        /// <summary>
+        /// The most connections, established or in their handshake, the server keeps at once; a client past that is
+        /// not answered once it passed its cookie exchange. 10,000 by default; 0 for no limit.
+        /// </summary>
+        public int MaxConnections { get; set; } = 10_000;
 
         /// <summary>The newest version offered: DTLS 1.3 (the default) or DTLS 1.2 to turn DTLS 1.3 off.</summary>
         public ushort MaximumVersion { get; set; } = DtlsVersion.Dtls13;

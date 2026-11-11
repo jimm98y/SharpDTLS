@@ -1,4 +1,4 @@
-// SharpDTLS
+﻿// SharpDTLS
 // Copyright (C) 2026 Lukas Volf
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -62,6 +62,11 @@ namespace SharpDTLS.Protocol13.DTLS13
     internal class Dtls13Server : Tls13ServerBase
     {
         private readonly ConcurrentDictionary<string, Tls13ServerConnection> _connections = new();
+
+        internal int ConnectionCount => _connections.Count;
+
+        /// <summary>Whether a client past its cookie exchange may have a connection (see DtlsServer.MaxConnections).</summary>
+        internal Func<bool> AcceptsConnection { get; set; }
         private readonly ClientHelloReassembler _clientHelloReassembler = new();
 
         public IServerTransport ServerTransport { get; }
@@ -195,6 +200,9 @@ namespace SharpDTLS.Protocol13.DTLS13
         private void HandleClientHello(EndPoint endpoint, byte[] datagram, byte[] record)
         {
             if (!CheckCookie(endpoint, record, out ClientHelloDatagram clientHello, out ClientHelloDecision decision))
+                return;
+
+            if (!_connections.ContainsKey(endpoint.ToString()) && AcceptsConnection != null && !AcceptsConnection())
                 return;
 
             var connection = new Tls13ServerConnection(this, endpoint);

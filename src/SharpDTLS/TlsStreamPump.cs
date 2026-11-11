@@ -1,4 +1,4 @@
-// SharpDTLS
+﻿// SharpDTLS
 // Copyright (C) 2026 Lukas Volf
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -63,8 +63,13 @@ namespace SharpDTLS
             try
             {
                 int read;
-                while ((ownsStream || !active().IsClosed) && (read = await stream.ReadAsync(buffer).ConfigureAwait(false)) > 0)
+                while (true)
                 {
+                    // A reader that holds as much as it takes stops the reading, so TCP pushes back on the peer.
+                    if (!active().IsClosed && active().ReceiveGate is { } gate)
+                        await gate().ConfigureAwait(false);
+                    if (!(ownsStream || !active().IsClosed) || (read = await stream.ReadAsync(buffer).ConfigureAwait(false)) <= 0)
+                        break;
                     if (!active().IsClosed)
                         process(buffer, read);
                 }

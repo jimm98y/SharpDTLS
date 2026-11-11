@@ -120,7 +120,8 @@ namespace SharpDTLS
 
         /// <summary>
         /// Optional server certificate validation. Return false to abort with bad_certificate.
-        /// When null, any certificate is accepted (only proof of key possession is checked).
+        /// When null, the chain is validated against the platform's trust store for serverAuth and matched against
+        /// ServerName (see <see cref="CertificateValidator"/>); set (c, chain) => true to accept any certificate.
         /// </summary>
         public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ServerCertificateValidator
         {
@@ -189,7 +190,7 @@ namespace SharpDTLS
 
         /// <summary>
         /// Checks the server's raw public key (DER SubjectPublicKeyInfo), e.g. against a pinned key; false aborts with
-        /// bad_certificate. When null, any key is accepted (only proof of possession is checked).
+        /// bad_certificate. When null, a raw public key is refused.
         /// </summary>
         public Func<byte[], bool> ServerRawPublicKeyValidator
         {

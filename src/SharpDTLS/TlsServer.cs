@@ -1,4 +1,4 @@
-// SharpDTLS
+﻿// SharpDTLS
 // Copyright (C) 2026 Lukas Volf
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -26,6 +26,8 @@ using SharpDTLS.Protocol12.TLS12;
 using SharpDTLS.Protocol13;
 using SharpDTLS.Protocol13.TLS13;
 using System;
+using System.Diagnostics;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -56,6 +58,8 @@ namespace SharpDTLS
     public class TlsServer : TlsServerBase, IDisposable
     {
         private TcpListener _listener;
+        private int _pendingHandshakes;
+        private readonly ConcurrentDictionary<TlsConnectionBase, TaskCompletionSource<bool>> _handshakes = new();
 
         public TlsServer()
             : this(Dtls13CryptoUtils.GenerateSelfSignedCertificate())
@@ -65,8 +69,8 @@ namespace SharpDTLS
         public TlsServer(AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
             : base(new Tls12Server(keyPair, certificate), new Tls13Server(keyPair, certificate))
         {
-            Tls12.HandshakeFinished += (_, c) => HandshakeFinished?.Invoke(this, c);
-            Tls13.HandshakeFinished += (_, c) => HandshakeFinished?.Invoke(this, c);
+            Tls12.HandshakeFinished += (_, c) => OnHandshakeFinished(c);
+            Tls13.HandshakeFinished += (_, c) => OnHandshakeFinished(c);
             Tls12.ApplicationDataReceived += (_, e) => ApplicationDataReceived?.Invoke(this, new TlsDataReceivedEventArgs(e.Connection, e.Data));
             Tls13.ApplicationDataReceived += (_, e) => ApplicationDataReceived?.Invoke(this, new TlsDataReceivedEventArgs(e.Connection, e.Data));
             Tls12.ConnectionClosed += (_, c) => ConnectionClosed?.Invoke(this, c);
@@ -89,6 +93,18 @@ namespace SharpDTLS
 
         /// <summary>The oldest version accepted; TLS 1.2 by default (RFC 8996 deprecates 1.0 and 1.1).</summary>
         public ushort MinimumVersion { get => Tls12.MinimumVersion; set => Tls12.MinimumVersion = value; }
+
+        /// <summary>
+        /// How long a client accepted by <see cref="Start"/> has to complete its handshake, from its connection on; it
+        /// is closed past it. 30 s by default.
+        /// </summary>
+        public TimeSpan HandshakeTimeout { get; set; } = TimeSpan.FromSeconds(30);
+
+        /// <summary>
+        /// The most clients accepted by <see cref="Start"/> that may be in their handshake at once; a new connection
+        /// past it is closed. 1,000 by default; 0 for no limit.
+        /// </summary>
+        public int MaxPendingHandshakes { get; set; } = 1000;
 
         /// <summary>The newest version offered: TLS 1.3 (the default) or TLS 1.2 to turn TLS 1.3 off.</summary>
         public ushort MaximumVersion { get; set; } = TlsVersion.Tls13;
@@ -130,8 +146,14 @@ namespace SharpDTLS
                     while (true)
                     {
                         var client = await listener.AcceptTcpClientAsync().ConfigureAwait(false);
+                        if (MaxPendingHandshakes > 0 && Volatile.Read(ref _pendingHandshakes) >= MaxPendingHandshakes)
+                        {
+                            client.Dispose();
+                            continue;
+                        }
                         client.NoDelay = true;
-                        _ = AcceptAsync(client.GetStream(), client.Client.RemoteEndPoint);
+                        Interlocked.Increment(ref _pendingHandshakes);
+                        _ = ServeAsync(client);
                     }
                 }
                 catch (Exception ex) when (ex is SocketException or ObjectDisposedException)
@@ -139,6 +161,56 @@ namespace SharpDTLS
                     // stopped
                 }
             });
+        }
+
+        private void OnHandshakeFinished(TlsConnectionBase connection)
+        {
+            if (_handshakes.TryGetValue(connection, out var finished))
+                finished.TrySetResult(true);
+            HandshakeFinished?.Invoke(this, connection);
+        }
+
+        /// <summary>Serves a client of <see cref="Start"/>: closed unless its handshake completes in HandshakeTimeout.</summary>
+        private async Task ServeAsync(TcpClient client)
+        {
+            var deadline = Stopwatch.StartNew();
+            TimeSpan timeout = HandshakeTimeout;
+            TlsConnectionBase connection = null;
+            try
+            {
+                // Disposing the client is what ends a pending read on every framework.
+                using (var expired = new CancellationTokenSource(timeout))
+                using (expired.Token.Register(client.Dispose))
+                    connection = await AcceptAsync(client.GetStream(), client.Client.RemoteEndPoint, expired.Token).ConfigureAwait(false);
+                if (connection == null)
+                    return;
+
+                var finished = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                _handshakes[connection] = finished;
+                connection.Closed += (_, _) => finished.TrySetResult(false);
+                if (connection.IsHandshakeComplete || connection.IsClosed)
+                    finished.TrySetResult(connection.IsHandshakeComplete);
+
+                TimeSpan left = timeout - deadline.Elapsed;
+                if (left < TimeSpan.Zero)
+                    left = TimeSpan.Zero;
+                if (await Task.WhenAny(finished.Task, Task.Delay(left)).ConfigureAwait(false) != finished.Task || !finished.Task.Result)
+                {
+                    connection.Close();
+                    client.Dispose();
+                }
+            }
+            catch (Exception)
+            {
+                connection?.Close();
+                client.Dispose();
+            }
+            finally
+            {
+                if (connection != null)
+                    _handshakes.TryRemove(connection, out _);
+                Interlocked.Decrement(ref _pendingHandshakes);
+            }
         }
 
         /// <summary>

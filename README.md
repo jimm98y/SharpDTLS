@@ -34,12 +34,14 @@ server.ApplicationDataReceived += (sender, e) =>
     e.Connection.SendApplicationData(Encoding.UTF8.GetBytes("Hello from server!"));
 };
 ```
-To use your own certificate, pass it with its key pair: `new DtlsServer(serverTransport, keyPair, certificate)`.
+To use your own certificate, pass it with its key pair: `new DtlsServer(serverTransport, keyPair, certificate)`. A server keeps at most `MaxConnections` connections (10,000 by default) and creates one only for a client that passed the cookie exchange.
 
 Create the client and start the handshake. The handshake runs in the background and `HandshakeFinished` is raised when it completes, or `Failed` when it does not:
 ```cs
 var clientTransport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, 8888));
 var client = new DtlsClient(clientTransport);
+// the server's certificate is self-signed: accept it here (pin its fingerprint in real use, see Certificate validation)
+client.ServerCertificateValidator = (certificate, chain) => true;
 client.HandshakeFinished += (sender, e) =>
 {
     Console.WriteLine($"Handshake finished: version 0x{client.NegotiatedVersion:X4}");
@@ -58,20 +60,21 @@ using var tcp = new TcpClient();
 await tcp.ConnectAsync("example.com", 443);
 using var tls = await TlsStream.ConnectAsync(tcp.GetStream(), client =>
 {
-    client.ServerName = "example.com";
-    client.ServerCertificateValidator = new CertificateValidator().ForServer("example.com");
+    client.ServerName = "example.com"; // the chain is validated, and must match this name
 });
 await tls.WriteAsync(request, 0, request.Length);
 int read = await tls.ReadAsync(buffer, 0, buffer.Length);
 ```
-On the server side, `TlsStream.AcceptAsync(new TlsServer(), stream)` serves a client connected on the stream.
+On the server side, `TlsStream.AcceptAsync(new TlsServer(), stream)` serves a client connected on the stream. A `TlsServer` listening with `Start` closes a client that has not completed its handshake within `HandshakeTimeout` (30 s), and accepts at most `MaxPendingHandshakes` (1,000) at once.
 
 ## Certificate validation
-By default, a client accepts any certificate from the server and only checks that the server holds its private key. To validate the chain against the operating system's trust store and check the host name, set `ServerCertificateValidator`:
+By default, a client validates the server's chain against the operating system's trust store and checks it against `ServerName`; a server that asks for a client certificate validates its chain the same way. A raw public key is refused unless `ServerRawPublicKeyValidator` (or `ClientRawPublicKeyValidator`) accepts it.
+
+To validate otherwise, set `ServerCertificateValidator`. To trust only your own CA, pass its certificate:
 ```cs
-client.ServerCertificateValidator = new CertificateValidator().ForServer("example.com");
+client.ServerCertificateValidator = new CertificateValidator(new[] { caCertificate }).ForServer("example.com");
 ```
-To trust only your own CA, pass its certificate: `new CertificateValidator(new[] { caCertificate })`. A server checks client certificates the same way with `ForClient()`.
+A server checks client certificates the same way with `ClientCertificateValidator` and `ForClient()`. For a self-signed certificate whose fingerprint is known, as in WebRTC, compare the fingerprint in the validator; `(certificate, chain) => true` accepts any certificate, checking only that the peer holds its private key.
 
 `CertificateValidator` is the default implementation of `ICertificateValidator`. To validate some other way, implement `Validate`, which throws a `DtlsException` with the alert to send when the chain is not acceptable, and plug it in the same way:
 ```cs

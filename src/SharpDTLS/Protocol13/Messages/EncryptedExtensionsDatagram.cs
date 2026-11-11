@@ -67,6 +67,7 @@ namespace SharpDTLS.Protocol13.Messages
             if (bytes.Length < extensionsEnd) throw new ArgumentException("Buffer truncated in extensions area.");
 
             Extensions = new List<ITlsExtension>();
+            var seenExtensions = new HashSet<ushort>();
 
             int pos = extensionsStart;
             while (pos < extensionsEnd)
@@ -74,6 +75,9 @@ namespace SharpDTLS.Protocol13.Messages
                 if (pos + 4 > bytes.Length) throw new ArgumentException("Truncated extension header.");
                 ushort extType = (ushort)((bytes[pos] << 8) | bytes[pos + 1]);
                 ushort extLen = (ushort)((bytes[pos + 2] << 8) | bytes[pos + 3]);
+                // RFC 8446 §4.2: at most one extension of each type.
+                if (!seenExtensions.Add(extType))
+                    throw new DtlsException(AlertDescription.IllegalParameter, $"Duplicate extension 0x{extType:X4}.");
 
                 ITlsExtension matching = extType switch
                 {

@@ -1,4 +1,4 @@
-// SharpDTLS
+﻿// SharpDTLS
 // Copyright (C) 2026 Lukas Volf
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -111,7 +111,8 @@ namespace SharpDTLS.Protocol12
 
         /// <summary>
         /// Optional server certificate validation. Return false to abort with bad_certificate.
-        /// When null, any certificate is accepted (only proof of key possession is checked).
+        /// When null, the chain is validated against the platform's trust store for serverAuth and matched against
+        /// ServerName (see <see cref="CertificateValidator"/>); set (c, chain) => true to accept any certificate.
         /// </summary>
         public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ServerCertificateValidator { get; set; }
 
@@ -135,9 +136,14 @@ namespace SharpDTLS.Protocol12
 
         /// <summary>
         /// Checks the server's raw public key (DER SubjectPublicKeyInfo), e.g. against a pinned key; false aborts with
-        /// bad_certificate. When null, any key is accepted (only proof of possession is checked).
+        /// bad_certificate. When null, a raw public key is refused.
         /// </summary>
         public Func<byte[], bool> ServerRawPublicKeyValidator { get; set; }
+
+        // Without a ServerCertificateValidator, the chain is validated against the platform's trust store for
+        // serverAuth and matched against ServerName: accepting any certificate takes an explicit (c, chain) => true.
+        private Func<X509Certificate, IReadOnlyList<byte[]>, bool> DefaultServerCertificateValidator()
+            => CertificateValidatorDefaults.Server(ServerName);
 
         /// <summary>The server's raw public key (DER SubjectPublicKeyInfo), when it authenticated with one.</summary>
         public byte[] ServerRawPublicKey { get; private set; }
@@ -250,7 +256,7 @@ namespace SharpDTLS.Protocol12
         public bool IsFallback { get; set; }
 
         /// <summary>Smallest finite-field Diffie-Hellman prime, or SRP group modulus, accepted from a server.</summary>
-        public int MinimumDhPrimeBits { get; set; } = 1024;
+        public int MinimumDhPrimeBits { get; set; } = 2048;
 
         public bool ExtendedMasterSecretNegotiated => UseExtendedMasterSecret;
         public bool EncryptThenMacNegotiated => UseEncryptThenMac;
@@ -629,7 +635,7 @@ namespace SharpDTLS.Protocol12
             _serverPublicKey = _serverCertificate.GetPublicKey();
             if (!KeyMatches(CipherSuite.ServerCertificateType, _serverPublicKey))
                 throw new DtlsException(AlertDescription.UnsupportedCertificate, "Server certificate key does not match the cipher suite.");
-            if (ServerCertificateValidator != null && !ServerCertificateValidator(_serverCertificate, certificate.Chain))
+            if (!(ServerCertificateValidator ?? DefaultServerCertificateValidator())(_serverCertificate, certificate.Chain))
                 throw new DtlsException(AlertDescription.BadCertificate, "Server certificate was rejected.");
             _serverChain = certificate.Chain;
 
@@ -644,7 +650,7 @@ namespace SharpDTLS.Protocol12
             _serverPublicKey = RawPublicKeys.Decode(spki);
             if (!KeyMatches(CipherSuite.ServerCertificateType, _serverPublicKey) || CipherSuite.IsStaticKeyAgreement)
                 throw new DtlsException(AlertDescription.UnsupportedCertificate, "Server key does not match the cipher suite.");
-            if (ServerRawPublicKeyValidator != null && !ServerRawPublicKeyValidator(spki))
+            if (!CertificateValidatorDefaults.RawPublicKey(ServerRawPublicKeyValidator, spki))
                 throw new DtlsException(AlertDescription.BadCertificate, "Server raw public key was rejected.");
             ServerRawPublicKey = spki;
 

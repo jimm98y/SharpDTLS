@@ -4,7 +4,8 @@ using SharpDTLS;
 
 using var tcp = new TcpClient();
 await tcp.ConnectAsync("127.0.0.1", 4433);
-using var tls = await TlsStream.ConnectAsync(tcp.GetStream()); // accepts any certificate
+// the sample server's certificate is self-signed: accept any (without a validator the chain is validated)
+using var tls = await TlsStream.ConnectAsync(tcp.GetStream(), client => client.ServerCertificateValidator = (certificate, chain) => true);
 await tls.WriteAsync(Encoding.UTF8.GetBytes("Hello over TLS!"));
 var buffer = new byte[4096];
 int read = await tls.ReadAsync(buffer);

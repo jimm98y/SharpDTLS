@@ -1,4 +1,4 @@
-// SharpDTLS
+﻿// SharpDTLS
 // Copyright (C) 2026 Lukas Volf
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -219,10 +219,12 @@ namespace SharpDTLS.Protocol12
 
         public static bool ValidateCookie(DateTime timestamp, string clientIP, int clientPort, byte[] cookie)
         {
+            if (cookie == null)
+                return false;
             byte[] expected = CreateCookie(timestamp, clientIP, clientPort);
-            if (expected.SequenceEqual(cookie)) return true;
+            if (System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(expected, cookie)) return true;
             expected = CreateCookie(timestamp, clientIP, clientPort, -1);
-            return expected.SequenceEqual(cookie);
+            return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(expected, cookie);
         }
 
         public static (X25519PrivateKeyParameters privateX25519, X25519PublicKeyParameters publicX25519) CreateX25519KeyPair()

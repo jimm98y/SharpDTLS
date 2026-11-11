@@ -1,4 +1,4 @@
-// SharpDTLS
+﻿// SharpDTLS
 // Copyright (C) 2026 Lukas Volf
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -77,6 +77,11 @@ namespace SharpDTLS.Protocol12
 
         public IReadOnlyCollection<Tls12ServerConnection> Connections => _connections.Values.ToList();
 
+        internal int ConnectionCount => _connections.Count;
+
+        /// <summary>Whether a client past its cookie exchange may have a connection (see DtlsServer.MaxConnections).</summary>
+        internal Func<bool> AcceptsConnection { get; set; }
+
         public Tls12ServerConnection GetConnection(EndPoint endpoint)
             => _connections.TryGetValue(endpoint.ToString(), out var connection) ? connection : null;
 
@@ -153,6 +158,9 @@ namespace SharpDTLS.Protocol12
         private void HandleClientHello(EndPoint endpoint, byte[] record)
         {
             if (!CheckCookie(endpoint, record, out ClientHelloMessage clientHello, out byte[] message, out ulong recordSeq))
+                return;
+
+            if (AcceptsConnection != null && !AcceptsConnection())
                 return;
 
             // Replies go to the connection's current address, which moves with connection IDs.

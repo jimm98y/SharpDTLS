@@ -1,4 +1,4 @@
-// SharpDTLS
+﻿// SharpDTLS
 // Copyright (C) 2026 Lukas Volf
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -36,8 +36,8 @@ namespace SharpDTLS.Protocol12
         {
             private const int MaxCiphertextLength = 16384 + 2048;
 
-            private readonly List<byte> _input = new();
-            private readonly List<byte> _handshake = new();
+            private readonly ByteQueue _input = new();
+            private readonly ByteQueue _handshake = new();
 
             private IRecordCipher _readCipher, _writeCipher, _pendingReadCipher, _pendingWriteCipher;
             private ulong _readSequence, _writeSequence;
@@ -65,8 +65,7 @@ namespace SharpDTLS.Protocol12
 
             public override void ProcessInput(byte[] data, int offset, int count)
             {
-                for (int i = 0; i < count; i++)
-                    _input.Add(data[offset + i]);
+                _input.AddRange(data, offset, count);
 
                 while (_input.Count >= 5 && !C.IsClosed)
                 {
@@ -75,7 +74,7 @@ namespace SharpDTLS.Protocol12
                         throw new DtlsException(AlertDescription.RecordOverflow, $"Record of {length} bytes.");
                     if (_input.Count < 5 + length)
                         return;
-                    byte[] record = _input.GetRange(0, 5 + length).ToArray();
+                    byte[] record = _input.GetRange(0, 5 + length);
                     _input.RemoveRange(0, 5 + length);
                     ProcessRecord(record);
                 }
@@ -152,7 +151,7 @@ namespace SharpDTLS.Protocol12
                         throw new DtlsException(AlertDescription.HandshakeFailure, $"Handshake message of {length} bytes.");
                     if (_handshake.Count < 4 + length)
                         return;
-                    byte[] message = _handshake.GetRange(0, 4 + length).ToArray();
+                    byte[] message = _handshake.GetRange(0, 4 + length);
                     _handshake.RemoveRange(0, 4 + length);
                     C.NextReceiveMessageSeq++;
                     C.InspectReceived(message, 4);

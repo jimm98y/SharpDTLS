@@ -1,4 +1,4 @@
-// SharpDTLS
+﻿// SharpDTLS
 // Copyright (C) 2026 Lukas Volf
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -66,7 +66,10 @@ namespace SharpDTLS.Protocol12
         /// The schemes to offer in signature_algorithms: <see cref="Supported"/> without DSA, which RFC 9846 §4.3.3
         /// forbids offering, unless <paramref name="dsa"/> because DSA cipher suites were enabled explicitly.
         /// </summary>
-        public static ushort[] Offered(bool dsa) => dsa ? Supported : WithoutDsa;
+        public static ushort[] Offered(bool dsa) => dsa ? Supported : WithoutDsaOrSha1;
+
+        // RFC 9155: SHA-1 is not offered in signature_algorithms.
+        private static readonly ushort[] WithoutDsaOrSha1 = WithoutDsa.Where(s => s is not (EcdsaSha1 or RsaPkcs1Sha1)).ToArray();
 
         public static ushort Scheme(byte hashAlgorithm, byte signatureAlgorithm) => (ushort)((hashAlgorithm << 8) | signatureAlgorithm);
 

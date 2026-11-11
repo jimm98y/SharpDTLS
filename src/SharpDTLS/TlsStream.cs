@@ -1,4 +1,4 @@
-// SharpDTLS
+﻿// SharpDTLS
 // Copyright (C) 2026 Lukas Volf
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -44,8 +44,17 @@ namespace SharpDTLS
         private byte[] _current;
         private int _currentOffset;
         private bool _ended;
+        private bool _disposed;
         private Exception _error;
         private TaskCompletionSource<bool> _dataAvailable = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private TaskCompletionSource<bool> _roomAvailable;
+        private long _buffered;
+
+        /// <summary>
+        /// Received data held for reads past which the connection stops reading its stream, so a peer can't fill memory
+        /// while the application doesn't read.
+        /// </summary>
+        internal const int MaxBufferedBytes = 1 << 20;
 
         private TlsStream(Func<TlsConnectionBase> connection) => _connection = connection;
 
@@ -66,11 +75,12 @@ namespace SharpDTLS
             var stream = new TlsStream(() => client.Connection);
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.HandshakeFinished += (_, _) => done.TrySetResult(true);
-            client.ApplicationDataReceived += (_, data) => stream.Signal(() => stream._received.Enqueue(data));
+            client.ApplicationDataReceived += (_, data) => stream.Signal(() => stream.Received(data));
             client.Closed += (_, _) => { stream.Signal(() => stream._ended = true); done.TrySetException(new IOException("The connection closed during the TLS handshake.")); };
             client.Failed += (_, ex) => { stream.Signal(() => stream._error = ex); done.TrySetException(new IOException("The TLS handshake failed: " + ex.Message, ex)); };
             client.BeginHandshake();
             await done.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            client.Connection.ReceiveGate = stream.WaitForRoomAsync;
             return stream;
         }
 
@@ -95,13 +105,43 @@ namespace SharpDTLS
                 tls12.HandshakeFinished += finished;
             else
                 ((Tls13ServerConnection)connection).HandshakeFinished += finished;
-            connection.ApplicationDataReceived += (_, data) => stream.Signal(() => stream._received.Enqueue(data));
+            connection.ApplicationDataReceived += (_, data) => stream.Signal(() => stream.Received(data));
             connection.Closed += (_, _) => { stream.Signal(() => stream._ended = true); done.TrySetException(new IOException("The connection closed during the TLS handshake.")); };
             connection.Failed += (_, ex) => { stream.Signal(() => stream._error = ex); done.TrySetException(new IOException("The TLS handshake failed: " + ex.Message, ex)); };
+            connection.ReceiveGate = stream.WaitForRoomAsync;
             if (connection.IsHandshakeComplete)
                 done.TrySetResult(true);
             await done.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
             return stream;
+        }
+
+        private void Received(byte[] data)
+        {
+            _received.Enqueue(data);
+            _buffered += data.Length;
+        }
+
+        /// <summary>Completes once less than <see cref="MaxBufferedBytes"/> wait to be read, or the stream is done.</summary>
+        private Task WaitForRoomAsync()
+        {
+            lock (_sync)
+            {
+                if (_buffered < MaxBufferedBytes || _ended || _error != null || _disposed)
+                    return Task.CompletedTask;
+                _roomAvailable ??= new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                return _roomAvailable.Task;
+            }
+        }
+
+        private void ReleaseRoom()
+        {
+            TaskCompletionSource<bool> waiting;
+            lock (_sync)
+            {
+                waiting = _roomAvailable;
+                _roomAvailable = null;
+            }
+            waiting?.TrySetResult(true);
         }
 
         private void Signal(Action update)
@@ -113,6 +153,8 @@ namespace SharpDTLS
                 waiting = _dataAvailable;
             }
             waiting.TrySetResult(true);
+            if (_ended || _error != null)
+                ReleaseRoom();
         }
 
         public override bool CanRead => true;
@@ -141,7 +183,16 @@ namespace SharpDTLS
                 lock (_sync)
                 {
                     if (_current == null && _received.Count > 0)
+                    {
                         (_current, _currentOffset) = (_received.Dequeue(), 0);
+                        _buffered -= _current.Length;
+                        if (_buffered < MaxBufferedBytes && _roomAvailable != null)
+                        {
+                            var room = _roomAvailable;
+                            _roomAvailable = null;
+                            room.TrySetResult(true); // continuations run asynchronously, not under the lock
+                        }
+                    }
                     if (_current != null)
                     {
                         int n = Math.Min(buffer.Length, _current.Length - _currentOffset);
@@ -208,7 +259,12 @@ namespace SharpDTLS
         protected override void Dispose(bool disposing)
         {
             if (disposing)
+            {
+                lock (_sync)
+                    _disposed = true;
+                ReleaseRoom();
                 Connection?.Close();
+            }
             base.Dispose(disposing);
         }
     }

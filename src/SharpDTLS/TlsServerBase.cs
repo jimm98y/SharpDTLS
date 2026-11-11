@@ -70,7 +70,10 @@ namespace SharpDTLS
             set { Engine12.RequireClientCertificate = value; Engine13.RequireClientCertificate = value; }
         }
 
-        /// <summary>Optional client certificate validation. Return false to abort with bad_certificate.</summary>
+        /// <summary>
+        /// Client certificate validation; return false to abort with bad_certificate. When null, the chain is validated
+        /// against the platform's trust store for clientAuth; set (c, chain) => true to accept any certificate.
+        /// </summary>
         public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ClientCertificateValidator
         {
             get => Engine13.ClientCertificateValidator;
@@ -146,7 +149,7 @@ namespace SharpDTLS
             set { Engine12.ClientCertificateAuthorities = value; Engine13.ClientCertificateAuthorities = value; }
         }
 
-        /// <summary>Checks a client's raw public key (DER SubjectPublicKeyInfo); false aborts with bad_certificate.</summary>
+        /// <summary>Checks a client's raw public key (DER SubjectPublicKeyInfo); false aborts with bad_certificate. When null, one is refused.</summary>
         public Func<byte[], bool> ClientRawPublicKeyValidator
         {
             get => Engine13.ClientRawPublicKeyValidator;

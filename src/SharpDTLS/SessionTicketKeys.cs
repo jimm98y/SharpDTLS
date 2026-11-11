@@ -1,4 +1,4 @@
-// SharpDTLS
+﻿// SharpDTLS
 // Copyright (C) 2026 Lukas Volf
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -33,13 +33,14 @@ namespace SharpDTLS
     /// Keys that protect session tickets (RFC 5077 for DTLS 1.0/1.2, RFC 8446 §4.6.1 for DTLS 1.3):
     /// key_name(16) || nonce(12) || AES-256-GCM(state), with key_name as additional data. Servers that share keys can
     /// resume each other's sessions. <see cref="Rotate"/> starts a new key and keeps the previous one for decryption;
-    /// DTLS 1.0/1.2 tickets under it are renewed when used.
+    /// DTLS 1.0/1.2 tickets under it are renewed when used. Keys rotate by themselves every <see cref="RotationInterval"/>.
     /// </summary>
     public sealed class SessionTicketKeys
     {
         private readonly object _lock = new();
         private (byte[] Name, byte[] Key) _current = NewKey();
         private (byte[] Name, byte[] Key)? _previous;
+        private DateTime _currentSince = DateTime.UtcNow;
 
         /// <summary>
         /// How long a ticket can be used: from the full handshake for DTLS 1.0/1.2, from issue for DTLS 1.3 (at most
@@ -47,13 +48,25 @@ namespace SharpDTLS
         /// </summary>
         public TimeSpan Lifetime { get; set; } = TimeSpan.FromHours(2);
 
+        /// <summary>
+        /// How long a key seals new tickets before <see cref="Rotate"/> runs by itself, so that one key disclosed opens
+        /// the tickets of a bounded time; a ticket stays readable for one more interval. <see cref="Lifetime"/> when
+        /// null (the default); <see cref="TimeSpan.Zero"/> to rotate only when Rotate is called, as servers that share
+        /// keys do, rotating them together.
+        /// </summary>
+        public TimeSpan? RotationInterval { get; set; }
+
         public void Rotate()
         {
             lock (_lock)
-            {
-                _previous = _current;
-                _current = NewKey();
-            }
+                RotateLocked();
+        }
+
+        private void RotateLocked()
+        {
+            _previous = _current;
+            _current = NewKey();
+            _currentSince = DateTime.UtcNow;
         }
 
         private static (byte[], byte[]) NewKey() => (RandomNumberGenerator.GetBytes(16), RandomNumberGenerator.GetBytes(32));
@@ -62,7 +75,12 @@ namespace SharpDTLS
         {
             byte[] name, key;
             lock (_lock)
+            {
+                TimeSpan interval = RotationInterval ?? Lifetime;
+                if (interval > TimeSpan.Zero && DateTime.UtcNow - _currentSince >= interval)
+                    RotateLocked();
                 (name, key) = _current;
+            }
             byte[] nonce = RandomNumberGenerator.GetBytes(12);
             var gcm = new GcmBlockCipher(new AesEngine());
             gcm.Init(true, new AeadParameters(new KeyParameter(key), 128, nonce, name));

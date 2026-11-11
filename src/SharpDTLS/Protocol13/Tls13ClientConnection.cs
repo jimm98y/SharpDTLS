@@ -1,4 +1,4 @@
-// SharpDTLS
+﻿// SharpDTLS
 // Copyright (C) 2026 Lukas Volf
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -214,7 +214,8 @@ namespace SharpDTLS.Protocol13
 
         /// <summary>
         /// Optional server certificate validation. Return false to abort with bad_certificate.
-        /// When null, any certificate is accepted (only proof of key possession is checked).
+        /// When null, the chain is validated against the platform's trust store for serverAuth and matched against
+        /// ServerName (see <see cref="CertificateValidator"/>); set (c, chain) => true to accept any certificate.
         /// </summary>
         public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ServerCertificateValidator { get; set; }
 
@@ -233,9 +234,14 @@ namespace SharpDTLS.Protocol13
 
         /// <summary>
         /// Checks the server's raw public key (DER SubjectPublicKeyInfo), e.g. against a pinned key; false aborts with
-        /// bad_certificate. When null, any key is accepted (only proof of possession is checked).
+        /// bad_certificate. When null, a raw public key is refused.
         /// </summary>
         public Func<byte[], bool> ServerRawPublicKeyValidator { get; set; }
+
+        // Without a ServerCertificateValidator, the chain is validated against the platform's trust store for
+        // serverAuth and matched against ServerName: accepting any certificate takes an explicit (c, chain) => true.
+        private Func<X509Certificate, IReadOnlyList<byte[]>, bool> DefaultServerCertificateValidator()
+            => CertificateValidatorDefaults.Server(ServerName);
 
         /// <summary>The server's raw public key (DER SubjectPublicKeyInfo), when it authenticated with one.</summary>
         public byte[] ServerRawPublicKey { get; private set; }
@@ -850,7 +856,7 @@ namespace SharpDTLS.Protocol13
                     throw new DtlsException(AlertDescription.UnsupportedExtension, "OCSP staple for a raw public key.");
                 byte[] spki = certificate.Certificate;
                 _serverPublicKey = RawPublicKeys.Decode(spki);
-                if (ServerRawPublicKeyValidator != null && !ServerRawPublicKeyValidator(spki))
+                if (!CertificateValidatorDefaults.RawPublicKey(ServerRawPublicKeyValidator, spki))
                     throw new DtlsException(AlertDescription.BadCertificate, "Server raw public key was rejected.");
                 ServerRawPublicKey = spki;
                 return;
@@ -872,7 +878,7 @@ namespace SharpDTLS.Protocol13
             _serverPublicKey = _serverCertificate.GetPublicKey();
 
             Session.PeerCertificate = certificate.Certificate;
-            if (ServerCertificateValidator != null && !ServerCertificateValidator(_serverCertificate, certificate.CertificateChain))
+            if (!(ServerCertificateValidator ?? DefaultServerCertificateValidator())(_serverCertificate, certificate.CertificateChain))
                 throw new DtlsException(AlertDescription.BadCertificate, "Server certificate was rejected.");
 
             // RFC 8446 §4.4.2: CertificateEntry extensions must answer ClientHello extensions.

@@ -1,4 +1,4 @@
-// SharpDTLS
+﻿// SharpDTLS
 // Copyright (C) 2026 Lukas Volf
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -355,9 +355,11 @@ namespace SharpDTLS.Protocol12
                 return;
 
             var serverKey = _keyPair?.Private;
-            // Without explicit configuration weak suites (export, DES, NULL, anonymous...) are never selected.
+            // Without explicit configuration weak suites (export, DES, NULL, anonymous...) are never selected, nor legacy
+            // ones (CBC, static RSA) unless a version below 1.2 is allowed.
             var preference = _settings.CipherSuites
-                ?? SharpDTLS.CipherSuites.All.Where(s => s.Security != CipherSuiteSecurity.Weak).Select(s => s.Id).ToList();
+                ?? SharpDTLS.CipherSuites.All.Where(s => SharpDTLS.CipherSuites.IsDefault(s, version) || SharpDTLS.CipherSuites.IsDefault(s, MinimumVersion))
+                    .Select(s => s.Id).ToList();
             CipherSuite = preference
                 .Where(id => ch.CipherSuites.Contains(id))
                 .Select(id => SharpDTLS.CipherSuites.TryGet(id, out var s) ? s : null)
@@ -654,7 +656,7 @@ namespace SharpDTLS.Protocol12
                 if (!Tls12ClientConnection.CertificateTypeAccepted(_certificateRequest, _clientCertificate.GetPublicKey())
                     && !(CipherSuite.IsStaticKeyAgreement && Tls12ClientConnection.FixedTypeAccepted(_certificateRequest, _clientCertificate)))
                     throw new DtlsException(AlertDescription.UnsupportedCertificate, "Client certificate type was not requested.");
-                if (_settings.ClientCertificateValidator != null && !_settings.ClientCertificateValidator(_clientCertificate, certificate.Chain))
+                if (!(_settings.ClientCertificateValidator ?? CertificateValidatorDefaults.Client)(_clientCertificate, certificate.Chain))
                     throw new DtlsException(AlertDescription.BadCertificate, "Client certificate was rejected.");
                 _clientPublicKey = _clientCertificate.GetPublicKey();
             }
@@ -676,7 +678,7 @@ namespace SharpDTLS.Protocol12
                 var key = RawPublicKeys.Decode(spki);
                 if (!Tls12ClientConnection.CertificateTypeAccepted(_certificateRequest, key))
                     throw new DtlsException(AlertDescription.UnsupportedCertificate, "Client key type was not requested.");
-                if (_settings.ClientRawPublicKeyValidator != null && !_settings.ClientRawPublicKeyValidator(spki))
+                if (!CertificateValidatorDefaults.RawPublicKey(_settings.ClientRawPublicKeyValidator, spki))
                     throw new DtlsException(AlertDescription.BadCertificate, "Client raw public key was rejected.");
                 (_clientPublicKey, ClientRawPublicKey) = (key, spki);
             }

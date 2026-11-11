@@ -1,4 +1,4 @@
-// SharpDTLS
+﻿// SharpDTLS
 // Copyright (C) 2026 Lukas Volf
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -600,7 +600,7 @@ namespace SharpDTLS.Protocol13
                             throw new DtlsException(AlertDescription.DecodeError, "A raw public key Certificate has one entry.");
                         byte[] spki = certificate.Certificate;
                         _clientPublicKey = RawPublicKeys.Decode(spki);
-                        if (_server.ClientRawPublicKeyValidator != null && !_server.ClientRawPublicKeyValidator(spki))
+                        if (!CertificateValidatorDefaults.RawPublicKey(_server.ClientRawPublicKeyValidator, spki))
                             throw new DtlsException(AlertDescription.BadCertificate, "Client raw public key was rejected.");
                         ClientRawPublicKey = spki;
                         // Nothing to resume with: a later resumption that requires a certificate does a full handshake.
@@ -620,7 +620,7 @@ namespace SharpDTLS.Protocol13
                     }
                     if (_clientCertificate == null)
                         throw new DtlsException(AlertDescription.BadCertificate, "Client certificate could not be parsed.");
-                    if (_server.ClientCertificateValidator != null && !_server.ClientCertificateValidator(_clientCertificate, certificate.CertificateChain))
+                    if (!(_server.ClientCertificateValidator ?? CertificateValidatorDefaults.Client)(_clientCertificate, certificate.CertificateChain))
                         throw new DtlsException(AlertDescription.BadCertificate, "Client certificate was rejected.");
                     _clientPublicKey = _clientCertificate.GetPublicKey();
 
@@ -813,7 +813,7 @@ namespace SharpDTLS.Protocol13
                         if (certificate.CertificateChain.Count != 1)
                             throw new DtlsException(AlertDescription.DecodeError, "A raw public key Certificate has one entry.");
                         auth.PublicKey = RawPublicKeys.Decode(certificate.Certificate);
-                        if (_server.ClientRawPublicKeyValidator != null && !_server.ClientRawPublicKeyValidator(certificate.Certificate))
+                        if (!CertificateValidatorDefaults.RawPublicKey(_server.ClientRawPublicKeyValidator, certificate.Certificate))
                             throw new DtlsException(AlertDescription.BadCertificate, "Client raw public key was rejected.");
                         auth.RawPublicKey = certificate.Certificate;
                         auth.Stage = 1;
@@ -821,7 +821,7 @@ namespace SharpDTLS.Protocol13
                     else
                     {
                         auth.Certificate = SharpDTLS.Protocol12.Tls12ClientConnection.ParseCertificate(certificate.Certificate);
-                        if (_server.ClientCertificateValidator != null && !_server.ClientCertificateValidator(auth.Certificate, certificate.CertificateChain))
+                        if (!(_server.ClientCertificateValidator ?? CertificateValidatorDefaults.Client)(auth.Certificate, certificate.CertificateChain))
                             throw new DtlsException(AlertDescription.BadCertificate, "Client certificate was rejected.");
                         auth.PublicKey = auth.Certificate.GetPublicKey();
                         auth.Stage = 1;

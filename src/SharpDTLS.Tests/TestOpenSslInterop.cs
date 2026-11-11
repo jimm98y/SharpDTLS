@@ -269,6 +269,8 @@ namespace SharpDTLS.Tests
         [TestMethod]
         public void CbcSuites_BothDirections(string cipher, bool ecCertificate, bool encryptThenMac)
         {
+            static List<ushort> AllButWeak() // CBC is chosen only when configured
+                => SharpDTLS.CipherSuites.All.Where(s => s.Security != CipherSuiteSecurity.Weak && !s.IsStaticKeyAgreement).Select(s => s.Id).ToList();
             OpenSsl.RequireOpenSsl();
             string dir = OpenSsl.NewTempDirectory();
             var (kp, cert) = Credentials(ecCertificate);
@@ -281,7 +283,7 @@ namespace SharpDTLS.Tests
             {
                 Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), server.Output);
                 using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
-                var client = new Dtls12Client(transport);
+                var client = new Dtls12Client(transport) { CipherSuites = AllButWeak() };
                 var handshake = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                 client.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
                 client.Failed += (_, ex) => handshake.TrySetException(ex);
@@ -295,7 +297,7 @@ namespace SharpDTLS.Tests
 
             // OpenSSL client -> SharpDTLS server
             using var serverTransport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
-            var sharpServer = new Dtls12Server(serverTransport, kp, cert);
+            var sharpServer = new Dtls12Server(serverTransport, kp, cert) { CipherSuites = AllButWeak() };
             var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             sharpServer.ApplicationDataReceived += (_, e) => received.TrySetResult(Encoding.UTF8.GetString(e.Data));
             using var openSslClient = new OpenSslProcess($"s_client -dtls1_2 -connect 127.0.0.1:{serverTransport.LocalEndpoint.Port} -cipher {cipher}{etm} -quiet", dir);

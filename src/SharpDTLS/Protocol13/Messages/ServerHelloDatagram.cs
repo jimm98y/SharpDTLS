@@ -103,6 +103,8 @@ namespace SharpDTLS.Protocol13.Messages
 
             // Compression method - DTLS1.3 doesn't use compression
             byte compression = bytes[cipherOffset + 2];
+            if (compression != 0)
+                throw new DtlsException(AlertDescription.IllegalParameter, "A ServerHello compression method other than null.");
 
             // Extensions length
             int extLenOffset = cipherOffset + 3;
@@ -113,6 +115,7 @@ namespace SharpDTLS.Protocol13.Messages
             if (bytes.Length < extensionsEnd) throw new ArgumentException("Buffer truncated in extensions area.");
 
             Extensions = new List<ITlsExtension>();
+            var seenExtensions = new HashSet<ushort>();
 
             // Parse extensions
             int pos = extensionsStart;
@@ -121,6 +124,9 @@ namespace SharpDTLS.Protocol13.Messages
                 if (pos + 4 > bytes.Length) throw new ArgumentException("Truncated extension header.");
                 ushort extType = (ushort)((bytes[pos] << 8) | bytes[pos + 1]);
                 ushort extLen = (ushort)((bytes[pos + 2] << 8) | bytes[pos + 3]);
+                // RFC 8446 §4.2: at most one extension of each type.
+                if (!seenExtensions.Add(extType))
+                    throw new DtlsException(AlertDescription.IllegalParameter, $"Duplicate extension 0x{extType:X4}.");
 
                 // Try to find an existing extension instance (so we update it), otherwise create a new one.
                 ITlsExtension extensionInstance = extType switch

@@ -1,4 +1,4 @@
-// SharpDTLS
+﻿// SharpDTLS
 // Copyright (C) 2026 Lukas Volf
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -40,10 +40,13 @@ namespace SharpDTLS.Protocol13
         private const int MaxBufferedMessages = 16;
 
         private readonly HandshakeReassembler _reassembler = new HandshakeReassembler();
+        private readonly HandshakeReassembler _plaintextReassembler = new HandshakeReassembler();
+        private DateTime _lastPlaintextRetransmission = DateTime.MinValue;
         private readonly SortedDictionary<int, byte[]> _bufferedMessages = new SortedDictionary<int, byte[]>();
 
         // Records that carried handshake messages of the peer's current flight, to be ACKed.
         private readonly List<(ulong Epoch, ulong SequenceNumber)> _receivedHandshakeRecords = new();
+        private const int MaxAcknowledgedRecords = 64;
 
         // Record numbers of every transmission of the current flight, to match ACKs.
         private readonly List<(ulong Epoch, ulong SequenceNumber)> _flightRecords = new();
@@ -249,11 +252,23 @@ namespace SharpDTLS.Protocol13
         /// <summary>Called for a retransmitted epoch-0 handshake record while the handshake is in progress.</summary>
         protected virtual void OnDuplicatePlaintextHandshake(byte[] record) => RetransmitFlight();
 
+        // A retransmitted flight arrives as several records, and plaintext ones can be spoofed: answer at most one
+        // every 100 ms, so that records packed into a datagram are not each answered with a whole flight.
+        private void OnRetransmittedPlaintextHandshake(byte[] record)
+        {
+            var now = DateTime.UtcNow;
+            if (now - _lastPlaintextRetransmission < TimeSpan.FromMilliseconds(100))
+                return;
+            _lastPlaintextRetransmission = now;
+            OnDuplicatePlaintextHandshake(record);
+        }
+
         // ── TLS 1.3 stream record layer (RFC 8446 §5) ─────────────────────────────────────────
 
         private const int MaxTlsCiphertextLength = 16384 + 256;
-        private readonly List<byte> _tlsInput = new();
-        private readonly List<byte> _tlsHandshake = new();
+        private readonly ByteQueue _tlsInput = new();
+        private bool _compatibilityCcsReceived;
+        private readonly ByteQueue _tlsHandshake = new();
         private readonly Dictionary<Dtls13CryptoContext, ulong> _tlsReadSequence = new();
 
         /// <summary>
@@ -295,8 +310,7 @@ namespace SharpDTLS.Protocol13
         {
             if (IsClosed)
                 return;
-            for (int i = 0; i < count; i++)
-                _tlsInput.Add(data[offset + i]);
+            _tlsInput.AddRange(data, offset, count);
             while (_tlsInput.Count >= 5 && !IsClosed && !InputDetached)
             {
                 int length = (_tlsInput[3] << 8) | _tlsInput[4];
@@ -304,7 +318,7 @@ namespace SharpDTLS.Protocol13
                     throw new DtlsException(AlertDescription.RecordOverflow, $"Record of {length} bytes.");
                 if (_tlsInput.Count < 5 + length)
                     return;
-                byte[] record = _tlsInput.GetRange(0, 5 + length).ToArray();
+                byte[] record = _tlsInput.GetRange(0, 5 + length);
                 _tlsInput.RemoveRange(0, 5 + length);
                 ProcessTlsRecord(record);
             }
@@ -336,8 +350,10 @@ namespace SharpDTLS.Protocol13
             {
                 case 0x14:
                     // Middlebox compatibility (RFC 8446 §5, Appendix D.4): a single 0x01 before the handshake ends, ignored.
-                    if (fragment.Length != 1 || fragment[0] != 1 || IsHandshakeComplete)
+                    // RFC 8446 §5 / D.4: one compatibility change_cipher_spec, before the handshake completes.
+                    if (fragment.Length != 1 || fragment[0] != 1 || IsHandshakeComplete || _compatibilityCcsReceived)
                         throw new DtlsException(AlertDescription.UnexpectedMessage, "Unexpected change_cipher_spec.");
+                    _compatibilityCcsReceived = true;
                     return;
 
                 case 0x15:
@@ -364,7 +380,9 @@ namespace SharpDTLS.Protocol13
                         whole[3] = (byte)(message.Length >> 8);
                         whole[4] = (byte)message.Length;
                         message.CopyTo(whole, 5);
+                        var before = CurrentTlsReadKeys;
                         OnPlaintextHandshake(whole);
+                        CheckNoHandshakeSpansKeyChange(before);
                     }
                     return;
 
@@ -428,7 +446,9 @@ namespace SharpDTLS.Protocol13
                         dtlsForm[9] = message[1]; dtlsForm[10] = message[2]; dtlsForm[11] = message[3];
                         Buffer.BlockCopy(message, 4, dtlsForm, 12, length);
                         dtlsForm[^1] = 0x16;
+                        var before = CurrentTlsReadKeys;
                         DeliverHandshake(dtlsForm);
+                        CheckNoHandshakeSpansKeyChange(before);
                     }
                     break;
 
@@ -449,6 +469,15 @@ namespace SharpDTLS.Protocol13
             }
         }
 
+        private Dtls13CryptoContext CurrentTlsReadKeys => TlsReadKeysOverride ?? (Session.ReadKeys.Count > 0 ? Session.ReadKeys[Session.ReadKeys.Count - 1] : null);
+
+        // RFC 8446 §5.1: a message that changes the read keys ends its record; nothing may follow it under the old keys.
+        private void CheckNoHandshakeSpansKeyChange(Dtls13CryptoContext before)
+        {
+            if (!IsClosed && !InputDetached && _tlsHandshake.Count > 0 && CurrentTlsReadKeys != before)
+                throw new DtlsException(AlertDescription.UnexpectedMessage, "Handshake data after a key change in the same record.");
+        }
+
         /// <summary>The next complete handshake message (4-byte TLS header + body) from the buffer, or null.</summary>
         private byte[] TakeTlsHandshakeMessage()
         {
@@ -459,7 +488,7 @@ namespace SharpDTLS.Protocol13
                 throw new DtlsException(AlertDescription.HandshakeFailure, $"Handshake message of {length} bytes.");
             if (_tlsHandshake.Count < 4 + length)
                 return null;
-            byte[] message = _tlsHandshake.GetRange(0, 4 + length).ToArray();
+            byte[] message = _tlsHandshake.GetRange(0, 4 + length);
             _tlsHandshake.RemoveRange(0, 4 + length);
             return message;
         }
@@ -484,8 +513,28 @@ namespace SharpDTLS.Protocol13
                 case 0x16:
                     if (record.Length < 25)
                         throw new DtlsRecordDiscardedException("Truncated handshake record");
-                    if (_reassembler.TryAddUnencryptedFragment(record, out byte[] complete))
-                        OnPlaintextHandshake(complete);
+                    if (Session.ServerHandshakeKeys != null)
+                    {
+                        // Keys are in use and nothing authenticates a plaintext record, so it never changes the
+                        // connection's state or fails it (RFC 9147 §4.5.2): anyone can send one from the peer's address.
+                        // For a server, its one use is to tell that the client retransmitted a ClientHello already answered.
+                        int messageSeq = (record[17] << 8) | record[18];
+                        if (!IsClient && messageSeq < NextReceiveMessageSeq && record[13] == 0x01 && !IsHandshakeComplete)
+                            OnRetransmittedPlaintextHandshake(record);
+                        throw new DtlsRecordDiscardedException("Plaintext handshake record after keys were established");
+                    }
+                    byte[] complete;
+                    try
+                    {
+                        // Plaintext fragments have a reassembler of their own: they are never joined to protected ones.
+                        if (!_plaintextReassembler.TryAddUnencryptedFragment(record, out complete))
+                            break;
+                    }
+                    catch (DtlsException ex)
+                    {
+                        throw new DtlsRecordDiscardedException("Malformed plaintext handshake record: " + ex.Message);
+                    }
+                    OnPlaintextHandshake(complete);
                     break;
 
                 case 0x15:
@@ -505,7 +554,16 @@ namespace SharpDTLS.Protocol13
             ulong failed = ++keys.FailedAuthentications;
             ulong limit = keys.Suite.IntegrityLimit;
             if (failed > limit)
+            {
+                // Keys we no longer send with are kept only for records still in flight: past their limit they are
+                // dropped, not the connection, or forged records against them would end it.
+                if (IsHandshakeComplete && keys != Session.ReadKeys[Session.ReadKeys.Count - 1])
+                {
+                    Session.ReadKeys.Remove(keys);
+                    return;
+                }
                 throw new DtlsException(AlertDescription.BadRecordMac, $"{failed} records failed authentication, more than the AEAD's integrity limit");
+            }
             if (failed == limit / 2 && IsHandshakeComplete && keys.Epoch >= 3 && keys == Session.ReadKeys[Session.ReadKeys.Count - 1] && CanUpdateWriteKeys)
                 QueueKeyUpdate(requestUpdate: true);
         }
@@ -561,7 +619,9 @@ namespace SharpDTLS.Protocol13
             switch (contentType)
             {
                 case 0x16:
-                    _receivedHandshakeRecords.Add((keys.Epoch, unprotected.SequenceNumber));
+                    // Bounded: an ACK lists what it fits, and a peer repeating records must not grow it without end.
+                    if (_receivedHandshakeRecords.Count < MaxAcknowledgedRecords && !_receivedHandshakeRecords.Contains((keys.Epoch, unprotected.SequenceNumber)))
+                        _receivedHandshakeRecords.Add((keys.Epoch, unprotected.SequenceNumber));
                     ProcessHandshakeRecord(inner);
                     break;
 

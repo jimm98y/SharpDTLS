@@ -1,4 +1,4 @@
-// SharpDTLS
+﻿// SharpDTLS
 // Copyright (C) 2026 Lukas Volf
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -148,6 +148,8 @@ namespace SharpDTLS.Protocol13
         public TimeSpan EarlyDataFreshnessWindow { get; set; } = TimeSpan.FromSeconds(10);
 
         private readonly ConcurrentDictionary<string, DateTime> _seenEarlyDataClientHellos = new();
+        private DateTime _lastEarlyDataPrune = DateTime.MinValue;
+        private const int MaxRecordedEarlyDataClientHellos = 100_000;
 
         /// <summary>
         /// RFC 8446 §8.2 ClientHello recording: remembers the binder of each 0-RTT ClientHello for the freshness
@@ -156,9 +158,16 @@ namespace SharpDTLS.Protocol13
         internal bool RecordEarlyDataClientHello(byte[] binder)
         {
             var now = DateTime.UtcNow;
-            foreach (var entry in _seenEarlyDataClientHellos)
-                if (now - entry.Value > EarlyDataFreshnessWindow)
-                    _seenEarlyDataClientHellos.TryRemove(entry);
+            // Pruned at most once a second, and bounded: past the bound, early data is refused (the handshake goes on).
+            if (now - _lastEarlyDataPrune > TimeSpan.FromSeconds(1))
+            {
+                _lastEarlyDataPrune = now;
+                foreach (var entry in _seenEarlyDataClientHellos)
+                    if (now - entry.Value > EarlyDataFreshnessWindow)
+                        _seenEarlyDataClientHellos.TryRemove(entry);
+            }
+            if (_seenEarlyDataClientHellos.Count >= MaxRecordedEarlyDataClientHellos)
+                return false;
             return _seenEarlyDataClientHellos.TryAdd(Convert.ToHexString(binder), now);
         }
 

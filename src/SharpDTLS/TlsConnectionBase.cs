@@ -1,4 +1,4 @@
-// SharpDTLS
+﻿// SharpDTLS
 // Copyright (C) 2026 Lukas Volf
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -21,6 +21,7 @@
 
 using Org.BouncyCastle.X509;
 using System;
+using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -62,6 +63,9 @@ namespace SharpDTLS
 
         public bool IsHandshakeComplete { get; protected set; }
         public bool IsClosed { get; private set; }
+
+        /// <summary>Awaited by a stream's reader before each read: completes once the application has room for more data.</summary>
+        internal Func<Task> ReceiveGate { get; set; }
 
         /// <summary>Initial retransmission timeout; doubles on every retransmission (RFC 6347 §4.2.4.1, RFC 9147 §5.8).</summary>
         internal TimeSpan InitialRetransmitTimeout { get; set; } = TimeSpan.FromSeconds(1);
@@ -307,6 +311,10 @@ namespace SharpDTLS
             {
                 if (!IsHandshakeComplete)
                     throw new InvalidOperationException("The handshake has not completed.");
+                // RFC 7627 §5.4: without the extended master secret, two connections can share a master secret (the
+                // triple handshake), and so their exported keys.
+                if (!IsExtendedMasterSecret)
+                    throw new InvalidOperationException("Keying material is not exported from a TLS 1.2 session without the extended master secret (RFC 7627).");
                 return ExportKeyingMaterialCore(label, context, length);
             }
         }
@@ -406,6 +414,10 @@ namespace SharpDTLS
                 CloseInternal();
                 RaiseEvent(() => Failed?.Invoke(this, error));
             }
+            else
+            {
+                CountEmptyRecord();
+            }
         }
 
         protected void Fail(Exception ex)
@@ -416,6 +428,7 @@ namespace SharpDTLS
             var alert = ex switch
             {
                 DtlsException dtls => dtls.Alert,
+                DtlsRecordAuthenticationException => AlertDescription.BadRecordMac,
                 TimeoutException => (AlertDescription?)null,
                 InvalidDataException or ArgumentException or IndexOutOfRangeException or NotSupportedException => AlertDescription.DecodeError,
                 _ => AlertDescription.InternalError,
@@ -450,7 +463,32 @@ namespace SharpDTLS
         /// <summary>Queues an event to be raised after the connection lock is released.</summary>
         protected void RaiseEvent(Action raise) => _outbox.Enqueue(raise);
 
-        protected void RaiseApplicationData(byte[] data) => RaiseEvent(() => ApplicationDataReceived?.Invoke(this, data));
+        protected void RaiseApplicationData(byte[] data)
+        {
+            // On a stream an empty record carries nothing: a peer may send a few, not an endless run of them.
+            if (data.Length == 0 && IsReliableTransport)
+            {
+                CountEmptyRecord();
+                return;
+            }
+            _emptyRecords = 0;
+            RaiseEvent(() => ApplicationDataReceived?.Invoke(this, data));
+        }
+
+        private int _emptyRecords;
+        private const int MaxConsecutiveEmptyRecords = 32;
+
+        /// <summary>
+        /// Counts a record of no effect (empty application data, a warning alert) on a stream, where every record is the
+        /// peer's: past a few in a row the connection fails, as each costs a decryption and nothing to send.
+        /// </summary>
+        protected void CountEmptyRecord()
+        {
+            if (!IsReliableTransport)
+                return;
+            if (++_emptyRecords > MaxConsecutiveEmptyRecords)
+                throw new DtlsException(AlertDescription.UnexpectedMessage, $"More than {MaxConsecutiveEmptyRecords} records in a row of no content.");
+        }
 
         /// <summary>Runs <paramref name="action"/> under the lock; any exception fails the connection.</summary>
         protected void Run(Action action)
@@ -537,6 +575,19 @@ namespace SharpDTLS
                 catch (Exception ex)
                 {
                     Debug.WriteLine($"{LogPrefix} {(next is byte[] ? "Send" : "Event handler")} failed: {ex.Message}");
+                    // A stream that failed a write has lost part of the record stream: the connection is over. (A
+                    // datagram lost is retransmitted or not, as any other.)
+                    if (next is byte[] && IsReliableTransport)
+                    {
+                        lock (_sync)
+                        {
+                            if (!IsClosed)
+                            {
+                                CloseInternal();
+                                RaiseEvent(() => Failed?.Invoke(this, ex));
+                            }
+                        }
+                    }
                 }
             }
         }

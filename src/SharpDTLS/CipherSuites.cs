@@ -1,4 +1,4 @@
-// SharpDTLS
+﻿// SharpDTLS
 // Copyright (C) 2026 Lukas Volf
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -454,13 +454,14 @@ namespace SharpDTLS
             => TryGet(id, out var suite) ? suite : throw new DtlsException(AlertDescription.HandshakeFailure, $"Unsupported cipher suite 0x{id:X4}");
 
         /// <summary>
-        /// Suites offered when none are configured: implemented, not weak, usable within the version range,
-        /// in preference order. PSK, SRP and TLS-PWD suites are included only when their credentials are configured.
+        /// Suites offered when none are configured: implemented, forward secret with an AEAD cipher, usable within the
+        /// version range, in preference order. PSK, SRP and TLS-PWD suites are included only when their credentials are
+        /// configured; legacy (CBC or static RSA) suites only when a version below 1.2, which has no others, is allowed.
         /// </summary>
         public static List<ushort> DefaultFor(ushort minimumVersion, ushort maximumVersion, bool includePsk = false, bool includeSrp = false,
             bool includePwd = false)
             => _implemented
-                .Where(s => s.Security != CipherSuiteSecurity.Weak)
+                .Where(s => IsDefault(s, maximumVersion) || IsDefault(s, minimumVersion))
                 .Where(s => includePsk || !s.RequiresPsk)
                 .Where(s => includeSrp || !s.RequiresSrp)
                 .Where(s => includePwd || !s.RequiresPwd)
@@ -468,6 +469,19 @@ namespace SharpDTLS
                 .Where(s => s.IsUsableWith(maximumVersion) || s.IsUsableWith(minimumVersion))
                 .Select(s => s.Id)
                 .ToList();
+
+        /// <summary>
+        /// Whether a suite is chosen without configuration at <paramref name="version"/>: never a weak one; a legacy one
+        /// (CBC with MAC-then-encrypt, or no forward secrecy) only below (D)TLS 1.2 or of PSK, SRP or TLS-PWD credentials.
+        /// </summary>
+        internal static bool IsDefault(CipherSuiteInfo suite, ushort version)
+        {
+            if (suite.Security == CipherSuiteSecurity.Weak)
+                return false;
+            if (suite.Security == CipherSuiteSecurity.Recommended || suite.RequiresPsk || suite.RequiresSrp || suite.RequiresPwd)
+                return true;
+            return !ProtocolVersions.IsAtLeast(version, ProtocolVersions.IsDatagram(version) ? DtlsVersion.Dtls12 : TlsVersion.Tls12);
+        }
 
         private static int CipherRank(BulkCipherAlgorithm cipher) => cipher switch
         {

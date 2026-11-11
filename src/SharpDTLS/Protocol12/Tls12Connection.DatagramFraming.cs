@@ -1,4 +1,4 @@
-// SharpDTLS
+﻿// SharpDTLS
 // Copyright (C) 2026 Lukas Volf
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -127,6 +127,23 @@ namespace SharpDTLS.Protocol12
                     return;
                 }
 
+                if (epoch == 0 && _readEpoch > 0)
+                {
+                    // Nothing authenticates an epoch-0 record once keys are in use, so it must never fail the
+                    // connection (RFC 6347 §4.1.2.7): anyone can send one from the peer's address. Until the handshake
+                    // completes, a handshake message sent before the peer's ChangeCipherSpec (a NewSessionTicket) can
+                    // still arrive after it, retransmitted, and is taken if well formed; once it completes, an
+                    // epoch-0 record only tells that the peer retransmitted a flight we already answered.
+                    if (contentType != 0x16)
+                        throw new DtlsRecordDiscardedException("Unprotected record after keys were established");
+                    if (C.IsHandshakeComplete || !IsWellFormedHandshake(fragment))
+                    {
+                        if (IsRetransmittedHandshake(fragment))
+                            OnDuplicateHandshake();
+                        throw new DtlsRecordDiscardedException("Unprotected handshake record after keys were established");
+                    }
+                }
+
                 if (epoch < _readEpoch && contentType != 0x16)
                     throw new DtlsRecordDiscardedException($"Record from old epoch {epoch}");
 
@@ -233,6 +250,10 @@ namespace SharpDTLS.Protocol12
                     int fragmentLength = r.ReadUInt24();
                     r.ReadBytes(fragmentLength);
 
+                    // Finished is always protected (RFC 6347 §4.2.6); an unprotected one is not the peer's.
+                    if (epoch == 0 && plaintext[start] == HandshakeType.Finished)
+                        continue;
+
                     if (messageSeq < C.NextReceiveMessageSeq)
                     {
                         OnDuplicateHandshake();
@@ -263,6 +284,55 @@ namespace SharpDTLS.Protocol12
                     if (C.IsClosed)
                         return;
                 }
+            }
+
+            /// <summary>Whether a handshake record's fragments are well formed: each header and its fragment within the record.</summary>
+            private static bool IsWellFormedHandshake(byte[] plaintext)
+            {
+                try
+                {
+                    var r = new TlsReader(plaintext);
+                    while (!r.IsEmpty)
+                    {
+                        r.ReadUInt8();
+                        int length = r.ReadUInt24();
+                        r.ReadUInt16();
+                        int offset = r.ReadUInt24();
+                        int fragmentLength = r.ReadUInt24();
+                        if (offset + fragmentLength > length || length > HandshakeReassembler.MaxMessageLength)
+                            return false;
+                        r.ReadBytes(fragmentLength);
+                    }
+                    return plaintext.Length > 0;
+                }
+                catch (Exception)
+                {
+                    return false;
+                }
+            }
+
+            /// <summary>Whether an unauthenticated handshake record holds a fragment of a message already processed.</summary>
+            private bool IsRetransmittedHandshake(byte[] plaintext)
+            {
+                try
+                {
+                    var r = new TlsReader(plaintext);
+                    while (!r.IsEmpty)
+                    {
+                        r.ReadUInt8();
+                        r.ReadUInt24();
+                        int messageSeq = r.ReadUInt16();
+                        r.ReadUInt24();
+                        r.ReadBytes(r.ReadUInt24());
+                        if (messageSeq < C.NextReceiveMessageSeq)
+                            return true;
+                    }
+                }
+                catch (Exception)
+                {
+                    // malformed: not the peer's
+                }
+                return false;
             }
 
             private void Deliver(byte[] message, ushort epoch)

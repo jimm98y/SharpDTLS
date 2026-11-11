@@ -197,7 +197,7 @@ namespace SharpDTLS.UDP
     {
         private readonly Socket _listenSocket;
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
-        private readonly ConcurrentDictionary<string, UdpTransport> _activeSessions;
+        private volatile IPEndPoint _lastSender;
         public event EventHandler<byte[]> OnDataReceived;
 
         /// <summary>The bound local endpoint (useful when binding to port 0).</summary>
@@ -219,12 +219,10 @@ namespace SharpDTLS.UDP
                 _listenSocket.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.PacketInformation, true);
             }
 
-            _activeSessions = new ConcurrentDictionary<string, UdpTransport>();
-
             _listenSocket.Bind(localEndpoint);
             LocalEndpoint = (IPEndPoint)_listenSocket.LocalEndPoint;
 
-            // Receive loops block, so they run on dedicated threads rather than thread-pool threads.
+            // The receive loop blocks, so it runs on a dedicated thread rather than a thread-pool thread.
             StartLongRunning(ListenLoop);
         }
 
@@ -258,67 +256,35 @@ namespace SharpDTLS.UDP
 
                 // copy: ReceiveFrom may reuse the endpoint instance on the next call
                 var sender = new IPEndPoint(((IPEndPoint)remoteEndpoint).Address, ((IPEndPoint)remoteEndpoint).Port);
-                byte[] datagram = buffer.AsSpan(0, length).ToArray();
+                _lastSender = sender;
 
-                if (_activeSessions.TryGetValue(sender.ToString(), out UdpTransport transport))
+                // Every datagram is handed to the handler on this one thread. No per-source state or thread is
+                // made here: any source address can be spoofed, and the DTLS server keeps state only for peers
+                // that passed its cookie exchange.
+                try
                 {
-                    // current session; drop the datagram when the queue is full (the peer retransmits)
-                    if (!transport.TryAddToReceiveQueue(datagram))
-                        Debug.WriteLine($"Receive queue full for {sender}, dropping datagram");
-                    continue;
+                    OnDataReceived?.Invoke(sender, buffer.AsSpan(0, length).ToArray());
                 }
-
-                transport = new UdpTransport(_listenSocket, sender, UdpTransport.MTU, (t) => _activeSessions.TryRemove(t.RemoteEndpoint, out _));
-                if (_activeSessions.TryAdd(sender.ToString(), transport))
+                catch (Exception ex)
                 {
-                    transport.TryAddToReceiveQueue(datagram);
-                    StartLongRunning(() => SessionLoop(sender, transport));
-                }
-            }
-        }
-
-        private void SessionLoop(EndPoint sender, UdpTransport transport)
-        {
-            byte[] receiveBuffer = new byte[UdpTransport.MTU];
-            while (!_cts.IsCancellationRequested)
-            {
-                int len = transport.Receive(receiveBuffer, 0, receiveBuffer.Length, 1000);
-                if (len > 0)
-                {
-                    try
-                    {
-                        OnDataReceived?.Invoke(sender, receiveBuffer.AsSpan(0, len).ToArray());
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"Receive handler failed: {ex.Message}");
-                    }
+                    Debug.WriteLine($"Receive handler failed: {ex.Message}");
                 }
             }
         }
 
         public void Send(EndPoint endpoint, byte[] buf)
         {
-            if (_activeSessions.TryGetValue(endpoint.ToString(), out UdpTransport transport))
-            {
-                transport.Send(buf, 0, buf.Length);
-            }
-            else
-            {
-                throw new Exception("No active session for endpoint " + endpoint);
-            }
+            if (endpoint == null)
+                throw new ArgumentNullException(nameof(endpoint));
+            if (buf.Length > UdpTransport.MTU)
+                throw new ArgumentException($"A datagram of {buf.Length} bytes is larger than the MTU ({UdpTransport.MTU}).", nameof(buf));
+            _listenSocket.SendTo(buf, endpoint);
         }
 
+        /// <summary>Sends to the source of the last datagram received.</summary>
         public void Send(byte[] buf)
         {
-            if (_activeSessions.TryGetValue(_activeSessions.First().Key, out UdpTransport transport))
-            {
-                transport.Send(buf, 0, buf.Length);
-            }
-            else
-            {
-                throw new Exception("No active session");
-            }
+            Send(_lastSender ?? throw new InvalidOperationException("No datagram has been received yet."), buf);
         }
 
         public void Dispose()

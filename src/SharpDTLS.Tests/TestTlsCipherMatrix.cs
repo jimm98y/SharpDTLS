@@ -67,6 +67,7 @@ namespace SharpDTLS.Tests
                 c.MinimumVersion = version;
                 c.MaximumVersion = version;
                 c.CipherSuites = new List<ushort> { id };
+                c.MinimumDhPrimeBits = 1024; // OpenSSL's anonymous DH at SECLEVEL=0 has a 1024-bit prime
                 if (suite.RequiresPsk)
                 {
                     c.PskIdentity = TestCredentials.PskIdentity;
