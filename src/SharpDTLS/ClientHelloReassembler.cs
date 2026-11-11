@@ -72,8 +72,12 @@ namespace SharpDTLS
 
                 if (!_pending.TryGetValue(endpoint, out var entry))
                 {
+                    // Full: evict the oldest rather than refuse the newcomer. These entries exist before any cookie
+                    // exchange, so spoofed sources can fill the table; refusing new endpoints would let a few spoofed
+                    // fragments a second lock every real client with a fragmented ClientHello out. A real client sends
+                    // its fragments back to back, so it completes long before a flood can evict it.
                     if (_pending.Count >= MaxPendingEndpoints)
-                        return false; // drop; the client retransmits
+                        _pending.Remove(_pending.OrderBy(p => p.Value.Created).First().Key);
                     entry = (new HandshakeReassembler(), now);
                     _pending[endpoint] = entry;
                 }

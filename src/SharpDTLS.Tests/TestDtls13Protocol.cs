@@ -648,5 +648,33 @@ namespace SharpDTLS.Tests
             f[0] = 0x0b; f[3] = 20; f[8] = 15; f[11] = 10; f[^1] = 0x16;
             Assert.ThrowsExactly<DtlsException>(() => reassembler.TryAddFragment(f, out _));
         }
+
+        [TestMethod]
+        public void ClientHelloReassembler_FullOfSpoofedFragments_StillReassemblesARealClient()
+        {
+            // An epoch-0 ClientHello fragment record: record header (13), handshake header (12), body.
+            static byte[] Fragment(int total, int offset, int length)
+            {
+                byte[] r = new byte[13 + 12 + length];
+                r[0] = 0x16; r[1] = 0xFE; r[2] = 0xFD;
+                r[11] = (byte)((12 + length) >> 8); r[12] = (byte)(12 + length);
+                r[13] = 0x01;
+                r[15] = (byte)(total >> 8); r[16] = (byte)total;
+                r[20] = (byte)(offset >> 8); r[21] = (byte)offset;
+                r[23] = (byte)(length >> 8); r[24] = (byte)length;
+                for (int i = 0; i < length; i++) r[25 + i] = (byte)(offset + i);
+                return r;
+            }
+
+            var reassembler = new ClientHelloReassembler();
+            // spoofed sources that each send a first fragment and never the rest: more than the table holds
+            for (int i = 0; i < 200; i++)
+                Assert.IsFalse(reassembler.TryAdd($"198.51.100.{i % 250}:{1000 + i}", Fragment(400, 0, 200), out _));
+
+            // a real client's fragments, back to back, complete all the same
+            Assert.IsFalse(reassembler.TryAdd("192.0.2.1:5000", Fragment(400, 0, 200), out _));
+            Assert.IsTrue(reassembler.TryAdd("192.0.2.1:5000", Fragment(400, 200, 200), out byte[] complete), "not locked out by the spoofed ones");
+            Assert.IsNotNull(complete);
+        }
     }
 }
