@@ -21,6 +21,7 @@
 
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Digests;
+using Org.BouncyCastle.Crypto.Parameters;
 using SharpDTLS.Protocol10;
 using System;
 using System.Collections.Generic;
@@ -294,17 +295,22 @@ namespace SharpDTLS.Protocol12
         /// Signs <paramref name="content"/>. In DTLS 1.2 the scheme is the first supported one the peer
         /// accepts; DTLS 1.0 uses the fixed TLS 1.1 algorithms and returns a null scheme.
         /// </summary>
-        protected byte[] Sign(AsymmetricKeyParameter privateKey, byte[] content, IEnumerable<ushort> peerSchemes, out ushort? scheme)
+        protected byte[] Sign(ITlsCrypto crypto, CertificateCredentials credentials, byte[] content, IEnumerable<ushort> peerSchemes, out ushort? scheme)
         {
+            var key = credentials.PublicKey;
             if (!IsDtls12)
             {
                 scheme = null;
-                return Tls10Signatures.Sign(privateKey, content);
+                ushort fixedScheme = key is RsaKeyParameters ? SignatureSchemes.RsaPkcs1Md5Sha1
+                    : key is ECKeyParameters ? SignatureSchemes.EcdsaSha1
+                    : key is DsaKeyParameters ? SignatureSchemes.DsaSha1
+                    : throw new DtlsException(AlertDescription.UnsupportedCertificate, "Unsupported key type for DTLS 1.0 signatures.");
+                return crypto.Sign(credentials, fixedScheme, content);
             }
 
-            scheme = Dtls12Signatures.SelectScheme(privateKey, peerSchemes)
+            scheme = Dtls12Signatures.SelectScheme(key, peerSchemes)
                 ?? throw new DtlsException(AlertDescription.HandshakeFailure, "No signature algorithm in common.");
-            return Dtls12Signatures.Sign(scheme.Value, privateKey, content);
+            return crypto.Sign(credentials, scheme.Value, content);
         }
 
         protected bool Verify(AsymmetricKeyParameter publicKey, byte[] content, ushort? scheme, byte[] signature, IEnumerable<ushort> acceptedSchemes)

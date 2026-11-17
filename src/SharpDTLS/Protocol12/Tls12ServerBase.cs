@@ -40,8 +40,7 @@ namespace SharpDTLS.Protocol12
 
             Settings = new Tls12ServerSettings
             {
-                KeyPair = keyPair,
-                Certificate = certificate,
+                Credentials = CertificateCredentials.Of(keyPair, certificate),
                 MinimumVersion = version,
                 MaximumVersion = version,
             };
@@ -52,6 +51,8 @@ namespace SharpDTLS.Protocol12
         public bool RequireClientCertificate { get => Settings.RequireClientCertificate; set => Settings.RequireClientCertificate = value; }
 
         public Action<string> KeyLogWriter { get => Settings.KeyLogWriter; set => Settings.KeyLogWriter = value; }
+
+        public ITlsCrypto Crypto { get => Settings.Crypto; set => Settings.Crypto = value; }
 
         public ushort MinimumVersion { get => Settings.MinimumVersion; set => Settings.MinimumVersion = value; }
 

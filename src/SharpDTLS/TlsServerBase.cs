@@ -107,6 +107,16 @@ namespace SharpDTLS
             set { Engine12.CredentialsSelector = value; Engine13.CredentialsSelector = value; }
         }
 
+        /// <summary>
+        /// The operations of the server's private keys (signing, RSA key transport, static key agreement):
+        /// <see cref="BouncyCastleTlsCrypto.Default"/> unless set.
+        /// </summary>
+        public ITlsCrypto Crypto
+        {
+            get => Engine13.Crypto;
+            set { Engine12.Crypto = value ?? BouncyCastleTlsCrypto.Default; Engine13.Crypto = value ?? BouncyCastleTlsCrypto.Default; }
+        }
+
         /// <summary>Application protocols (ALPN, RFC 7301) in server preference order; null to ignore ALPN.</summary>
         public IList<string> ApplicationProtocols
         {

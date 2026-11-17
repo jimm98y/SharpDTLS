@@ -185,6 +185,9 @@ namespace SharpDTLS.Protocol13
         /// <summary>Intermediate CA certificates sent after <see cref="ClientCertificate"/>.</summary>
         public IList<X509Certificate> ClientIntermediateCertificates { get; set; }
 
+        /// <summary>The operations of the client's private key.</summary>
+        public ITlsCrypto Crypto { get; set; } = BouncyCastleTlsCrypto.Default;
+
         /// <summary>
         /// Chooses the client credentials for a CertificateRequest (the CAs and signature schemes the server accepts);
         /// returning null uses <see cref="ClientCertificate"/> and <see cref="ClientCertificateKeyPair"/>.
@@ -961,18 +964,18 @@ namespace SharpDTLS.Protocol13
             bool inHandshake = transcript == Session.Transcript;
             var chosen = ClientCredentialsSelector?.Invoke(new CertificateSelectionContext(null,
                 CertificateSelectionContext.ParseNames(request.CertificateAuthorities), request.SignatureAlgorithms, request.SignatureAlgorithmsCert));
-            var (keyPair, clientCertificate, intermediates) = chosen != null
-                ? (chosen.KeyPair, chosen.Certificate, chosen.IntermediateCertificates)
-                : (ClientCertificateKeyPair, ClientCertificate, ClientIntermediateCertificates);
+            var (credentials, clientCertificate, intermediates) = chosen != null
+                ? (chosen, chosen.Certificate, chosen.IntermediateCertificates)
+                : (CertificateCredentials.Of(ClientCertificateKeyPair, ClientCertificate), ClientCertificate, ClientIntermediateCertificates);
 
             // Send our certificate only if we can sign with a scheme the server accepts.
             bool rawPublicKey = _clientCertificateType == CertificateType.RawPublicKey;
             ushort? scheme = null;
-            if ((clientCertificate != null || rawPublicKey) && keyPair != null)
-                scheme = Dtls13Signatures.SelectScheme(keyPair.Private, request.SignatureAlgorithms);
+            if ((clientCertificate != null || rawPublicKey) && credentials != null)
+                scheme = Dtls13Signatures.SelectScheme(credentials.PublicKey, request.SignatureAlgorithms);
 
             var chain = !scheme.HasValue ? Array.Empty<byte[]>()
-                : rawPublicKey ? new[] { RawPublicKeys.Encode(keyPair.Public) }
+                : rawPublicKey ? new[] { RawPublicKeys.Encode(credentials.PublicKey) }
                 : new[] { clientCertificate.GetEncoded() }.Concat((intermediates ?? Array.Empty<X509Certificate>()).Select(c => c.GetEncoded())).ToArray();
             if (scheme.HasValue && !rawPublicKey)
                 LocalCertificate = clientCertificate;
@@ -985,7 +988,7 @@ namespace SharpDTLS.Protocol13
             if (scheme.HasValue)
             {
                 byte[] content = Dtls13Signatures.BuildSignedContent(server: false, transcript.Hash(suite));
-                byte[] signature = Dtls13Signatures.Sign(scheme.Value, keyPair.Private, content);
+                byte[] signature = Crypto.Sign(credentials, scheme.Value, content);
                 sent = SendHandshake(new CertificateVerifyDatagram(signature, scheme.Value), keys, inHandshake);
                 if (!inHandshake)
                     transcript.AddHandshake(sent);

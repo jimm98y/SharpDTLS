@@ -66,7 +66,7 @@ namespace SharpDTLS.Protocol13
         private bool _helloRetried;
         private Dtls13TicketState _ticketState;
         private Dtls13CryptoContext _earlyKeys;
-        private AsymmetricCipherKeyPair _keyPair;
+        private CertificateCredentials _credentials;
         private X509Certificate _certificate;
         private IList<X509Certificate> _intermediates;
         private bool _serverNameUsed;
@@ -193,16 +193,17 @@ namespace SharpDTLS.Protocol13
                         _clientHello.Extensions.OfType<SignatureAlgorithmsCertExtension>().FirstOrDefault()?.Schemes))
                     ?? _server.CertificateSelector?.Invoke(ServerName);
                 _serverNameUsed = selected != null && ServerName != null;
-                (_keyPair, _certificate, _intermediates, _ocspResponse) = selected != null
-                    ? (selected.KeyPair, selected.Certificate, selected.IntermediateCertificates, selected.OcspResponse)
-                    : (_server.ServerKeyPair, _server.ServerCertificate, _server.IntermediateCertificates, _server.OcspResponse);
+                (_credentials, _intermediates, _ocspResponse) = selected != null
+                    ? (selected, selected.IntermediateCertificates, selected.OcspResponse)
+                    : (_server.Credentials, _server.IntermediateCertificates, _server.OcspResponse);
+                _certificate = _credentials?.Certificate;
                 if (_clientHello.Extensions.OfType<StatusRequestExtension>().FirstOrDefault()?.StatusType != StatusRequestExtension.Ocsp)
                     _ocspResponse = null;
 
                 // Certificate types (RFC 7250); without one in common we cannot authenticate with a certificate.
                 _serverCertificateType = RawPublicKeys.Choose(_server.ServerCertificateTypes,
                     RawPublicKeys.Find(_clientHello.Extensions, CertificateTypeExtension.ServerType),
-                    t => t == CertificateType.RawPublicKey ? _keyPair != null : _certificate != null);
+                    t => t == CertificateType.RawPublicKey ? _credentials != null : _certificate != null);
                 _clientCertificateType = RawPublicKeys.Choose(_server.ClientCertificateTypes,
                     RawPublicKeys.Find(_clientHello.Extensions, CertificateTypeExtension.ClientType), _ => true);
                 if (_serverCertificateType == CertificateType.RawPublicKey)
@@ -225,8 +226,8 @@ namespace SharpDTLS.Protocol13
 
                 SelectPsk(record);
                 if (_psk == null && (_group == 0 || _serverCertificateType == null))
-                    throw new DtlsException(_serverCertificateType == null && _keyPair != null ? AlertDescription.UnsupportedCertificate : AlertDescription.HandshakeFailure,
-                        _keyPair == null ? "PSK-only server and no acceptable PSK."
+                    throw new DtlsException(_serverCertificateType == null && _credentials != null ? AlertDescription.UnsupportedCertificate : AlertDescription.HandshakeFailure,
+                        _credentials == null ? "PSK-only server and no acceptable PSK."
                         : _serverCertificateType == null ? "No certificate type in common and no acceptable PSK." : "No key share and no acceptable PSK.");
                 Session.Transcript.AddPlaintextRecord(record);
 
@@ -428,7 +429,7 @@ namespace SharpDTLS.Protocol13
                 var chain = new List<byte[]>();
                 if (_serverCertificateType == CertificateType.RawPublicKey)
                 {
-                    chain.Add(RawPublicKeys.Encode(_keyPair.Public));
+                    chain.Add(RawPublicKeys.Encode(_credentials.PublicKey));
                 }
                 else
                 {
@@ -443,10 +444,10 @@ namespace SharpDTLS.Protocol13
                 SendHandshake(compression.HasValue ? new CompressedCertificateDatagram(compression.Value, certificate) : certificate, handshakeKeys);
 
                 var clientSchemes = _clientHello.Extensions.OfType<ClientSignatureAlgorithms>().FirstOrDefault()?.SignatureAlgorithms;
-                ushort scheme = Dtls13Signatures.SelectScheme(_keyPair.Private, clientSchemes)
+                ushort scheme = Dtls13Signatures.SelectScheme(_credentials.PublicKey, clientSchemes)
                     ?? throw new DtlsException(AlertDescription.HandshakeFailure, "No signature scheme in common with the client.");
                 byte[] content = Dtls13Signatures.BuildSignedContent(server: true, Session.Transcript.Hash(suite));
-                SendHandshake(new CertificateVerifyDatagram(Dtls13Signatures.Sign(scheme, _keyPair.Private, content), scheme), handshakeKeys);
+                SendHandshake(new CertificateVerifyDatagram(_server.Crypto.Sign(_credentials, scheme, content), scheme), handshakeKeys);
             }
 
             byte[] verifyData = Dtls13CryptoUtils.CalculateFinished(handshakeKeys.ServerSecret, Session.Transcript.Hash(suite), suite);

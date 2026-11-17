@@ -40,13 +40,14 @@ namespace SharpDTLS.Protocol13
         {
             if (certificate != null && keyPair == null)
                 throw new ArgumentException("A certificate needs its key pair.");
-            ServerKeyPair = keyPair;
-            ServerCertificate = certificate;
+            Credentials = CertificateCredentials.Of(keyPair, certificate);
         }
 
-        internal AsymmetricCipherKeyPair ServerKeyPair { get; }
+        /// <summary>The default key and certificate; null for a PSK-only server.</summary>
+        internal CertificateCredentials Credentials { get; }
 
-        internal X509Certificate ServerCertificate { get; }
+        /// <summary>The operations of the server's private keys.</summary>
+        public ITlsCrypto Crypto { get; set; } = BouncyCastleTlsCrypto.Default;
 
         /// <summary>Request a client certificate and abort with certificate_required if none is sent.</summary>
         public bool RequireClientCertificate { get; set; } = false;

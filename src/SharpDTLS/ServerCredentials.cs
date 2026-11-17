@@ -15,6 +15,20 @@ namespace SharpDTLS
             IntermediateCertificates = intermediateCertificates ?? Array.Empty<X509Certificate>();
         }
 
+        // a key, of a certificate or of a raw public key alone: a server's or client's own key pair and certificate
+        private CertificateCredentials(AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
+        {
+            KeyPair = keyPair;
+            Certificate = certificate;
+            IntermediateCertificates = Array.Empty<X509Certificate>();
+        }
+
+        internal static CertificateCredentials Of(AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
+            => keyPair == null ? null : new CertificateCredentials(keyPair, certificate);
+
+        /// <summary>The public key of the private key.</summary>
+        internal AsymmetricKeyParameter PublicKey => KeyPair.Public;
+
         public AsymmetricCipherKeyPair KeyPair { get; }
         public X509Certificate Certificate { get; }
         public IList<X509Certificate> IntermediateCertificates { get; }

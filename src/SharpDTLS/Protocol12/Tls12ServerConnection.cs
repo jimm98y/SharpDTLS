@@ -35,8 +35,9 @@ namespace SharpDTLS.Protocol12
     /// <summary>Configuration shared by all connections of a (D)TLS 1.0-1.2 server.</summary>
     internal sealed class Tls12ServerSettings
     {
-        public AsymmetricCipherKeyPair KeyPair { get; set; }
-        public X509Certificate Certificate { get; set; }
+        /// <summary>The default key and certificate; null for a server of PSK, SRP or PWD alone.</summary>
+        public CertificateCredentials Credentials { get; set; }
+        public ITlsCrypto Crypto { get; set; } = BouncyCastleTlsCrypto.Default;
         public ushort MinimumVersion { get; set; } = DtlsVersion.Dtls12;
         public ushort MaximumVersion { get; set; } = DtlsVersion.Dtls12;
 
@@ -170,7 +171,7 @@ namespace SharpDTLS.Protocol12
         private Dtls12SessionState _resumedSession;
         private byte[] _sessionId = Array.Empty<byte>();
         private bool _issueTicket;
-        private AsymmetricCipherKeyPair _keyPair;
+        private CertificateCredentials _credentials;
         private X509Certificate _certificate;
         private IList<X509Certificate> _intermediates;
         private byte[] _ocspResponse;
@@ -320,16 +321,17 @@ namespace SharpDTLS.Protocol12
                     ch.Extension<SignatureAlgorithmsExtension>()?.Algorithms, ch.Extension<SignatureAlgorithmsCertExtension>()?.Schemes))
                 ?? _settings.CertificateSelector?.Invoke(ServerName);
             _serverNameUsed = selected != null && ServerName != null;
-            (_keyPair, _certificate, _intermediates, _ocspResponse) = selected != null
-                ? (selected.KeyPair, selected.Certificate, selected.IntermediateCertificates, selected.OcspResponse)
-                : (_settings.KeyPair, _settings.Certificate, _settings.IntermediateCertificates, _settings.OcspResponse);
+            (_credentials, _intermediates, _ocspResponse) = selected != null
+                ? (selected, selected.IntermediateCertificates, selected.OcspResponse)
+                : (_settings.Credentials, _settings.IntermediateCertificates, _settings.OcspResponse);
+            _certificate = _credentials?.Certificate;
             if (ch.Extension<StatusRequestExtension>()?.StatusType != StatusRequestExtension.Ocsp)
                 _ocspResponse = null;
 
             // Certificate types (RFC 7250): without one in common that side cannot use a certificate-based suite.
             _serverCertificateType = RawPublicKeys.Choose(_settings.ServerCertificateTypes,
                 RawPublicKeys.Find(ch.Extensions, CertificateTypeExtension.ServerType),
-                t => t == CertificateType.RawPublicKey ? _keyPair != null : _certificate != null);
+                t => t == CertificateType.RawPublicKey ? _credentials != null : _certificate != null);
             _clientCertificateType = RawPublicKeys.Choose(_settings.ClientCertificateTypes,
                 RawPublicKeys.Find(ch.Extensions, CertificateTypeExtension.ClientType), _ => true);
             if (_serverCertificateType == CertificateType.RawPublicKey)
@@ -354,7 +356,7 @@ namespace SharpDTLS.Protocol12
             if (TryResume(ch, version))
                 return;
 
-            var serverKey = _keyPair?.Private;
+            var serverKey = _credentials?.PublicKey;
             // Without explicit configuration weak suites (export, DES, NULL, anonymous...) are never selected, nor legacy
             // ones (CBC, static RSA) unless a version below 1.2 is allowed.
             var preference = _settings.CipherSuites
@@ -379,7 +381,9 @@ namespace SharpDTLS.Protocol12
             _keyExchange = KeyExchanges.CreateServer(CipherSuite, new ServerKeyExchangeContext
             {
                 ClientHello = ch,
-                ServerPrivateKey = serverKey,
+                ServerPublicKey = serverKey,
+                DecryptPreMasterSecret = encrypted => _settings.Crypto.DecryptPreMasterSecret(_credentials, encrypted),
+                Agree = peer => _settings.Crypto.Agree(_credentials, peer),
                 PskIdentityHint = _settings.PskIdentityHint,
                 PskResolver = _settings.PskIdentityResolver,
                 SrpVerifierProvider = _settings.SrpVerifierProvider,
@@ -534,7 +538,7 @@ namespace SharpDTLS.Protocol12
             {
                 if (_serverCertificateType == CertificateType.RawPublicKey)
                 {
-                    SendHandshake(HandshakeType.Certificate, RawPublicKeys.EncodeCertificate(RawPublicKeys.Encode(_keyPair.Public)));
+                    SendHandshake(HandshakeType.Certificate, RawPublicKeys.EncodeCertificate(RawPublicKeys.Encode(_credentials.PublicKey)));
                 }
                 else
                 {
@@ -556,7 +560,7 @@ namespace SharpDTLS.Protocol12
                 if (_keyExchange.SignsParams)
                 {
                     byte[] signed = Concat(Concat(ClientRandom, ServerRandom), serverParams);
-                    byte[] signature = Sign(_keyPair.Private, signed, ch.Extension<SignatureAlgorithmsExtension>()?.Algorithms, out ushort? scheme);
+                    byte[] signature = Sign(_settings.Crypto, _credentials, signed, ch.Extension<SignatureAlgorithmsExtension>()?.Algorithms, out ushort? scheme);
                     if (scheme.HasValue)
                         ske.WriteUInt16(scheme.Value);
                     ske.WriteOpaque16(signature);

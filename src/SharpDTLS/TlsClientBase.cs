@@ -160,6 +160,16 @@ namespace SharpDTLS
             set { Engine12.ClientCredentialsSelector = value; Engine13.ClientCredentialsSelector = value; }
         }
 
+        /// <summary>
+        /// The operations of the client's private key (signing, static key agreement):
+        /// <see cref="BouncyCastleTlsCrypto.Default"/> unless set.
+        /// </summary>
+        public ITlsCrypto Crypto
+        {
+            get => Engine13.Crypto;
+            set { Engine12.Crypto = value ?? BouncyCastleTlsCrypto.Default; Engine13.Crypto = value ?? BouncyCastleTlsCrypto.Default; }
+        }
+
         /// <summary>Signature schemes we accept in certificates (signature_algorithms_cert, RFC 8446 §4.2.3); null to not send it.</summary>
         public IList<ushort> SignatureAlgorithmsCert
         {
