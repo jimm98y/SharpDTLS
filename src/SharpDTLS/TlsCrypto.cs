@@ -148,4 +148,68 @@ namespace SharpDTLS
 #endif
         }
     }
+
+    /// <summary>
+    /// An <see cref="ITlsCrypto"/> that signs and decrypts with the certificate's own <see cref="RSA"/> or <see cref="ECDsa"/>,
+    /// so its key need not be exportable (the Windows certificate store, smart cards, HSMs). What .NET has no key for
+    /// (PKCS#8 keys, Ed25519, Ed448, DSA, DH, static ECDH) and the MD5 || SHA-1 RSA signature of TLS 1.0/1.1 are left to
+    /// <see cref="BouncyCastleTlsCrypto"/>. RSA key transport is the platform's PKCS#1 v1.5 decryption, whose failures may
+    /// take longer than successes; prefer the ECDHE and DHE cipher suites, as the defaults do.
+    /// </summary>
+    public class NetTlsCrypto : BouncyCastleTlsCrypto
+    {
+        public override byte[] Sign(CertificateCredentials credentials, ushort scheme, byte[] content)
+        {
+            if (!OwnKey(credentials))
+                return base.Sign(credentials, scheme, content);
+            HashAlgorithmName hash = (scheme >> 8, scheme & 0xFF) switch
+            {
+                (2, _) => HashAlgorithmName.SHA1,
+                (4, _) or (8, 4) => HashAlgorithmName.SHA256,
+                (5, _) or (8, 5) => HashAlgorithmName.SHA384,
+                (6, _) or (8, 6) => HashAlgorithmName.SHA512,
+                _ => default,
+            };
+            bool pss = scheme is SignatureSchemes.RsaPssRsaeSha256 or SignatureSchemes.RsaPssRsaeSha384 or SignatureSchemes.RsaPssRsaeSha512;
+            if (hash.Name != null && (pss || (scheme & 0xFF) == 1))
+            {
+                using var rsa = credentials.Certificate.GetRSAPrivateKey();
+                if (rsa != null)
+                    return rsa.SignData(content, hash, pss ? RSASignaturePadding.Pss : RSASignaturePadding.Pkcs1);
+            }
+            else if (hash.Name != null && (scheme & 0xFF) == 3)
+            {
+                using var ecdsa = credentials.Certificate.GetECDsaPrivateKey();
+                if (ecdsa != null)
+                {
+                    // IEEE P1363 r || s, as TLS has it: a DER SEQUENCE of the two INTEGERs
+                    byte[] rs = ecdsa.SignData(content, hash);
+                    int half = rs.Length / 2;
+                    return new Org.BouncyCastle.Asn1.DerSequence(
+                        new Org.BouncyCastle.Asn1.DerInteger(new BigInteger(1, rs, 0, half)),
+                        new Org.BouncyCastle.Asn1.DerInteger(new BigInteger(1, rs, half, half))).GetEncoded();
+                }
+            }
+            return base.Sign(credentials, scheme, content);
+        }
+
+        public override byte[] DecryptPreMasterSecret(CertificateCredentials credentials, byte[] encrypted)
+        {
+            using var rsa = OwnKey(credentials) ? credentials.Certificate.GetRSAPrivateKey() : null;
+            if (rsa == null)
+                return base.DecryptPreMasterSecret(credentials, encrypted);
+            try
+            {
+                return rsa.Decrypt(encrypted, RSAEncryptionPadding.Pkcs1);
+            }
+            catch (System.Exception ex) when (ex is not CryptographicException)
+            {
+                throw new CryptographicException("RSA decryption failed.", ex);
+            }
+        }
+
+        // The certificate holds the key, and BouncyCastle has none of it: of PKCS#8, or of the engines' key pairs.
+        private static bool OwnKey(CertificateCredentials credentials)
+            => credentials.Certificate != null && credentials.Certificate.HasPrivateKey && !credentials.HasPkcs8PrivateKey && credentials.KeyPair == null;
+    }
 }

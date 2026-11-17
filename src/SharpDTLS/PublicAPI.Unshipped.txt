@@ -1,4 +1,6 @@
 const SharpDTLS.SignatureSchemes.RsaPkcs1Md5Sha1 = 65281 -> ushort
+override SharpDTLS.NetTlsCrypto.DecryptPreMasterSecret(SharpDTLS.CertificateCredentials credentials, byte[] encrypted) -> byte[]
+override SharpDTLS.NetTlsCrypto.Sign(SharpDTLS.CertificateCredentials credentials, ushort scheme, byte[] content) -> byte[]
 SharpDTLS.AlertDescription.GeneralError = 117 -> SharpDTLS.AlertDescription
 *REMOVED*SharpDTLS.CertificateValidator.ForClient() -> System.Func<Org.BouncyCastle.X509.X509Certificate, System.Collections.Generic.IReadOnlyList<byte[]>, bool>
 *REMOVED*SharpDTLS.CertificateValidator.ForServer(string hostName) -> System.Func<Org.BouncyCastle.X509.X509Certificate, System.Collections.Generic.IReadOnlyList<byte[]>, bool>
@@ -21,6 +23,8 @@ SharpDTLS.ITlsCrypto
 SharpDTLS.ITlsCrypto.Agree(SharpDTLS.CertificateCredentials credentials, byte[] peerPublicKey) -> byte[]
 SharpDTLS.ITlsCrypto.DecryptPreMasterSecret(SharpDTLS.CertificateCredentials credentials, byte[] encrypted) -> byte[]
 SharpDTLS.ITlsCrypto.Sign(SharpDTLS.CertificateCredentials credentials, ushort scheme, byte[] content) -> byte[]
+SharpDTLS.NetTlsCrypto
+SharpDTLS.NetTlsCrypto.NetTlsCrypto() -> void
 SharpDTLS.OcspStapleValidator.OcspStapleValidator(System.Collections.Generic.IEnumerable<System.Security.Cryptography.X509Certificates.X509Certificate2> issuers = null) -> void
 SharpDTLS.ServerCredentials.ServerCredentials(System.Security.Cryptography.X509Certificates.X509Certificate2 certificate, byte[] pkcs8PrivateKey, System.Collections.Generic.IList<System.Security.Cryptography.X509Certificates.X509Certificate2> intermediateCertificates = null) -> void
 SharpDTLS.ServerCredentials.ServerCredentials(System.Security.Cryptography.X509Certificates.X509Certificate2 certificate, System.Collections.Generic.IList<System.Security.Cryptography.X509Certificates.X509Certificate2> intermediateCertificates = null) -> void
