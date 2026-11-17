@@ -93,7 +93,7 @@ namespace SharpDTLS.Protocol12
             public override void ProcessRecord(ReadOnlySpan<byte> record)
             {
                 // the plaintext of a buffer of the pool's: application data's goes on with the event, any other's back
-                byte[] buffer = ArrayPool<byte>.Shared.Rent(Math.Max(record.Length, 1));
+                byte[] buffer = RecordBuffers.Pool.Rent(Math.Max(record.Length, 1));
                 bool handedOver = false;
                 try
                 {
@@ -102,7 +102,7 @@ namespace SharpDTLS.Protocol12
                 finally
                 {
                     if (!handedOver)
-                        ArrayPool<byte>.Shared.Return(buffer);
+                        RecordBuffers.Pool.Return(buffer);
                 }
             }
 
@@ -225,7 +225,7 @@ namespace SharpDTLS.Protocol12
             private void EnqueueRecord(byte contentType, ReadOnlySpan<byte> payload)
             {
                 int length = RecordLength(payload.Length);
-                byte[] record = ArrayPool<byte>.Shared.Rent(length);
+                byte[] record = RecordBuffers.Pool.Rent(length);
                 WriteRecord(contentType, payload, record);
                 C.EnqueueRented(record, length);
             }

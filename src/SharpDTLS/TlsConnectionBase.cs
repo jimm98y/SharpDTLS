@@ -522,14 +522,14 @@ namespace SharpDTLS
 
         protected void Enqueue(byte[] datagram) => _outbox.Enqueue(new Outgoing(datagram, datagram.Length, rented: false, isData: false, null));
 
-        /// <summary>Queues a datagram of <see cref="ArrayPool{T}.Shared"/>, returned to it once sent.</summary>
+        /// <summary>Queues a datagram of <see cref="RecordBuffers.Pool"/>, returned to it once sent.</summary>
         protected void EnqueueRented(byte[] datagram, int length) => _outbox.Enqueue(new Outgoing(datagram, length, rented: true, isData: false, null));
 
         /// <summary>Queues an event to be raised after the connection lock is released.</summary>
         protected void RaiseEvent(Action raise) => _outbox.Enqueue(new Outgoing(null, 0, rented: false, isData: false, raise));
 
         /// <summary>
-        /// Queues application data of <see cref="ArrayPool{T}.Shared"/>: <paramref name="length"/> bytes from the start of
+        /// Queues application data of <see cref="RecordBuffers.Pool"/>: <paramref name="length"/> bytes from the start of
         /// <paramref name="rented"/>, which is the outbox's now and returned once the event is raised.
         /// </summary>
         protected void RaiseApplicationData(byte[] rented, int length)
@@ -537,7 +537,7 @@ namespace SharpDTLS
             // On a stream an empty record carries nothing: a peer may send a few, not an endless run of them.
             if (length == 0 && IsReliableTransport)
             {
-                ArrayPool<byte>.Shared.Return(rented);
+                RecordBuffers.Pool.Return(rented);
                 CountEmptyRecord();
                 return;
             }
@@ -707,7 +707,7 @@ namespace SharpDTLS
                 finally
                 {
                     if (next.Rented)
-                        ArrayPool<byte>.Shared.Return(next.Buffer);
+                        RecordBuffers.Pool.Return(next.Buffer);
                 }
             }
         }

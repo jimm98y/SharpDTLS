@@ -91,7 +91,7 @@ namespace SharpDTLS
 #if NETCOREAPP
             stream.Write(record);
 #else
-            byte[] buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(record.Length);
+            byte[] buffer = RecordBuffers.Pool.Rent(record.Length);
             try
             {
                 record.CopyTo(buffer);
@@ -99,7 +99,7 @@ namespace SharpDTLS
             }
             finally
             {
-                System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
+                RecordBuffers.Pool.Return(buffer);
             }
 #endif
             stream.Flush();

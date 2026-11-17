@@ -234,7 +234,7 @@ namespace SharpDTLS.Protocol13
             TlsInspector.Current?.OnProtectedRecord(this, IsClient, true, 0x17, keys.Epoch, seq, data);
             byte[] cid = WriteCid(keys);
             int length = IsDatagram ? Dtls13RecordProtection.ProtectedLength(keys, data.Length, cid?.Length ?? 0) : Dtls13RecordProtection.TlsProtectedLength(keys, data.Length);
-            byte[] record = System.Buffers.ArrayPool<byte>.Shared.Rent(length);
+            byte[] record = RecordBuffers.Pool.Rent(length);
             if (IsDatagram)
                 Dtls13RecordProtection.Protect(keys, IsClient, (int)keys.Epoch, seq, data, 0x17, cid, record, Crypto);
             else
@@ -425,7 +425,7 @@ namespace SharpDTLS.Protocol13
             if (keys == null)
                 throw new DtlsException(AlertDescription.UnexpectedMessage, "Protected record before the keys are known.");
             // the plaintext of a buffer of the pool's: application data's goes on with the event, any other's back
-            byte[] buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(record.Length);
+            byte[] buffer = RecordBuffers.Pool.Rent(record.Length);
             bool handedOver = false;
             try
             {
@@ -434,7 +434,7 @@ namespace SharpDTLS.Protocol13
             finally
             {
                 if (!handedOver)
-                    System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
+                    RecordBuffers.Pool.Return(buffer);
             }
         }
 
@@ -546,7 +546,7 @@ namespace SharpDTLS.Protocol13
                 return;
             }
             // the plaintext of a buffer of the pool's: application data's goes on with the event, any other's back
-            byte[] buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(record.Length);
+            byte[] buffer = RecordBuffers.Pool.Rent(record.Length);
             bool handedOver = false;
             try
             {
@@ -555,7 +555,7 @@ namespace SharpDTLS.Protocol13
             finally
             {
                 if (!handedOver)
-                    System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
+                    RecordBuffers.Pool.Return(buffer);
             }
         }
 

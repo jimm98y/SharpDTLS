@@ -169,7 +169,7 @@ namespace SharpDTLS.Protocol12
                     throw new DtlsRecordDiscardedException("tls12_cid record without keys");
 
                 // the plaintext of a buffer of the pool's: application data's goes on with the event, any other's back
-                byte[] buffer = ArrayPool<byte>.Shared.Rent(Math.Max(fragment.Length, 1));
+                byte[] buffer = RecordBuffers.Pool.Rent(Math.Max(fragment.Length, 1));
                 bool handedOver = false;
                 try
                 {
@@ -178,7 +178,7 @@ namespace SharpDTLS.Protocol12
                 finally
                 {
                     if (!handedOver)
-                        ArrayPool<byte>.Shared.Return(buffer);
+                        RecordBuffers.Pool.Return(buffer);
                 }
             }
 
@@ -444,7 +444,7 @@ namespace SharpDTLS.Protocol12
                 int fragmentLength;
                 if (cid.Length > 0)
                 {
-                    byte[] inner = ArrayPool<byte>.Shared.Rent(plaintext.Length + 1);
+                    byte[] inner = RecordBuffers.Pool.Rent(plaintext.Length + 1);
                     try
                     {
                         plaintext.CopyTo(inner);
@@ -453,7 +453,7 @@ namespace SharpDTLS.Protocol12
                     }
                     finally
                     {
-                        ArrayPool<byte>.Shared.Return(inner);
+                        RecordBuffers.Pool.Return(inner);
                     }
                     fragmentLength = cipher.FragmentLength(plaintext.Length + 1);
                     contentType = Tls12Cid;
@@ -533,7 +533,7 @@ namespace SharpDTLS.Protocol12
             public override void WriteApplicationData(ReadOnlySpan<byte> data)
             {
                 int length = RecordLength(_writeEpoch, data.Length);
-                byte[] record = ArrayPool<byte>.Shared.Rent(length);
+                byte[] record = RecordBuffers.Pool.Rent(length);
                 WriteRecord(0x17, _writeEpoch, data, record);
                 C.EnqueueRented(record, length);
             }
