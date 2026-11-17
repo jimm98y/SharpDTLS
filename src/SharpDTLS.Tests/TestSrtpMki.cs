@@ -194,8 +194,8 @@ namespace SharpDTLS.Tests
             Assert.IsFalse(client.IsResumed);
             Assert.IsFalse(server.IsResumed);
 
-            Assert.AreEqual(clientCredentials.certificate, client.LocalCertificate);
-            Assert.AreEqual(clientCredentials.certificate, server.PeerCertificate);
+            Assert.AreEqual(clientCredentials.certificate.Net(), client.LocalCertificate);
+            Assert.AreEqual(clientCredentials.certificate.Net(), server.PeerCertificate);
             Assert.IsNotNull(server.LocalCertificate);
             Assert.AreEqual(server.LocalCertificate, client.PeerCertificate);
         }

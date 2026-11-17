@@ -61,7 +61,13 @@ namespace SharpDTLS.Protocol12.DTLS12
         }
 
         public Dtls12Server(IServerTransport serverTransport, AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
-            : base(serverTransport, keyPair, certificate, DtlsVersion.Dtls12)
+            : this(serverTransport, CertificateCredentials.OfServer(keyPair, certificate))
+        {
+        }
+
+        /// <param name="credentials">The default key and certificate; null for a server of PSK, SRP or PWD alone.</param>
+        public Dtls12Server(IServerTransport serverTransport, CertificateCredentials credentials)
+            : base(serverTransport, credentials, DtlsVersion.Dtls12)
         {
         }
 

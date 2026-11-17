@@ -90,6 +90,9 @@ namespace SharpDTLS.Protocol12
         /// <summary>Intermediate CA certificates sent after <see cref="ClientCertificate"/>.</summary>
         public IList<X509Certificate> ClientIntermediateCertificates { get; set; }
 
+        /// <summary>The client's credentials, before <see cref="ClientCertificate"/> and <see cref="ClientCertificateKeyPair"/>.</summary>
+        public CertificateCredentials ClientCredentials { get; set; }
+
         /// <summary>The operations of the client's private key.</summary>
         public ITlsCrypto Crypto { get; set; } = BouncyCastleTlsCrypto.Default;
 
@@ -117,12 +120,12 @@ namespace SharpDTLS.Protocol12
         /// When null, the chain is validated against the platform's trust store for serverAuth and matched against
         /// ServerName (see <see cref="CertificateValidator"/>); set (c, chain) => true to accept any certificate.
         /// </summary>
-        public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ServerCertificateValidator { get; set; }
+        public Func<System.Security.Cryptography.X509Certificates.X509Certificate2, IReadOnlyList<byte[]>, bool> ServerCertificateValidator { get; set; }
 
         /// <summary>The server's end-entity certificate once received.</summary>
         public X509Certificate ServerCertificate => _serverCertificate;
 
-        public override X509Certificate PeerCertificate => _serverCertificate;
+        internal override X509Certificate BcPeerCertificate => _serverCertificate;
 
         /// <summary>
         /// Certificate types we accept from the server, in preference order (RFC 7250); null for X.509 only. With
@@ -145,7 +148,7 @@ namespace SharpDTLS.Protocol12
 
         // Without a ServerCertificateValidator, the chain is validated against the platform's trust store for
         // serverAuth and matched against ServerName: accepting any certificate takes an explicit (c, chain) => true.
-        private Func<X509Certificate, IReadOnlyList<byte[]>, bool> DefaultServerCertificateValidator()
+        private Func<System.Security.Cryptography.X509Certificates.X509Certificate2, IReadOnlyList<byte[]>, bool> DefaultServerCertificateValidator()
             => CertificateValidatorDefaults.Server(ServerName);
 
         /// <summary>The server's raw public key (DER SubjectPublicKeyInfo), when it authenticated with one.</summary>
@@ -638,7 +641,7 @@ namespace SharpDTLS.Protocol12
             _serverPublicKey = _serverCertificate.GetPublicKey();
             if (!KeyMatches(CipherSuite.ServerCertificateType, _serverPublicKey))
                 throw new DtlsException(AlertDescription.UnsupportedCertificate, "Server certificate key does not match the cipher suite.");
-            if (!(ServerCertificateValidator ?? DefaultServerCertificateValidator())(_serverCertificate, certificate.Chain))
+            if (!(ServerCertificateValidator ?? DefaultServerCertificateValidator())(Certificates.Load(certificate.Chain[0]), certificate.Chain))
                 throw new DtlsException(AlertDescription.BadCertificate, "Server certificate was rejected.");
             _serverChain = certificate.Chain;
 
@@ -713,16 +716,16 @@ namespace SharpDTLS.Protocol12
         }
 
         // The credentials for the server's CertificateRequest: the selector's choice, or the configured ones.
-        private (CertificateCredentials Credentials, X509Certificate Certificate, IList<X509Certificate> Intermediates) ResolveClientCredentials()
+        private CertificateCredentials ResolveClientCredentials()
         {
             if (_certificateRequest != null && ClientCredentialsSelector != null)
             {
                 var chosen = ClientCredentialsSelector(new CertificateSelectionContext(null,
                     CertificateSelectionContext.ParseNames(_certificateRequest.CertificateAuthorities), _certificateRequest.SignatureAlgorithms, null));
                 if (chosen != null)
-                    return (chosen, chosen.Certificate, chosen.IntermediateCertificates);
+                    return chosen;
             }
-            return (CertificateCredentials.Of(ClientCertificateKeyPair, ClientCertificate), ClientCertificate, ClientIntermediateCertificates);
+            return ClientCredentials ?? CertificateCredentials.Of(ClientCertificateKeyPair, ClientCertificate, ClientIntermediateCertificates);
         }
 
         private void SendFinalFlight()
@@ -732,7 +735,8 @@ namespace SharpDTLS.Protocol12
             // Certificate (only when requested). Send ours only if its type and a signature scheme are accepted,
             // or, with static (EC)DH, if it holds a key agreement key on the server's parameters (fixed (EC)DH).
             bool authenticate = false;
-            var (credentials, clientCertificate, intermediates) = ResolveClientCredentials();
+            var credentials = ResolveClientCredentials();
+            var clientCertificate = credentials?.BcCertificate;
             bool fixedKeyAgreement = false;
             bool rawPublicKey = _clientCertificateType == CertificateType.RawPublicKey;
             if (_certificateRequest != null && rawPublicKey && credentials != null)
@@ -760,9 +764,9 @@ namespace SharpDTLS.Protocol12
                 if (authenticate || fixedKeyAgreement)
                 {
                     certificate.Chain.Add(clientCertificate.GetEncoded());
-                    LocalCertificate = clientCertificate;
-                    foreach (var intermediate in intermediates ?? Array.Empty<X509Certificate>())
-                        certificate.Chain.Add(intermediate.GetEncoded());
+                    LocalCertificate = credentials.Certificate;
+                    foreach (var intermediate in credentials.IntermediateChain)
+                        certificate.Chain.Add(intermediate);
                 }
                 SendHandshake(HandshakeType.Certificate, certificate.Encode());
             }

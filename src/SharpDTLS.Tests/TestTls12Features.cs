@@ -210,7 +210,7 @@ namespace SharpDTLS.Tests
                     c.ClientIntermediateCertificates = new[] { Pki.Intermediate.Cert };
                     c.ApplicationProtocols = new[] { "http/1.1" };
                     c.ServerName = "server.test";
-                    c.ServerCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }).ForServer("server.test");
+                    c.ServerCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForServer("server.test");
                 });
                 Assert.AreEqual("http/1.1", client.ApplicationProtocol);
                 client.SendApplicationData(Encoding.UTF8.GetBytes("authenticated\n"));
@@ -222,7 +222,7 @@ namespace SharpDTLS.Tests
             using var tlsServer = new Tls12Server(key, cert)
             {
                 IntermediateCertificates = new[] { Pki.Intermediate.Cert }, RequireClientCertificate = true,
-                ClientCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }).ForClient(), ApplicationProtocols = new[] { "h2" },
+                ClientCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForClient(), ApplicationProtocols = new[] { "h2" },
             };
             var established = new TaskCompletionSource<Tls12ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
             tlsServer.HandshakeFinished += (_, c) => established.TrySetResult(c);

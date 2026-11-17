@@ -44,7 +44,8 @@ namespace SharpDTLS
         /// Possible issuers of the server certificate besides the ones the server sends, e.g. the root CA when it
         /// issued the certificate directly.
         /// </param>
-        public OcspStapleValidator(IEnumerable<X509Certificate> issuers = null) => _issuers = issuers?.ToList() ?? new List<X509Certificate>();
+        public OcspStapleValidator(IEnumerable<System.Security.Cryptography.X509Certificates.X509Certificate2> issuers = null)
+            => _issuers = Certificates.ToBc(issuers) ?? new List<X509Certificate>();
 
         /// <summary>Fail when the server staples no response (otherwise a missing staple is accepted).</summary>
         public bool Required { get; set; }

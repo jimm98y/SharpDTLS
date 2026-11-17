@@ -35,11 +35,11 @@ namespace SharpDTLS.Tests
             public readonly TaskCompletionSource<Exception> ClientFailed = new(TaskCreationOptions.RunContinuationsAsynchronously);
         }
 
-        private static Setup Connect(bool allow = true, bool withCertificate = true, Func<X509Certificate, IReadOnlyList<byte[]>, bool> validator = null,
+        private static Setup Connect(bool allow = true, bool withCertificate = true, Func<System.Security.Cryptography.X509Certificates.X509Certificate2, IReadOnlyList<byte[]>, bool> validator = null,
             Action<Dtls13Server, Dtls13Client> configure = null)
         {
             var s = new Setup();
-            s.Server = new Dtls13Server(s.Pair.Server) { ClientCertificateValidator = validator ?? new CertificateValidator(new[] { Pki.Root.Cert }).ForClient() };
+            s.Server = new Dtls13Server(s.Pair.Server) { ClientCertificateValidator = validator ?? new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForClient() };
             s.Server.ApplicationDataReceived += (_, e) => { lock (s.ServerReceived) s.ServerReceived.Add(Encoding.UTF8.GetString(e.Data)); };
             s.Client = new Dtls13Client(s.Pair.Client) { AllowPostHandshakeAuthentication = allow };
             if (withCertificate)
@@ -180,7 +180,7 @@ namespace SharpDTLS.Tests
             System.IO.File.AppendAllText(certPath, System.IO.File.ReadAllText(OpenSsl.WritePem(dir, "intermediate.pem", Pki.Intermediate.Cert)));
 
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
-            var server = new Dtls13Server(transport) { ClientCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }).ForClient() };
+            var server = new Dtls13Server(transport) { ClientCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForClient() };
             using var client = new OpenSslProcess($"client {transport.LocalEndpoint.Port} -pha -cert {certPath} -key {keyPath}", dir, WolfSsl.Harness);
             Assert.IsTrue(client.WaitForOutput("CONNECTED", Timeout), client.Output);
             Assert.IsTrue(SpinWait.SpinUntil(() => server.Connections.Any(c => c.IsHandshakeComplete), Timeout));

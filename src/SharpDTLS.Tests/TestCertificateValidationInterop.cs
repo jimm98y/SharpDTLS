@@ -58,7 +58,7 @@ namespace SharpDTLS.Tests
             Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), server.Output);
 
             using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
-            var client = new Dtls12Client(transport) { ServerCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }).ForServer(hostName) };
+            var client = new Dtls12Client(transport) { ServerCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForServer(hostName) };
             var error = Wait(client.BeginHandshake, s => client.HandshakeFinished += (_, _) => s(), f => client.Failed += (_, ex) => f(ex), server.Output);
             Assert.AreEqual(expected, (error as DtlsException)?.Alert ?? (error == null ? null : AlertDescription.InternalError), error?.ToString());
         }
@@ -99,7 +99,7 @@ namespace SharpDTLS.Tests
             Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), server.Output);
 
             using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
-            var client = new Dtls13Client(transport) { ServerCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }).ForServer(hostName) };
+            var client = new Dtls13Client(transport) { ServerCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForServer(hostName) };
             var error = Wait(client.BeginHandshake, s => client.HandshakeFinished += (_, _) => s(), f => client.Failed += (_, ex) => f(ex), server.Output);
             Assert.AreEqual(expected, (error as DtlsException)?.Alert ?? (error == null ? null : AlertDescription.InternalError), error?.ToString());
         }

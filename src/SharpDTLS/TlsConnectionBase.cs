@@ -19,8 +19,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 // SOFTWARE.
 
-using Org.BouncyCastle.X509;
 using System;
+using System.Security.Cryptography.X509Certificates;
+using BcX509Certificate = Org.BouncyCastle.X509.X509Certificate;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -113,10 +114,29 @@ namespace SharpDTLS
         public abstract bool IsResumed { get; }
 
         /// <summary>The X.509 certificate this side authenticated with, or null.</summary>
-        public X509Certificate LocalCertificate { get; protected set; }
+        public X509Certificate2 LocalCertificate { get; protected set; }
 
-        /// <summary>The X.509 certificate the peer authenticated with (or the one of a resumed session), or null.</summary>
-        public abstract X509Certificate PeerCertificate { get; }
+        /// <summary>
+        /// The X.509 certificate the peer authenticated with (or the one of a resumed session), or null.
+        /// It belongs to the connection: do not dispose of it.
+        /// </summary>
+        public X509Certificate2 PeerCertificate
+        {
+            get
+            {
+                var peer = BcPeerCertificate;
+                var cached = _peerCertificate;
+                if (peer == null)
+                    return null;
+                if (cached.Bc != peer)
+                    _peerCertificate = cached = (peer, Certificates.ToNet(peer));
+                return cached.Net;
+            }
+        }
+
+        private (BcX509Certificate Bc, X509Certificate2 Net) _peerCertificate;
+
+        internal abstract BcX509Certificate BcPeerCertificate { get; }
 
         /// <summary>The application protocol negotiated with ALPN (RFC 7301), or null.</summary>
         public string ApplicationProtocol { get; protected set; }

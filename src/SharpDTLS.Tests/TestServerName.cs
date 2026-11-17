@@ -48,9 +48,9 @@ namespace SharpDTLS.Tests
         {
             var pair = new ScriptedTransportPair();
             var asked = new List<string>();
-            var server = new Dtls12Server(pair.Server, _default.Value.KeyPair, _default.Value.Certificate)
+            var server = new Dtls12Server(pair.Server, _default.Value.KeyPair, _default.Value.BcCertificate)
             {
-                IntermediateCertificates = _default.Value.IntermediateCertificates,
+                IntermediateCertificates = Certificates.ToBc(_default.Value.IntermediateCertificates),
                 CertificateSelector = name => { lock (asked) asked.Add(name); return Select(name); },
                 TicketKeys = keys,
             };
@@ -58,7 +58,7 @@ namespace SharpDTLS.Tests
             {
                 ServerName = serverName,
                 ResumptionSession = resume,
-                ServerCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }).ForServer(expectedCertificateName),
+                ServerCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForServer(expectedCertificateName),
             };
             var error = Wait(client.BeginHandshake, s => client.HandshakeFinished += (_, _) => s(), f => client.Failed += (_, ex) => f(ex));
             Assert.IsNull(error, error?.ToString());
@@ -69,9 +69,9 @@ namespace SharpDTLS.Tests
             Dtls13SessionTicket resume = null, SessionTicketKeys keys = null)
         {
             var pair = new ScriptedTransportPair();
-            var server = new Dtls13Server(pair.Server, _default.Value.KeyPair, _default.Value.Certificate)
+            var server = new Dtls13Server(pair.Server, _default.Value.KeyPair, _default.Value.BcCertificate)
             {
-                IntermediateCertificates = _default.Value.IntermediateCertificates,
+                IntermediateCertificates = Certificates.ToBc(_default.Value.IntermediateCertificates),
                 CertificateSelector = Select,
                 TicketKeys = keys,
                 InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50),
@@ -80,7 +80,7 @@ namespace SharpDTLS.Tests
             {
                 ServerName = serverName,
                 ResumptionTicket = resume,
-                ServerCertificateValidator = expectedCertificateName == null ? null : new CertificateValidator(new[] { Pki.Root.Cert }).ForServer(expectedCertificateName),
+                ServerCertificateValidator = expectedCertificateName == null ? null : new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForServer(expectedCertificateName),
             };
             var error = Wait(client.BeginHandshake, s => client.HandshakeFinished += (_, _) => s(), f => client.Failed += (_, ex) => f(ex));
             Assert.IsNull(error, error?.ToString());
@@ -166,7 +166,7 @@ namespace SharpDTLS.Tests
             var client = new Dtls12Client(transport)
             {
                 ServerName = "b.test",
-                ServerCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }).ForServer("b.test"),
+                ServerCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForServer("b.test"),
             };
             var error = Wait(client.BeginHandshake, s => client.HandshakeFinished += (_, _) => s(), f => client.Failed += (_, ex) => f(ex));
             Assert.IsNull(error, error + "\n" + server.Output);
@@ -180,9 +180,9 @@ namespace SharpDTLS.Tests
             string dir = OpenSsl.NewTempDirectory();
             string root = OpenSsl.WritePem(dir, "root.pem", Pki.Root.Cert);
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
-            var server = new Dtls12Server(transport, _default.Value.KeyPair, _default.Value.Certificate)
+            var server = new Dtls12Server(transport, _default.Value.KeyPair, _default.Value.BcCertificate)
             {
-                IntermediateCertificates = _default.Value.IntermediateCertificates,
+                IntermediateCertificates = Certificates.ToBc(_default.Value.IntermediateCertificates),
                 CertificateSelector = Select,
             };
             using var client = new OpenSslProcess(
@@ -199,9 +199,9 @@ namespace SharpDTLS.Tests
             string dir = OpenSsl.NewTempDirectory();
             string root = OpenSsl.WritePem(dir, "root.pem", Pki.Root.Cert);
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
-            var server = new Dtls13Server(transport, _default.Value.KeyPair, _default.Value.Certificate)
+            var server = new Dtls13Server(transport, _default.Value.KeyPair, _default.Value.BcCertificate)
             {
-                IntermediateCertificates = _default.Value.IntermediateCertificates,
+                IntermediateCertificates = Certificates.ToBc(_default.Value.IntermediateCertificates),
                 CertificateSelector = Select,
             };
             using var client = new OpenSslProcess($"client {transport.LocalEndpoint.Port} -sni b.test -verify {root} -host b.test", dir, WolfSsl.Harness);

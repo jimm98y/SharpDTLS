@@ -68,7 +68,7 @@ namespace SharpDTLS.Protocol13
         private Dtls13CryptoContext _earlyKeys;
         private CertificateCredentials _credentials;
         private X509Certificate _certificate;
-        private IList<X509Certificate> _intermediates;
+        private IEnumerable<byte[]> _intermediates;
         private bool _serverNameUsed;
         private ITlsExtension _recordSizeResponse;
         private byte[] _ocspResponse;
@@ -119,7 +119,7 @@ namespace SharpDTLS.Protocol13
         /// <summary>The client's certificate, when one was sent.</summary>
         public X509Certificate ClientCertificate => _clientCertificate;
 
-        public override X509Certificate PeerCertificate => _clientCertificate;
+        internal override X509Certificate BcPeerCertificate => _clientCertificate;
 
         /// <summary>The client's raw public key (DER SubjectPublicKeyInfo, RFC 7250), when it authenticated with one.</summary>
         public byte[] ClientRawPublicKey { get; private set; }
@@ -194,9 +194,10 @@ namespace SharpDTLS.Protocol13
                     ?? _server.CertificateSelector?.Invoke(ServerName);
                 _serverNameUsed = selected != null && ServerName != null;
                 (_credentials, _intermediates, _ocspResponse) = selected != null
-                    ? (selected, selected.IntermediateCertificates, selected.OcspResponse)
-                    : (_server.Credentials, _server.IntermediateCertificates, _server.OcspResponse);
-                _certificate = _credentials?.Certificate;
+                    ? (selected, selected.IntermediateChain, selected.OcspResponse)
+                    : (_server.Credentials, _server.IntermediateCertificates?.Select(c => c.GetEncoded()) ?? _server.Credentials?.IntermediateChain,
+                       _server.OcspResponse ?? (_server.Credentials as ServerCredentials)?.OcspResponse);
+                _certificate = _credentials?.BcCertificate;
                 if (_clientHello.Extensions.OfType<StatusRequestExtension>().FirstOrDefault()?.StatusType != StatusRequestExtension.Ocsp)
                     _ocspResponse = null;
 
@@ -434,8 +435,8 @@ namespace SharpDTLS.Protocol13
                 else
                 {
                     chain.Add(_certificate.GetEncoded());
-                    LocalCertificate = _certificate;
-                    chain.AddRange((_intermediates ?? Array.Empty<X509Certificate>()).Select(c => c.GetEncoded()));
+                    LocalCertificate = _credentials.Certificate;
+                    chain.AddRange(_intermediates ?? Array.Empty<byte[]>());
                 }
                 var certificate = new CertificateDatagram(chain) { OcspResponse = _ocspResponse };
                 CertificateCompression.Validate(_server.CertificateCompressionAlgorithms);
@@ -621,7 +622,7 @@ namespace SharpDTLS.Protocol13
                     }
                     if (_clientCertificate == null)
                         throw new DtlsException(AlertDescription.BadCertificate, "Client certificate could not be parsed.");
-                    if (!(_server.ClientCertificateValidator ?? CertificateValidatorDefaults.Client)(_clientCertificate, certificate.CertificateChain))
+                    if (!(_server.ClientCertificateValidator ?? CertificateValidatorDefaults.Client)(Certificates.Load(certificate.Certificate), certificate.CertificateChain))
                         throw new DtlsException(AlertDescription.BadCertificate, "Client certificate was rejected.");
                     _clientPublicKey = _clientCertificate.GetPublicKey();
 
@@ -822,7 +823,7 @@ namespace SharpDTLS.Protocol13
                     else
                     {
                         auth.Certificate = SharpDTLS.Protocol12.Tls12ClientConnection.ParseCertificate(certificate.Certificate);
-                        if (!(_server.ClientCertificateValidator ?? CertificateValidatorDefaults.Client)(auth.Certificate, certificate.CertificateChain))
+                        if (!(_server.ClientCertificateValidator ?? CertificateValidatorDefaults.Client)(Certificates.Load(certificate.Certificate), certificate.CertificateChain))
                             throw new DtlsException(AlertDescription.BadCertificate, "Client certificate was rejected.");
                         auth.PublicKey = auth.Certificate.GetPublicKey();
                         auth.Stage = 1;

@@ -19,7 +19,7 @@ namespace SharpDTLS.Tests
         private static readonly Lazy<TestPki> _pki = new(() => new TestPki());
         private static TestPki Pki => _pki.Value;
 
-        private static CertificateValidator Validator() => new(new[] { Pki.Root.Cert });
+        private static CertificateValidator Validator() => new(new[] { Pki.Root.Cert }.Net());
 
         private static List<byte[]> Chain(Org.BouncyCastle.X509.X509Certificate leaf, bool withIntermediate = true)
             => withIntermediate ? new List<byte[]> { leaf.GetEncoded(), Pki.Intermediate.Cert.GetEncoded() } : new List<byte[]> { leaf.GetEncoded() };
@@ -60,7 +60,7 @@ namespace SharpDTLS.Tests
         {
             var leaf = Pki.Leaf(new[] { "server.test" }).Cert;
             string seen = null;
-            var validator = new CertificateValidator(new[] { Pki.Root.Cert })
+            var validator = new CertificateValidator(new[] { Pki.Root.Cert }.Net())
             {
                 HostNameValidator = (certificate, hostName) => { seen = hostName; return hostName == "pinned.example"; },
             };
@@ -75,7 +75,7 @@ namespace SharpDTLS.Tests
         {
             var leaf = Pki.Leaf(commonName: "legacy.test").Cert;
             AssertRejected(AlertDescription.BadCertificate, () => Validator().Validate(Chain(leaf), ServerAuth, "legacy.test"));
-            new CertificateValidator(new[] { Pki.Root.Cert }) { AllowCommonNameFallback = true }.Validate(Chain(leaf), ServerAuth, "legacy.test");
+            new CertificateValidator(new[] { Pki.Root.Cert }.Net()) { AllowCommonNameFallback = true }.Validate(Chain(leaf), ServerAuth, "legacy.test");
         }
 
         [TestMethod]
@@ -85,7 +85,7 @@ namespace SharpDTLS.Tests
             AssertRejected(AlertDescription.UnknownCa, () => Validator().Validate(Chain(leaf, withIntermediate: false), ServerAuth, "server.test"));
 
             var other = new TestPki("Other");
-            AssertRejected(AlertDescription.UnknownCa, () => new CertificateValidator(new[] { other.Root.Cert }).Validate(Chain(leaf), ServerAuth, "server.test"));
+            AssertRejected(AlertDescription.UnknownCa, () => new CertificateValidator(new[] { other.Root.Cert }.Net()).Validate(Chain(leaf), ServerAuth, "server.test"));
         }
 
         [TestMethod]
@@ -103,7 +103,7 @@ namespace SharpDTLS.Tests
         {
             var clientOnly = Pki.Leaf(new[] { "server.test" }, usage: KeyPurposeID.id_kp_clientAuth).Cert;
             AssertRejected(AlertDescription.UnsupportedCertificate, () => Validator().Validate(Chain(clientOnly), ServerAuth, "server.test"));
-            Validator().ForClient()(clientOnly, Chain(clientOnly));
+            Validator().ForClient()(clientOnly.Net(), Chain(clientOnly));
         }
 
         [TestMethod]

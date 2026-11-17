@@ -61,7 +61,12 @@ namespace SharpDTLS.Protocol12.TLS12
         }
 
         public Tls12Server(AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
-            : base(keyPair, certificate, TlsVersion.Tls12)
+            : this(CertificateCredentials.OfServer(keyPair, certificate))
+        {
+        }
+
+        public Tls12Server(CertificateCredentials credentials)
+            : base(credentials, TlsVersion.Tls12)
         {
         }
 

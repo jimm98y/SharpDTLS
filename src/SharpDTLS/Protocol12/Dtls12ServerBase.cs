@@ -41,8 +41,8 @@ namespace SharpDTLS.Protocol12
         private readonly ConcurrentDictionary<string, Tls12ServerConnection> _connectionsById = new();
         private readonly ClientHelloReassembler _clientHelloReassembler = new();
 
-        protected Dtls12ServerBase(IServerTransport serverTransport, AsymmetricCipherKeyPair keyPair, X509Certificate certificate, ushort version)
-            : base(keyPair, certificate, version)
+        protected Dtls12ServerBase(IServerTransport serverTransport, CertificateCredentials credentials, ushort version)
+            : base(credentials, version)
         {
             ServerTransport = serverTransport;
             ServerTransport.OnDataReceived += OnDataReceived;

@@ -19,11 +19,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 // SOFTWARE.
 
-using Org.BouncyCastle.X509;
 using SharpDTLS.Protocol12;
 using SharpDTLS.Protocol13;
 using System;
 using System.Collections.Generic;
+using System.Security.Cryptography.X509Certificates;
 
 namespace SharpDTLS
 {
@@ -74,18 +74,20 @@ namespace SharpDTLS
         /// Client certificate validation; return false to abort with bad_certificate. When null, the chain is validated
         /// against the platform's trust store for clientAuth; set (c, chain) => true to accept any certificate.
         /// </summary>
-        public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ClientCertificateValidator
+        public Func<X509Certificate2, IReadOnlyList<byte[]>, bool> ClientCertificateValidator
         {
             get => Engine13.ClientCertificateValidator;
             set { Engine12.ClientCertificateValidator = value; Engine13.ClientCertificateValidator = value; }
         }
 
         /// <summary>Intermediate CA certificates sent after the server certificate, issuer of the previous one first.</summary>
-        public IList<X509Certificate> IntermediateCertificates
+        public IList<X509Certificate2> IntermediateCertificates
         {
-            get => Engine13.IntermediateCertificates;
-            set { Engine12.IntermediateCertificates = value; Engine13.IntermediateCertificates = value; }
+            get => _intermediateCertificates;
+            set { _intermediateCertificates = value; Engine12.IntermediateCertificates = Engine13.IntermediateCertificates = Certificates.ToBc(value); }
         }
+
+        private IList<X509Certificate2> _intermediateCertificates;
 
         /// <summary>
         /// Chooses the credentials for the client's server_name (RFC 6066), which is null when the client sent none.
@@ -153,11 +155,13 @@ namespace SharpDTLS
         }
 
         /// <summary>CAs named in our CertificateRequests (certificate_authorities), to guide the client's choice; null names none.</summary>
-        public IList<X509Certificate> ClientCertificateAuthorities
+        public IList<X509Certificate2> ClientCertificateAuthorities
         {
-            get => Engine13.ClientCertificateAuthorities;
-            set { Engine12.ClientCertificateAuthorities = value; Engine13.ClientCertificateAuthorities = value; }
+            get => _clientCertificateAuthorities;
+            set { _clientCertificateAuthorities = value; Engine12.ClientCertificateAuthorities = Engine13.ClientCertificateAuthorities = Certificates.ToBc(value); }
         }
+
+        private IList<X509Certificate2> _clientCertificateAuthorities;
 
         /// <summary>Checks a client's raw public key (DER SubjectPublicKeyInfo); false aborts with bad_certificate. When null, one is refused.</summary>
         public Func<byte[], bool> ClientRawPublicKeyValidator

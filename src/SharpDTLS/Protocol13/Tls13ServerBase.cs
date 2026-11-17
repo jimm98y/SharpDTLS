@@ -36,11 +36,9 @@ namespace SharpDTLS.Protocol13
     /// </summary>
     internal abstract class Tls13ServerBase
     {
-        protected Tls13ServerBase(AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
+        protected Tls13ServerBase(CertificateCredentials credentials)
         {
-            if (certificate != null && keyPair == null)
-                throw new ArgumentException("A certificate needs its key pair.");
-            Credentials = CertificateCredentials.Of(keyPair, certificate);
+            Credentials = credentials;
         }
 
         /// <summary>The default key and certificate; null for a PSK-only server.</summary>
@@ -86,7 +84,7 @@ namespace SharpDTLS.Protocol13
         public IList<ushort> SupportedGroups { get; set; } = new List<ushort>(Dtls13Groups.DefaultPreference);
 
         /// <summary>Optional client certificate validation. Return false to abort with bad_certificate.</summary>
-        public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ClientCertificateValidator { get; set; }
+        public Func<System.Security.Cryptography.X509Certificates.X509Certificate2, IReadOnlyList<byte[]>, bool> ClientCertificateValidator { get; set; }
 
         /// <summary>
         /// Certificate types we authenticate with, in preference order (RFC 7250); null for X.509 only. With

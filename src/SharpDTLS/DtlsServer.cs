@@ -66,13 +66,21 @@ namespace SharpDTLS
         {
         }
 
-        public DtlsServer(IServerTransport serverTransport, AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
-            : this(serverTransport, new EnginePort(serverTransport), new EnginePort(serverTransport), keyPair, certificate)
+        private DtlsServer(IServerTransport serverTransport, (AsymmetricCipherKeyPair keyPair, X509Certificate certificate) generated)
+            : this(serverTransport, new ServerCredentials(generated.keyPair, generated.certificate))
         {
         }
 
-        private DtlsServer(IServerTransport serverTransport, EnginePort port12, EnginePort port13, AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
-            : base(new Dtls12Server(port12, keyPair, certificate), new Dtls13Server(port13, keyPair, certificate))
+        /// <param name="credentials">
+        /// The certificate and key, with the intermediates and OCSP staple to send; null for a server of PSK, SRP or PWD alone.
+        /// </param>
+        public DtlsServer(IServerTransport serverTransport, ServerCredentials credentials)
+            : this(serverTransport, new EnginePort(serverTransport), new EnginePort(serverTransport), credentials)
+        {
+        }
+
+        private DtlsServer(IServerTransport serverTransport, EnginePort port12, EnginePort port13, ServerCredentials credentials)
+            : base(new Dtls12Server(port12, credentials), new Dtls13Server(port13, credentials))
         {
             ServerTransport = serverTransport;
             _port12 = port12;
@@ -91,11 +99,6 @@ namespace SharpDTLS
             Dtls12.AcceptsConnection = Dtls13.AcceptsConnection = AcceptsConnection;
 
             serverTransport.OnDataReceived += OnDataReceived;
-        }
-
-        private DtlsServer(IServerTransport serverTransport, (AsymmetricCipherKeyPair keyPair, X509Certificate certificate) credentials)
-            : this(serverTransport, credentials.keyPair, credentials.certificate)
-        {
         }
 
         public IServerTransport ServerTransport { get; }

@@ -104,7 +104,7 @@ namespace SharpDTLS.Tests
         public void ClientAuthentication_InHandshakeAndPostHandshake()
         {
             var (key, cert) = Pki.Leaf(commonName: "tls13 client", usage: KeyPurposeID.id_kp_clientAuth);
-            using var server = new Tls13Server { RequireClientCertificate = true, ClientCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }).ForClient() };
+            using var server = new Tls13Server { RequireClientCertificate = true, ClientCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForClient() };
             var established = new TaskCompletionSource<Tls13ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
             server.HandshakeFinished += (_, c) => established.TrySetResult(c);
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
@@ -161,7 +161,7 @@ namespace SharpDTLS.Tests
                 c.SupportedGroups = new[] { Dtls13Groups.X25519, Dtls13Groups.Secp384r1 };
                 c.ApplicationProtocols = new[] { "h2" };
                 c.ServerName = "server.test";
-                c.ServerCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }).ForServer("server.test");
+                c.ServerCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForServer("server.test");
             });
             Assert.AreEqual(Dtls13Groups.Secp384r1, client.NegotiatedGroup);
             Assert.AreEqual("h2", client.ApplicationProtocol);
@@ -222,7 +222,7 @@ namespace SharpDTLS.Tests
             var (clientKey, clientCert) = Pki.Leaf(commonName: "openssl client", usage: KeyPurposeID.id_kp_clientAuth);
             string clientCertPath = OpenSsl.WritePem(f.Dir, "client.pem", clientCert);
             string clientKeyPath = OpenSsl.WritePem(f.Dir, "client-key.pem", clientKey.Private);
-            using var server = new Tls13Server { RequireClientCertificate = true, ClientCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }).ForClient() };
+            using var server = new Tls13Server { RequireClientCertificate = true, ClientCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForClient() };
             var established = new TaskCompletionSource<Tls13ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
             server.HandshakeFinished += (_, c) => established.TrySetResult(c);
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));

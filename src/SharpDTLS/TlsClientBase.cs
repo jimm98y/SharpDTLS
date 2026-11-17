@@ -21,7 +21,7 @@
 
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Parameters;
-using Org.BouncyCastle.X509;
+using System.Security.Cryptography.X509Certificates;
 using SharpDTLS.Protocol12;
 using SharpDTLS.Protocol13;
 using System;
@@ -123,36 +123,25 @@ namespace SharpDTLS
         /// When null, the chain is validated against the platform's trust store for serverAuth and matched against
         /// ServerName (see <see cref="CertificateValidator"/>); set (c, chain) => true to accept any certificate.
         /// </summary>
-        public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ServerCertificateValidator
+        public Func<X509Certificate2, IReadOnlyList<byte[]>, bool> ServerCertificateValidator
         {
             get => Engine13.ServerCertificateValidator;
             set { Engine12.ServerCertificateValidator = value; Engine13.ServerCertificateValidator = value; }
         }
 
-        /// <summary>The key pair of <see cref="ClientCertificate"/>, or of the raw public key we authenticate with.</summary>
-        public AsymmetricCipherKeyPair ClientCertificateKeyPair
+        /// <summary>
+        /// The certificate (or raw public key) and key we answer a CertificateRequest with, and the intermediates sent
+        /// after the certificate; null to send none.
+        /// </summary>
+        public CertificateCredentials ClientCredentials
         {
-            get => Engine13.ClientCertificateKeyPair;
-            set { Engine12.ClientCertificateKeyPair = value; Engine13.ClientCertificateKeyPair = value; }
-        }
-
-        /// <summary>The certificate we answer a CertificateRequest with; null to send none.</summary>
-        public X509Certificate ClientCertificate
-        {
-            get => Engine13.ClientCertificate;
-            set { Engine12.ClientCertificate = value; Engine13.ClientCertificate = value; }
-        }
-
-        /// <summary>Intermediate CA certificates sent after <see cref="ClientCertificate"/>.</summary>
-        public IList<X509Certificate> ClientIntermediateCertificates
-        {
-            get => Engine13.ClientIntermediateCertificates;
-            set { Engine12.ClientIntermediateCertificates = value; Engine13.ClientIntermediateCertificates = value; }
+            get => Engine13.ClientCredentials;
+            set { Engine12.ClientCredentials = value; Engine13.ClientCredentials = value; }
         }
 
         /// <summary>
         /// Chooses the client credentials for a CertificateRequest (the CAs and signature schemes the server accepts);
-        /// returning null uses <see cref="ClientCertificate"/> and <see cref="ClientCertificateKeyPair"/>.
+        /// returning null uses <see cref="ClientCredentials"/>.
         /// </summary>
         public Func<CertificateSelectionContext, CertificateCredentials> ClientCredentialsSelector
         {
@@ -190,7 +179,7 @@ namespace SharpDTLS
 
         /// <summary>
         /// Certificate types we can authenticate with, in preference order (RFC 7250); null for X.509 only. A raw public key
-        /// needs only <see cref="ClientCertificateKeyPair"/>.
+        /// needs no certificate in <see cref="ClientCredentials"/>.
         /// </summary>
         public IList<CertificateType> ClientCertificateTypes
         {
@@ -331,11 +320,17 @@ namespace SharpDTLS
 
         /// <summary>CAs we trust, named in certificate_authorities (RFC 8446 §4.2.4) so the server can pick a matching chain.</summary>
         /// <remarks>Used when 1.3 is negotiated.</remarks>
-        public IList<X509Certificate> CertificateAuthorities { get => Engine13.CertificateAuthorities; set => Engine13.CertificateAuthorities = value; }
+        public IList<X509Certificate2> CertificateAuthorities
+        {
+            get => _certificateAuthorities;
+            set { _certificateAuthorities = value; Engine13.CertificateAuthorities = Certificates.ToBc(value); }
+        }
+
+        private IList<X509Certificate2> _certificateAuthorities;
 
         /// <summary>
         /// Let the server ask for our certificate after the handshake (post_handshake_auth, RFC 8446 §4.6.2). Requests are
-        /// answered with <see cref="ClientCertificate"/> (or a raw public key) and its key, or with no certificate.
+        /// answered with <see cref="ClientCredentials"/>, or with no certificate.
         /// </summary>
         /// <remarks>Used when 1.3 is negotiated.</remarks>
         public bool AllowPostHandshakeAuthentication { get => Engine13.AllowPostHandshakeAuthentication; set => Engine13.AllowPostHandshakeAuthentication = value; }

@@ -21,7 +21,7 @@
 
 using System;
 using System.Collections.Generic;
-using BcX509Certificate = Org.BouncyCastle.X509.X509Certificate;
+using System.Security.Cryptography.X509Certificates;
 
 namespace SharpDTLS
 {
@@ -53,7 +53,7 @@ namespace SharpDTLS
         /// A server certificate validator: the chain must be valid for serverAuth and match <paramref name="hostName"/>
         /// (a DNS name or IP address; null skips the name check).
         /// </summary>
-        public static Func<BcX509Certificate, IReadOnlyList<byte[]>, bool> ForServer(this ICertificateValidator validator, string hostName)
+        public static Func<X509Certificate2, IReadOnlyList<byte[]>, bool> ForServer(this ICertificateValidator validator, string hostName)
         {
             if (validator == null)
                 throw new ArgumentNullException(nameof(validator));
@@ -61,7 +61,7 @@ namespace SharpDTLS
         }
 
         /// <summary>A client certificate validator: the chain must be valid for clientAuth.</summary>
-        public static Func<BcX509Certificate, IReadOnlyList<byte[]>, bool> ForClient(this ICertificateValidator validator)
+        public static Func<X509Certificate2, IReadOnlyList<byte[]>, bool> ForClient(this ICertificateValidator validator)
         {
             if (validator == null)
                 throw new ArgumentNullException(nameof(validator));
@@ -78,15 +78,15 @@ namespace SharpDTLS
         /// </summary>
         internal static bool AcceptAnyPeerByDefault;
 
-        private static readonly Func<BcX509Certificate, IReadOnlyList<byte[]>, bool> AcceptAny = (certificate, chain) => true;
-        private static readonly Func<BcX509Certificate, IReadOnlyList<byte[]>, bool> ClientChain = new CertificateValidator().ForClient();
+        private static readonly Func<X509Certificate2, IReadOnlyList<byte[]>, bool> AcceptAny = (certificate, chain) => true;
+        private static readonly Func<X509Certificate2, IReadOnlyList<byte[]>, bool> ClientChain = new CertificateValidator().ForClient();
 
         /// <summary>A server's chain, against the platform's trust store for serverAuth, matching <paramref name="hostName"/>.</summary>
-        public static Func<BcX509Certificate, IReadOnlyList<byte[]>, bool> Server(string hostName)
+        public static Func<X509Certificate2, IReadOnlyList<byte[]>, bool> Server(string hostName)
             => AcceptAnyPeerByDefault ? AcceptAny : new CertificateValidator().ForServer(hostName);
 
         /// <summary>A client's chain, against the platform's trust store for clientAuth.</summary>
-        public static Func<BcX509Certificate, IReadOnlyList<byte[]>, bool> Client => AcceptAnyPeerByDefault ? AcceptAny : ClientChain;
+        public static Func<X509Certificate2, IReadOnlyList<byte[]>, bool> Client => AcceptAnyPeerByDefault ? AcceptAny : ClientChain;
 
         /// <summary>Whether a raw public key is accepted: by its validator, and without one never.</summary>
         public static bool RawPublicKey(Func<byte[], bool> validator, byte[] spki) => validator != null ? validator(spki) : AcceptAnyPeerByDefault;

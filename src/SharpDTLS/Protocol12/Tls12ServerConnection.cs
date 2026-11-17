@@ -45,7 +45,7 @@ namespace SharpDTLS.Protocol12
         public IList<ushort> CipherSuites { get; set; }
 
         public bool RequireClientCertificate { get; set; }
-        public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ClientCertificateValidator { get; set; }
+        public Func<System.Security.Cryptography.X509Certificates.X509Certificate2, IReadOnlyList<byte[]>, bool> ClientCertificateValidator { get; set; }
 
         /// <summary>Certificate types we authenticate with, in preference order (RFC 7250); null for X.509 only.</summary>
         public IList<CertificateType> ServerCertificateTypes { get; set; }
@@ -173,7 +173,7 @@ namespace SharpDTLS.Protocol12
         private bool _issueTicket;
         private CertificateCredentials _credentials;
         private X509Certificate _certificate;
-        private IList<X509Certificate> _intermediates;
+        private IEnumerable<byte[]> _intermediates;
         private byte[] _ocspResponse;
         private bool _serverNameUsed;
 
@@ -229,7 +229,7 @@ namespace SharpDTLS.Protocol12
         /// <summary>The client's certificate, when one was sent.</summary>
         public X509Certificate ClientCertificate => _clientCertificate;
 
-        public override X509Certificate PeerCertificate => _clientCertificate;
+        internal override X509Certificate BcPeerCertificate => _clientCertificate;
 
         /// <summary>The client's raw public key (DER SubjectPublicKeyInfo, RFC 7250), when it authenticated with one.</summary>
         public byte[] ClientRawPublicKey { get; private set; }
@@ -322,9 +322,10 @@ namespace SharpDTLS.Protocol12
                 ?? _settings.CertificateSelector?.Invoke(ServerName);
             _serverNameUsed = selected != null && ServerName != null;
             (_credentials, _intermediates, _ocspResponse) = selected != null
-                ? (selected, selected.IntermediateCertificates, selected.OcspResponse)
-                : (_settings.Credentials, _settings.IntermediateCertificates, _settings.OcspResponse);
-            _certificate = _credentials?.Certificate;
+                ? (selected, selected.IntermediateChain, selected.OcspResponse)
+                : (_settings.Credentials, _settings.IntermediateCertificates?.Select(c => c.GetEncoded()) ?? _settings.Credentials?.IntermediateChain,
+                   _settings.OcspResponse ?? (_settings.Credentials as ServerCredentials)?.OcspResponse);
+            _certificate = _credentials?.BcCertificate;
             if (ch.Extension<StatusRequestExtension>()?.StatusType != StatusRequestExtension.Ocsp)
                 _ocspResponse = null;
 
@@ -544,9 +545,9 @@ namespace SharpDTLS.Protocol12
                 {
                     var certificate = new CertificateMessage();
                     certificate.Chain.Add(_certificate.GetEncoded());
-                    LocalCertificate = _certificate;
-                    foreach (var intermediate in _intermediates ?? Array.Empty<X509Certificate>())
-                        certificate.Chain.Add(intermediate.GetEncoded());
+                    LocalCertificate = _credentials.Certificate;
+                    foreach (var intermediate in _intermediates ?? Array.Empty<byte[]>())
+                        certificate.Chain.Add(intermediate);
                     SendHandshake(HandshakeType.Certificate, certificate.Encode());
                 }
                 if (_ocspResponse != null)
@@ -660,7 +661,7 @@ namespace SharpDTLS.Protocol12
                 if (!Tls12ClientConnection.CertificateTypeAccepted(_certificateRequest, _clientCertificate.GetPublicKey())
                     && !(CipherSuite.IsStaticKeyAgreement && Tls12ClientConnection.FixedTypeAccepted(_certificateRequest, _clientCertificate)))
                     throw new DtlsException(AlertDescription.UnsupportedCertificate, "Client certificate type was not requested.");
-                if (!(_settings.ClientCertificateValidator ?? CertificateValidatorDefaults.Client)(_clientCertificate, certificate.Chain))
+                if (!(_settings.ClientCertificateValidator ?? CertificateValidatorDefaults.Client)(Certificates.Load(certificate.Chain[0]), certificate.Chain))
                     throw new DtlsException(AlertDescription.BadCertificate, "Client certificate was rejected.");
                 _clientPublicKey = _clientCertificate.GetPublicKey();
             }

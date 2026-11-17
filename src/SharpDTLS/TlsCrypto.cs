@@ -23,10 +23,13 @@ using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Encodings;
 using Org.BouncyCastle.Crypto.Engines;
 using Org.BouncyCastle.Crypto.Parameters;
+using Org.BouncyCastle.Security;
 using SharpDTLS.Protocol10;
 using SharpDTLS.Protocol12;
 using SharpDTLS.Protocol13;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using BigInteger = Org.BouncyCastle.Math.BigInteger;
 
 namespace SharpDTLS
 {
@@ -91,12 +94,58 @@ namespace SharpDTLS
 
         public virtual byte[] Agree(CertificateCredentials credentials, byte[] peerPublicKey) => PrivateKey(credentials) switch
         {
-            DHPrivateKeyParameters dh => DhUtilities.Agree(dh.Parameters, dh.X, new Org.BouncyCastle.Math.BigInteger(1, peerPublicKey)),
+            DHPrivateKeyParameters dh => DhUtilities.Agree(dh.Parameters, dh.X, new BigInteger(1, peerPublicKey)),
             ECPrivateKeyParameters ec => StaticEcdh.Agree(ec, peerPublicKey),
             _ => throw new CryptographicException("The key is not a key agreement key."),
         };
 
-        /// <summary>The BouncyCastle private key of <paramref name="credentials"/>.</summary>
-        private static AsymmetricKeyParameter PrivateKey(CertificateCredentials credentials) => credentials.KeyPair.Private;
+        /// <summary>The BouncyCastle private key of <paramref name="credentials"/>: of PKCS#8, or exported of the certificate once.</summary>
+        private static AsymmetricKeyParameter PrivateKey(CertificateCredentials credentials)
+            => credentials.BcPrivateKey ??= Export(credentials.Certificate);
+
+        // The certificate's own key, which must be exportable.
+        private static AsymmetricKeyParameter Export(X509Certificate2 certificate)
+        {
+#if NETCOREAPP
+            using AsymmetricAlgorithm key = (AsymmetricAlgorithm)certificate.GetRSAPrivateKey() ?? (AsymmetricAlgorithm)certificate.GetECDsaPrivateKey()
+                ?? certificate.GetDSAPrivateKey() ?? throw new CryptographicException("The certificate's key is not RSA, ECDSA or DSA.");
+            try
+            {
+                return PrivateKeyFactory.CreateKey(key.ExportPkcs8PrivateKey());
+            }
+            catch (CryptographicException)
+            {
+                // exportable, but not as plaintext (a Windows CNG key): encrypted under a password of this call alone
+                string password = System.Convert.ToBase64String(Dtls13CryptoUtils.GenerateRandom(16));
+                byte[] encrypted = key.ExportEncryptedPkcs8PrivateKey(password, new PbeParameters(PbeEncryptionAlgorithm.Aes128Cbc, HashAlgorithmName.SHA256, 1));
+                return PrivateKeyFactory.DecryptKey(password.ToCharArray(), encrypted);
+            }
+#else
+            using (var rsa = certificate.GetRSAPrivateKey())
+            {
+                if (rsa != null)
+                {
+                    var p = rsa.ExportParameters(true);
+                    return new RsaPrivateCrtKeyParameters(new BigInteger(1, p.Modulus), new BigInteger(1, p.Exponent), new BigInteger(1, p.D),
+                        new BigInteger(1, p.P), new BigInteger(1, p.Q), new BigInteger(1, p.DP), new BigInteger(1, p.DQ), new BigInteger(1, p.InverseQ));
+                }
+            }
+            using (var ecdsa = certificate.GetECDsaPrivateKey())
+            {
+                if (ecdsa != null)
+                {
+                    var p = ecdsa.ExportParameters(true);
+                    return new ECPrivateKeyParameters("EC", new BigInteger(1, p.D), Certificates.CurveOid(p.Curve));
+                }
+            }
+            if (certificate.PrivateKey is DSA dsa)
+            {
+                var p = dsa.ExportParameters(true);
+                return new DsaPrivateKeyParameters(new BigInteger(1, p.X),
+                    new DsaParameters(new BigInteger(1, p.P), new BigInteger(1, p.Q), new BigInteger(1, p.G)));
+            }
+            throw new CryptographicException("The certificate's key is not RSA, ECDSA or DSA.");
+#endif
+        }
     }
 }

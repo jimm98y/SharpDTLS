@@ -66,8 +66,11 @@ namespace SharpDTLS
         {
         }
 
-        public TlsServer(AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
-            : base(new Tls12Server(keyPair, certificate), new Tls13Server(keyPair, certificate))
+        /// <param name="credentials">
+        /// The certificate and key, with the intermediates and OCSP staple to send; null for a server of PSK, SRP or PWD alone.
+        /// </param>
+        public TlsServer(ServerCredentials credentials)
+            : base(new Tls12Server(credentials), new Tls13Server(credentials))
         {
             Tls12.HandshakeFinished += (_, c) => OnHandshakeFinished(c);
             Tls13.HandshakeFinished += (_, c) => OnHandshakeFinished(c);
@@ -80,8 +83,8 @@ namespace SharpDTLS
             Tls13.ConnectionCreated += OnConnectionCreated;
         }
 
-        private TlsServer((AsymmetricCipherKeyPair keyPair, X509Certificate certificate) credentials)
-            : this(credentials.keyPair, credentials.certificate)
+        private TlsServer((AsymmetricCipherKeyPair keyPair, X509Certificate certificate) generated)
+            : this(new ServerCredentials(generated.keyPair, generated.certificate))
         {
         }
 

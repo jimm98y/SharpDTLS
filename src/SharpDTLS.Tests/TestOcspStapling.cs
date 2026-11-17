@@ -92,7 +92,7 @@ namespace SharpDTLS.Tests
             byte[] response = Pki.OcspResponse(leaf, fromRoot: true);
             var chain = new List<byte[]> { leaf.GetEncoded() };
             AssertRejected(AlertDescription.BadCertificateStatusResponse, () => new OcspStapleValidator().Validate(response, chain));
-            new OcspStapleValidator(new[] { Pki.Root.Cert }).Validate(response, chain);
+            new OcspStapleValidator(new[] { Pki.Root.Cert }.Net()).Validate(response, chain);
         }
 
         [TestMethod]

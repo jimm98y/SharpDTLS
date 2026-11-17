@@ -6,24 +6,45 @@ const SharpDTLS.CertificateValidator.ClientAuthentication = "1.3.6.1.5.5.7.3.2" 
 const SharpDTLS.CertificateValidator.ServerAuthentication = "1.3.6.1.5.5.7.3.1" -> string
 SharpDTLS.BouncyCastleTlsCrypto
 SharpDTLS.BouncyCastleTlsCrypto.BouncyCastleTlsCrypto() -> void
+SharpDTLS.CertificateCredentials.Certificate.get -> System.Security.Cryptography.X509Certificates.X509Certificate2
+SharpDTLS.CertificateCredentials.CertificateCredentials(System.Security.Cryptography.X509Certificates.X509Certificate2 certificate, byte[] pkcs8PrivateKey, System.Collections.Generic.IList<System.Security.Cryptography.X509Certificates.X509Certificate2> intermediateCertificates = null) -> void
+SharpDTLS.CertificateCredentials.CertificateCredentials(System.Security.Cryptography.X509Certificates.X509Certificate2 certificate, System.Collections.Generic.IList<System.Security.Cryptography.X509Certificates.X509Certificate2> intermediateCertificates = null) -> void
+SharpDTLS.CertificateCredentials.IntermediateCertificates.get -> System.Collections.Generic.IList<System.Security.Cryptography.X509Certificates.X509Certificate2>
+SharpDTLS.CertificateSelectionContext.CertificateAuthorities.get -> System.Collections.Generic.IReadOnlyList<System.Security.Cryptography.X509Certificates.X500DistinguishedName>
+SharpDTLS.CertificateValidator.CertificateValidator(System.Collections.Generic.IEnumerable<System.Security.Cryptography.X509Certificates.X509Certificate2> trustedRoots = null) -> void
+SharpDTLS.CertificateValidator.HostNameValidator.get -> System.Func<System.Security.Cryptography.X509Certificates.X509Certificate2, string, bool>
 SharpDTLS.CertificateValidatorExtensions
+SharpDTLS.DtlsServer.DtlsServer(SharpDTLS.UDP.IServerTransport serverTransport, SharpDTLS.ServerCredentials credentials) -> void
 SharpDTLS.ICertificateValidator
 SharpDTLS.ICertificateValidator.Validate(System.Collections.Generic.IReadOnlyList<byte[]> chain, string usage, string hostName) -> void
 SharpDTLS.ITlsCrypto
 SharpDTLS.ITlsCrypto.Agree(SharpDTLS.CertificateCredentials credentials, byte[] peerPublicKey) -> byte[]
 SharpDTLS.ITlsCrypto.DecryptPreMasterSecret(SharpDTLS.CertificateCredentials credentials, byte[] encrypted) -> byte[]
 SharpDTLS.ITlsCrypto.Sign(SharpDTLS.CertificateCredentials credentials, ushort scheme, byte[] content) -> byte[]
+SharpDTLS.OcspStapleValidator.OcspStapleValidator(System.Collections.Generic.IEnumerable<System.Security.Cryptography.X509Certificates.X509Certificate2> issuers = null) -> void
+SharpDTLS.ServerCredentials.ServerCredentials(System.Security.Cryptography.X509Certificates.X509Certificate2 certificate, byte[] pkcs8PrivateKey, System.Collections.Generic.IList<System.Security.Cryptography.X509Certificates.X509Certificate2> intermediateCertificates = null) -> void
+SharpDTLS.ServerCredentials.ServerCredentials(System.Security.Cryptography.X509Certificates.X509Certificate2 certificate, System.Collections.Generic.IList<System.Security.Cryptography.X509Certificates.X509Certificate2> intermediateCertificates = null) -> void
+SharpDTLS.TlsClientBase.CertificateAuthorities.get -> System.Collections.Generic.IList<System.Security.Cryptography.X509Certificates.X509Certificate2>
+SharpDTLS.TlsClientBase.ClientCredentials.get -> SharpDTLS.CertificateCredentials
+SharpDTLS.TlsClientBase.ClientCredentials.set -> void
 SharpDTLS.TlsClientBase.Crypto.get -> SharpDTLS.ITlsCrypto
 SharpDTLS.TlsClientBase.Crypto.set -> void
+SharpDTLS.TlsClientBase.ServerCertificateValidator.get -> System.Func<System.Security.Cryptography.X509Certificates.X509Certificate2, System.Collections.Generic.IReadOnlyList<byte[]>, bool>
+SharpDTLS.TlsConnectionBase.LocalCertificate.get -> System.Security.Cryptography.X509Certificates.X509Certificate2
+SharpDTLS.TlsConnectionBase.PeerCertificate.get -> System.Security.Cryptography.X509Certificates.X509Certificate2
+SharpDTLS.TlsServer.TlsServer(SharpDTLS.ServerCredentials credentials) -> void
+SharpDTLS.TlsServerBase.ClientCertificateAuthorities.get -> System.Collections.Generic.IList<System.Security.Cryptography.X509Certificates.X509Certificate2>
+SharpDTLS.TlsServerBase.ClientCertificateValidator.get -> System.Func<System.Security.Cryptography.X509Certificates.X509Certificate2, System.Collections.Generic.IReadOnlyList<byte[]>, bool>
 SharpDTLS.TlsServerBase.Crypto.get -> SharpDTLS.ITlsCrypto
 SharpDTLS.TlsServerBase.Crypto.set -> void
+SharpDTLS.TlsServerBase.IntermediateCertificates.get -> System.Collections.Generic.IList<System.Security.Cryptography.X509Certificates.X509Certificate2>
 static SharpDTLS.BouncyCastleTlsCrypto.Default.get -> SharpDTLS.BouncyCastleTlsCrypto
-static SharpDTLS.CertificateValidatorExtensions.ForClient(this SharpDTLS.ICertificateValidator validator) -> System.Func<Org.BouncyCastle.X509.X509Certificate, System.Collections.Generic.IReadOnlyList<byte[]>, bool>
-static SharpDTLS.CertificateValidatorExtensions.ForServer(this SharpDTLS.ICertificateValidator validator, string hostName) -> System.Func<Org.BouncyCastle.X509.X509Certificate, System.Collections.Generic.IReadOnlyList<byte[]>, bool>
 *REMOVED*SharpDTLS.OcspStapleValidator.ForServer() -> System.Func<byte[], System.Collections.Generic.IReadOnlyList<byte[]>, bool>
 SharpDTLS.IOcspStapleValidator
 SharpDTLS.IOcspStapleValidator.Validate(byte[] ocspResponse, System.Collections.Generic.IReadOnlyList<byte[]> chain) -> void
 SharpDTLS.OcspStapleValidatorExtensions
+static SharpDTLS.CertificateValidatorExtensions.ForClient(this SharpDTLS.ICertificateValidator validator) -> System.Func<System.Security.Cryptography.X509Certificates.X509Certificate2, System.Collections.Generic.IReadOnlyList<byte[]>, bool>
+static SharpDTLS.CertificateValidatorExtensions.ForServer(this SharpDTLS.ICertificateValidator validator, string hostName) -> System.Func<System.Security.Cryptography.X509Certificates.X509Certificate2, System.Collections.Generic.IReadOnlyList<byte[]>, bool>
 static SharpDTLS.OcspStapleValidatorExtensions.ForServer(this SharpDTLS.IOcspStapleValidator validator) -> System.Func<byte[], System.Collections.Generic.IReadOnlyList<byte[]>, bool>
 SharpDTLS.DtlsServer.MaxConnections.get -> int
 SharpDTLS.DtlsServer.MaxConnections.set -> void
@@ -39,3 +60,27 @@ SharpDTLS.TlsConnectionBase.CloseNotifyReceived.get -> bool
 virtual SharpDTLS.BouncyCastleTlsCrypto.Agree(SharpDTLS.CertificateCredentials credentials, byte[] peerPublicKey) -> byte[]
 virtual SharpDTLS.BouncyCastleTlsCrypto.DecryptPreMasterSecret(SharpDTLS.CertificateCredentials credentials, byte[] encrypted) -> byte[]
 virtual SharpDTLS.BouncyCastleTlsCrypto.Sign(SharpDTLS.CertificateCredentials credentials, ushort scheme, byte[] content) -> byte[]
+*REMOVED*abstract SharpDTLS.TlsConnectionBase.PeerCertificate.get -> Org.BouncyCastle.X509.X509Certificate
+*REMOVED*SharpDTLS.CertificateCredentials.Certificate.get -> Org.BouncyCastle.X509.X509Certificate
+*REMOVED*SharpDTLS.CertificateCredentials.CertificateCredentials(Org.BouncyCastle.Crypto.AsymmetricCipherKeyPair keyPair, Org.BouncyCastle.X509.X509Certificate certificate, System.Collections.Generic.IList<Org.BouncyCastle.X509.X509Certificate> intermediateCertificates = null) -> void
+*REMOVED*SharpDTLS.CertificateCredentials.IntermediateCertificates.get -> System.Collections.Generic.IList<Org.BouncyCastle.X509.X509Certificate>
+*REMOVED*SharpDTLS.CertificateCredentials.KeyPair.get -> Org.BouncyCastle.Crypto.AsymmetricCipherKeyPair
+*REMOVED*SharpDTLS.CertificateSelectionContext.CertificateAuthorities.get -> System.Collections.Generic.IReadOnlyList<Org.BouncyCastle.Asn1.X509.X509Name>
+*REMOVED*SharpDTLS.CertificateValidator.CertificateValidator(System.Collections.Generic.IEnumerable<Org.BouncyCastle.X509.X509Certificate> trustedRoots = null) -> void
+*REMOVED*SharpDTLS.CertificateValidator.HostNameValidator.get -> System.Func<Org.BouncyCastle.X509.X509Certificate, string, bool>
+*REMOVED*SharpDTLS.DtlsServer.DtlsServer(SharpDTLS.UDP.IServerTransport serverTransport, Org.BouncyCastle.Crypto.AsymmetricCipherKeyPair keyPair, Org.BouncyCastle.X509.X509Certificate certificate) -> void
+*REMOVED*SharpDTLS.OcspStapleValidator.OcspStapleValidator(System.Collections.Generic.IEnumerable<Org.BouncyCastle.X509.X509Certificate> issuers = null) -> void
+*REMOVED*SharpDTLS.ServerCredentials.ServerCredentials(Org.BouncyCastle.Crypto.AsymmetricCipherKeyPair keyPair, Org.BouncyCastle.X509.X509Certificate certificate, System.Collections.Generic.IList<Org.BouncyCastle.X509.X509Certificate> intermediateCertificates = null) -> void
+*REMOVED*SharpDTLS.TlsClientBase.CertificateAuthorities.get -> System.Collections.Generic.IList<Org.BouncyCastle.X509.X509Certificate>
+*REMOVED*SharpDTLS.TlsClientBase.ClientCertificate.get -> Org.BouncyCastle.X509.X509Certificate
+*REMOVED*SharpDTLS.TlsClientBase.ClientCertificate.set -> void
+*REMOVED*SharpDTLS.TlsClientBase.ClientCertificateKeyPair.get -> Org.BouncyCastle.Crypto.AsymmetricCipherKeyPair
+*REMOVED*SharpDTLS.TlsClientBase.ClientCertificateKeyPair.set -> void
+*REMOVED*SharpDTLS.TlsClientBase.ClientIntermediateCertificates.get -> System.Collections.Generic.IList<Org.BouncyCastle.X509.X509Certificate>
+*REMOVED*SharpDTLS.TlsClientBase.ClientIntermediateCertificates.set -> void
+*REMOVED*SharpDTLS.TlsClientBase.ServerCertificateValidator.get -> System.Func<Org.BouncyCastle.X509.X509Certificate, System.Collections.Generic.IReadOnlyList<byte[]>, bool>
+*REMOVED*SharpDTLS.TlsConnectionBase.LocalCertificate.get -> Org.BouncyCastle.X509.X509Certificate
+*REMOVED*SharpDTLS.TlsServer.TlsServer(Org.BouncyCastle.Crypto.AsymmetricCipherKeyPair keyPair, Org.BouncyCastle.X509.X509Certificate certificate) -> void
+*REMOVED*SharpDTLS.TlsServerBase.ClientCertificateAuthorities.get -> System.Collections.Generic.IList<Org.BouncyCastle.X509.X509Certificate>
+*REMOVED*SharpDTLS.TlsServerBase.ClientCertificateValidator.get -> System.Func<Org.BouncyCastle.X509.X509Certificate, System.Collections.Generic.IReadOnlyList<byte[]>, bool>
+*REMOVED*SharpDTLS.TlsServerBase.IntermediateCertificates.get -> System.Collections.Generic.IList<Org.BouncyCastle.X509.X509Certificate>

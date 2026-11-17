@@ -33,14 +33,11 @@ namespace SharpDTLS.Protocol12
     /// </summary>
     internal abstract class Tls12ServerBase
     {
-        protected Tls12ServerBase(AsymmetricCipherKeyPair keyPair, X509Certificate certificate, ushort version)
+        protected Tls12ServerBase(CertificateCredentials credentials, ushort version)
         {
-            if (certificate != null && keyPair == null)
-                throw new ArgumentException("A certificate needs its key pair.");
-
             Settings = new Tls12ServerSettings
             {
-                Credentials = CertificateCredentials.Of(keyPair, certificate),
+                Credentials = credentials,
                 MinimumVersion = version,
                 MaximumVersion = version,
             };
@@ -101,7 +98,7 @@ namespace SharpDTLS.Protocol12
         /// <summary>A DER OCSP response for the certificate, stapled for clients that ask (RFC 6066 §8); null for none.</summary>
         public byte[] OcspResponse { get => Settings.OcspResponse; set => Settings.OcspResponse = value; }
 
-        public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ClientCertificateValidator
+        public Func<System.Security.Cryptography.X509Certificates.X509Certificate2, IReadOnlyList<byte[]>, bool> ClientCertificateValidator
         {
             get => Settings.ClientCertificateValidator;
             set => Settings.ClientCertificateValidator = value;

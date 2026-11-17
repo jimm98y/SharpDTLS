@@ -119,7 +119,13 @@ namespace SharpDTLS.Protocol13.DTLS13
 
         /// <param name="keyPair">The certificate key, or null with <paramref name="certificate"/> for a PSK-only server.</param>
         public Dtls13Server(IServerTransport serverTransport, AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
-            : base(keyPair, certificate)
+            : this(serverTransport, CertificateCredentials.OfServer(keyPair, certificate))
+        {
+        }
+
+        /// <param name="credentials">The default key and certificate; null for a PSK-only server.</param>
+        public Dtls13Server(IServerTransport serverTransport, CertificateCredentials credentials)
+            : base(credentials)
         {
             ServerTransport = serverTransport;
             ServerTransport.OnDataReceived += ServerTransport_OnDataReceived;
