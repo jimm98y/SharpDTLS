@@ -101,7 +101,7 @@ namespace SharpDTLS.Protocol12
                 finally
                 {
                     if (!handedOver)
-                        RecordBuffers.Pool.Return(buffer);
+                        RecordBuffers.Pool.Return(buffer, clearArray: true);
                 }
             }
 

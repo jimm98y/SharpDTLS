@@ -25,7 +25,8 @@ namespace SharpDTLS
 {
     /// <summary>
     /// The buffers of records sent and received. A pool of the library's own: <see cref="ArrayPool{T}.Shared"/> gives its
-    /// arrays back to the GC under memory pressure, and so allocates again now and then; this one keeps them.
+    /// arrays back to the GC under memory pressure, and so allocates again now and then; this one keeps them. Every
+    /// array is cleared as it is returned: no plaintext or key stream waits in the pool.
     /// </summary>
     internal static class RecordBuffers
     {

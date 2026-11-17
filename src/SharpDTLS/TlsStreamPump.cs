@@ -99,7 +99,7 @@ namespace SharpDTLS
             }
             finally
             {
-                RecordBuffers.Pool.Return(buffer);
+                RecordBuffers.Pool.Return(buffer, clearArray: true);
             }
 #endif
             stream.Flush();

@@ -178,7 +178,7 @@ namespace SharpDTLS.Protocol12
                 finally
                 {
                     if (!handedOver)
-                        RecordBuffers.Pool.Return(buffer);
+                        RecordBuffers.Pool.Return(buffer, clearArray: true);
                 }
             }
 
@@ -451,7 +451,7 @@ namespace SharpDTLS.Protocol12
                     }
                     finally
                     {
-                        RecordBuffers.Pool.Return(inner);
+                        RecordBuffers.Pool.Return(inner, clearArray: true);
                     }
                     fragmentLength = cipher.FragmentLength(plaintext.Length + 1);
                     contentType = Tls12Cid;

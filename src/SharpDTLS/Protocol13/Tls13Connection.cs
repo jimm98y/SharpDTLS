@@ -434,7 +434,7 @@ namespace SharpDTLS.Protocol13
             finally
             {
                 if (!handedOver)
-                    RecordBuffers.Pool.Return(buffer);
+                    RecordBuffers.Pool.Return(buffer, clearArray: true);
             }
         }
 
@@ -555,7 +555,7 @@ namespace SharpDTLS.Protocol13
             finally
             {
                 if (!handedOver)
-                    RecordBuffers.Pool.Return(buffer);
+                    RecordBuffers.Pool.Return(buffer, clearArray: true);
             }
         }
 

@@ -536,7 +536,7 @@ namespace SharpDTLS
             // On a stream an empty record carries nothing: a peer may send a few, not an endless run of them.
             if (length == 0 && IsReliableTransport)
             {
-                RecordBuffers.Pool.Return(rented);
+                RecordBuffers.Pool.Return(rented, clearArray: true);
                 CountEmptyRecord();
                 return;
             }
@@ -706,7 +706,7 @@ namespace SharpDTLS
                 finally
                 {
                     if (next.Rented)
-                        RecordBuffers.Pool.Return(next.Buffer);
+                        RecordBuffers.Pool.Return(next.Buffer, clearArray: true);
                 }
             }
         }
