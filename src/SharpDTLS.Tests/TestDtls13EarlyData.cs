@@ -33,11 +33,11 @@ namespace SharpDTLS.Tests
             r.Server = new Dtls13Server(r.Pair.Server)
             {
                 TicketKeys = keys, MaxEarlyDataSize = maxEarlyData, ShouldSendHelloRetry = helloRetry,
-                InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50),
+                InitialRetransmitTimeout = TimeSpan.FromSeconds(2),
             };
             r.Server.EarlyDataReceived += (_, e) => { lock (r.EarlyData) r.EarlyData.Add(Encoding.UTF8.GetString(e.ToArray())); };
             r.Server.ApplicationDataReceived += (_, e) => { lock (r.ServerReceived) r.ServerReceived.Add(Encoding.UTF8.GetString(e.ToArray())); };
-            r.Client = new Dtls13Client(r.Pair.Client) { ResumptionTicket = ticket, EarlyData = earlyData, InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50) };
+            r.Client = new Dtls13Client(r.Pair.Client) { ResumptionTicket = ticket, EarlyData = earlyData, InitialRetransmitTimeout = TimeSpan.FromSeconds(2) };
 
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             r.Client.HandshakeFinished += (_, _) => done.TrySetResult(true);
@@ -66,6 +66,7 @@ namespace SharpDTLS.Tests
             Assert.IsTrue(r.Client.IsResumed);
             Assert.IsTrue(r.Client.EarlyDataAccepted);
             Assert.IsTrue(r.ServerConnection.EarlyDataAccepted);
+            Assert.IsTrue(SpinWait.SpinUntil(() => { lock (r.EarlyData) return r.EarlyData.Count > 0; }, Timeout));
             CollectionAssert.AreEqual(new[] { "GET /status" }, r.EarlyData);
             Assert.IsEmpty(r.ServerReceived, "early data is not reported as regular application data");
 

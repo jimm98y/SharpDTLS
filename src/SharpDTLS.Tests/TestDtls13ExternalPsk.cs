@@ -35,11 +35,11 @@ namespace SharpDTLS.Tests
         {
             var r = new Run();
             r.Server = certificate ? new Dtls13Server(r.Pair.Server) : new Dtls13Server(r.Pair.Server, TestCertificates.Server(null, null));
-            r.Server.InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50);
+            r.Server.InitialRetransmitTimeout = TimeSpan.FromSeconds(2);
             r.Server.ExternalPskResolver = Resolve;
             configureServer?.Invoke(r.Server);
             r.Server.ApplicationDataReceived += (_, e) => { lock (r.ServerReceived) r.ServerReceived.Add(Encoding.UTF8.GetString(e.ToArray())); };
-            r.Client = new Dtls13Client(r.Pair.Client) { ExternalPsk = new TlsExternalPsk(Identity, Key), InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50) };
+            r.Client = new Dtls13Client(r.Pair.Client) { ExternalPsk = new TlsExternalPsk(Identity, Key), InitialRetransmitTimeout = TimeSpan.FromSeconds(2) };
             configureClient?.Invoke(r.Client);
 
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);

@@ -31,12 +31,12 @@ namespace SharpDTLS.Tests
             bool expectSuccess = true)
         {
             var r = new Run();
-            r.Server = new Dtls13Server(r.Pair.Server) { TicketKeys = keys, ShouldSendHelloRetry = helloRetry, InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50) };
+            r.Server = new Dtls13Server(r.Pair.Server) { TicketKeys = keys, ShouldSendHelloRetry = helloRetry, InitialRetransmitTimeout = TimeSpan.FromSeconds(2) };
             if (serverSuites != null)
                 r.Server.CipherSuites = serverSuites;
             configureServer?.Invoke(r.Server);
             r.Server.ApplicationDataReceived += (_, e) => { lock (r.ServerReceived) r.ServerReceived.Add(Encoding.UTF8.GetString(e.ToArray())); };
-            r.Client = new Dtls13Client(r.Pair.Client) { ResumptionTicket = resume, InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50) };
+            r.Client = new Dtls13Client(r.Pair.Client) { ResumptionTicket = resume, InitialRetransmitTimeout = TimeSpan.FromSeconds(2) };
             configureClient?.Invoke(r.Client);
 
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);

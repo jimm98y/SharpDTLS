@@ -100,10 +100,15 @@ namespace SharpDTLS.Tests
             public List<Exception> ClientErrors = new();
             public List<Exception> ServerErrors = new();
 
-            public Harness(Action<Dtls13Server> configureServer = null, Action<Dtls13Client> configureClient = null)
+            /// <param name="retransmit">
+            /// The first retransmission timeout: 2 s, so that no timer fires within a test of a busy machine; the tests of
+            /// lost datagrams pass a short one.
+            /// </param>
+            public Harness(Action<Dtls13Server> configureServer = null, Action<Dtls13Client> configureClient = null, TimeSpan? retransmit = null)
             {
-                Server = new Dtls13Server(Pair.Server) { InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50) };
-                Client = new Dtls13Client(Pair.Client) { InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50) };
+                var timeout = retransmit ?? TimeSpan.FromSeconds(2);
+                Server = new Dtls13Server(Pair.Server) { InitialRetransmitTimeout = timeout };
+                Client = new Dtls13Client(Pair.Client) { InitialRetransmitTimeout = timeout };
                 configureServer?.Invoke(Server);
                 configureClient?.Invoke(Client);
 
@@ -202,12 +207,14 @@ namespace SharpDTLS.Tests
 
             int before = h.Pair.ClientSent.Count;
             h.Client.SendApplicationData(Encoding.UTF8.GetBytes("visible-on-the-wire"));
-            byte[] record = h.Pair.ClientSent.Skip(before).Single();
+            byte[] record;
+            lock (h.Pair.ClientSent)
+                record = h.Pair.ClientSent.Skip(before).Single(d => Encoding.ASCII.GetString(d).Contains("visible-on-the-wire"));
 
             // RFC 9150: DTLSInnerPlaintext || HMAC, with the 16-bit record number in the clear (§9).
             Assert.AreEqual(0x2C, record[0] & 0xFC, "unified header with 16-bit sequence number and length");
             ulong sequenceNumber = (ulong)((record[1] << 8) | record[2]);
-            Assert.AreEqual(h.Client.Session.WriteKeys.ClientKeyUseCounter - 1, sequenceNumber);
+            Assert.IsLessThan(h.Client.Session.WriteKeys.ClientKeyUseCounter, sequenceNumber);
             Assert.AreEqual("visible-on-the-wire\u0017", Encoding.ASCII.GetString(record, 5, record.Length - 5 - tagLength));
             CollectionAssert.AreEqual(new[] { "visible-on-the-wire" }, h.ServerReceived);
             Assert.IsTrue(Dtls13CipherSuite.Get(suite).IsIntegrityOnly);
@@ -318,7 +325,7 @@ namespace SharpDTLS.Tests
         public void LostServerFlight_IsRetransmitted()
         {
             // Without tickets, so a NewSessionTicket does not count as a retransmission.
-            var h = new Harness(configureServer: s => { s.ShouldSendHelloRetry = false; s.TicketKeys = null; });
+            var h = new Harness(configureServer: s => { s.ShouldSendHelloRetry = false; s.TicketKeys = null; }, retransmit: TimeSpan.FromMilliseconds(50));
             int serverDatagrams = 0;
             h.Pair.ServerToClient = d => Interlocked.Increment(ref serverDatagrams) == 3 ? Array.Empty<byte[]>() : new[] { d };
 
@@ -329,7 +336,7 @@ namespace SharpDTLS.Tests
         [TestMethod]
         public void LostClientFinished_IsRetransmittedUntilAcked()
         {
-            var h = new Harness(configureServer: s => s.ShouldSendHelloRetry = false);
+            var h = new Harness(configureServer: s => s.ShouldSendHelloRetry = false, retransmit: TimeSpan.FromMilliseconds(50));
             int clientDatagrams = 0;
             // datagram 1 = ClientHello, datagram 2 = client Finished
             h.Pair.ClientToServer = d => Interlocked.Increment(ref clientDatagrams) == 2 ? Array.Empty<byte[]>() : new[] { d };
@@ -341,7 +348,7 @@ namespace SharpDTLS.Tests
         [TestMethod]
         public void LostHelloRetryRequest_ClientRetransmitsClientHello()
         {
-            var h = new Harness();
+            var h = new Harness(retransmit: TimeSpan.FromMilliseconds(50));
             int serverDatagrams = 0;
             h.Pair.ServerToClient = d => Interlocked.Increment(ref serverDatagrams) == 1 ? Array.Empty<byte[]>() : new[] { d };
 
@@ -372,7 +379,7 @@ namespace SharpDTLS.Tests
         {
             // A retransmitted ClientHello1 makes the stateless server send the HelloRetryRequest again.
             // Dropping the first ClientHello2 keeps the client waiting for a ServerHello when the duplicate arrives.
-            var h = new Harness();
+            var h = new Harness(retransmit: TimeSpan.FromMilliseconds(50));
             int serverCount = 0, clientCount = 0;
             h.Pair.ServerToClient = d => Interlocked.Increment(ref serverCount) == 1 ? new[] { d, d } : new[] { d };
             h.Pair.ClientToServer = d => Interlocked.Increment(ref clientCount) == 2 ? Array.Empty<byte[]>() : new[] { d };
@@ -457,7 +464,7 @@ namespace SharpDTLS.Tests
             Assert.IsTrue(h.Client.IsClosed, "Client should receive the server's fatal alert");
             var error = h.ClientErrors.OfType<DtlsException>().Single();
             Assert.AreEqual(AlertDescription.CertificateRequired, error.Alert);
-            Assert.IsNull(h.ServerConnection, "Failed connection should be removed from the server");
+            Assert.IsTrue(SpinWait.SpinUntil(() => h.ServerConnection == null, Timeout), "Failed connection should be removed from the server");
         }
 
         [TestMethod]

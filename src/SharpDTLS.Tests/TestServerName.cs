@@ -74,7 +74,7 @@ namespace SharpDTLS.Tests
                 IntermediateCertificates = _default.Value.IntermediateCertificates,
                 CertificateSelector = Select,
                 TicketKeys = keys,
-                InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50),
+                InitialRetransmitTimeout = TimeSpan.FromSeconds(2),
             };
             var client = new Dtls13Client(pair.Client)
             {

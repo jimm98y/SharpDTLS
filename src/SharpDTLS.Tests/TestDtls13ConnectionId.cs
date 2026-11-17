@@ -35,12 +35,12 @@ namespace SharpDTLS.Tests
             r.Server = new Dtls13Server(r.Pair.Server)
             {
                 UseConnectionIds = serverCids, AutoUpdatePeerAddress = autoUpdate, ShouldSendHelloRetry = helloRetry,
-                InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50),
+                InitialRetransmitTimeout = TimeSpan.FromSeconds(2),
             };
             r.Server.ApplicationDataReceived += (_, e) => { lock (r.ServerReceived) r.ServerReceived.Add(Encoding.UTF8.GetString(e.ToArray())); };
             r.Server.HandshakeFinished += (_, e) =>
                 ((Dtls13ConnectionEventArgs)e).Connection.PeerAddressChanged += (_, c) => { lock (r.Changes) r.Changes.Add(c); };
-            r.Client = new Dtls13Client(r.Pair.Client) { UseConnectionId = true, ConnectionIdLength = clientCidLength, InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50) };
+            r.Client = new Dtls13Client(r.Pair.Client) { UseConnectionId = true, ConnectionIdLength = clientCidLength, InitialRetransmitTimeout = TimeSpan.FromSeconds(2) };
             r.Client.ApplicationDataReceived += (_, d) => { lock (r.ClientReceived) r.ClientReceived.Add(Encoding.UTF8.GetString(d.ToArray())); };
 
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
