@@ -170,6 +170,7 @@ namespace SharpDTLS.Tests
                     serverStream.Write(chunk, 0, chunk.Length);
             });
             Assert.IsFalse(writing.Wait(TimeSpan.FromSeconds(3)), "64 MiB were taken by a reader that read nothing");
+            Assert.IsLessThanOrEqualTo(2 * TlsStream.MaxBufferedBytes, client.BufferCapacity);
 
             // reading drains it all
             byte[] buffer = new byte[1 << 16];
@@ -181,6 +182,8 @@ namespace SharpDTLS.Tests
                 received += n;
             }
             Assert.IsTrue(writing.Wait(TestTimeouts.InProcess));
+            // the burst's array is not kept once read
+            Assert.IsLessThanOrEqualTo(ByteQueue.MaxIdleCapacity, client.BufferCapacity);
             }
             finally
             {

@@ -53,6 +53,9 @@ namespace SharpDTLS
         /// </summary>
         internal const int MaxBufferedBytes = 1 << 20;
 
+        // At most MaxBufferedBytes and one read (the pump waits before each), so the array at most twice that.
+        internal int BufferCapacity { get { lock (_sync) return _received.Capacity; } }
+
         private TlsStream(Func<TlsConnectionBase> connection) => _connection = connection;
 
         /// <summary>
