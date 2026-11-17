@@ -304,24 +304,23 @@ namespace SharpDTLS.UDP
                 if (length <= 0)
                     continue;
 
-#if NETCOREAPP
-                var sender = Sender(address);
-#else
-                // copy: ReceiveFrom may reuse the endpoint instance on the next call
-                var sender = new IPEndPoint(((IPEndPoint)remoteEndpoint).Address, ((IPEndPoint)remoteEndpoint).Port);
-#endif
-                _lastSender = sender;
-
                 // Every datagram is handed to the handler on this one thread. No per-source state or thread is
                 // made here: any source address can be spoofed, and the DTLS server keeps state only for peers
-                // that passed its cookie exchange.
+                // that passed its cookie exchange. Nothing one datagram does ends the loop.
                 try
                 {
+#if NETCOREAPP
+                    var sender = Sender(address);
+#else
+                    // copy: ReceiveFrom may reuse the endpoint instance on the next call
+                    var sender = new IPEndPoint(((IPEndPoint)remoteEndpoint).Address, ((IPEndPoint)remoteEndpoint).Port);
+#endif
+                    _lastSender = sender;
                     OnDataReceived?.Invoke(sender, buffer.AsSpan(0, length));
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"Receive handler failed: {ex.Message}");
+                    Debug.WriteLine($"Receive failed: {ex.Message}");
                 }
             }
         }
