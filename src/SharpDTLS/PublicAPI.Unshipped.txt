@@ -23,6 +23,7 @@ SharpDTLS.CertificateCredentials.Certificate.get -> System.Security.Cryptography
 SharpDTLS.CertificateCredentials.CertificateCredentials(System.Security.Cryptography.X509Certificates.X509Certificate2 certificate, byte[] pkcs8PrivateKey, System.Collections.Generic.IList<System.Security.Cryptography.X509Certificates.X509Certificate2> intermediateCertificates = null) -> void
 SharpDTLS.CertificateCredentials.CertificateCredentials(System.Security.Cryptography.X509Certificates.X509Certificate2 certificate, System.Collections.Generic.IList<System.Security.Cryptography.X509Certificates.X509Certificate2> intermediateCertificates = null) -> void
 SharpDTLS.CertificateCredentials.IntermediateCertificates.get -> System.Collections.Generic.IList<System.Security.Cryptography.X509Certificates.X509Certificate2>
+SharpDTLS.CertificateCredentials.ExportPkcs8PrivateKey() -> byte[]
 SharpDTLS.CertificateSelectionContext.CertificateAuthorities.get -> System.Collections.Generic.IReadOnlyList<System.Security.Cryptography.X509Certificates.X500DistinguishedName>
 SharpDTLS.CertificateValidator.CertificateValidator(System.Collections.Generic.IEnumerable<System.Security.Cryptography.X509Certificates.X509Certificate2> trustedRoots = null) -> void
 SharpDTLS.CertificateValidator.HostNameValidator.get -> System.Func<System.Security.Cryptography.X509Certificates.X509Certificate2, string, bool>

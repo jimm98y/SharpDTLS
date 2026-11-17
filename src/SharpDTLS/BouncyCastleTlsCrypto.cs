@@ -96,7 +96,7 @@ namespace SharpDTLS
         }
 
         /// <summary>The BouncyCastle private key of <paramref name="credentials"/>: of PKCS#8, or exported of the certificate once.</summary>
-        private static AsymmetricKeyParameter PrivateKey(CertificateCredentials credentials)
+        internal static AsymmetricKeyParameter PrivateKey(CertificateCredentials credentials)
             => credentials.BcPrivateKey ??= Export(credentials.Certificate);
 
         // The certificate's own key, which must be exportable.

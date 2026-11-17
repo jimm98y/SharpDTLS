@@ -21,6 +21,7 @@
 
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Parameters;
+using Org.BouncyCastle.Pkcs;
 using Org.BouncyCastle.Security;
 using System;
 using System.Collections.Generic;
@@ -48,6 +49,12 @@ namespace SharpDTLS
         /// <summary>A server's own key pair and certificate: a certificate needs its key pair, and neither is of a PSK-only server.</summary>
         internal static CertificateCredentials OfServer(AsymmetricCipherKeyPair keyPair, BcX509Certificate certificate)
             => certificate != null && keyPair == null ? throw new ArgumentException("A certificate needs its key pair.") : Of(keyPair, certificate);
+
+        /// <summary>
+        /// The private key as PKCS#8 DER: the one given as PKCS#8, or the certificate's own, which must then be exportable
+        /// (a <see cref="System.Security.Cryptography.CryptographicException"/> otherwise). For libraries that hand the key on.
+        /// </summary>
+        public byte[] ExportPkcs8PrivateKey() => PrivateKeyInfoFactory.CreatePrivateKeyInfo(BouncyCastleTlsCrypto.PrivateKey(this)).GetEncoded();
 
         /// <summary>The certificate as BouncyCastle's, for the tests.</summary>
         internal BcX509Certificate BcCertificate => Certificates.ToBc(Certificate);
