@@ -34,7 +34,7 @@ server.ApplicationDataReceived += (sender, e) =>
     e.Connection.SendApplicationData(Encoding.UTF8.GetBytes("Hello from server!"));
 };
 ```
-To use your own certificate, pass it with its key pair: `new DtlsServer(serverTransport, keyPair, certificate)`. A server keeps at most `MaxConnections` connections (10,000 by default) and creates one only for a client that passed the cookie exchange.
+To use your own certificate, pass it with its private key: `new DtlsServer(serverTransport, new ServerCredentials(certificate))`, where `certificate` is an `X509Certificate2` that has its key (see [doc/migration-0.0.2.md](doc/migration-0.0.2.md) for keys .NET cannot hold). A server keeps at most `MaxConnections` connections (10,000 by default) and creates one only for a client that passed the cookie exchange.
 
 Create the client and start the handshake. The handshake runs in the background and `HandshakeFinished` is raised when it completes, or `Failed` when it does not:
 ```cs
