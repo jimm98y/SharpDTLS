@@ -235,6 +235,15 @@ and `CreateHmac` are called once per key, and the object is used for every recor
   Framework and .NET Standard both providers use BouncyCastle.
 - Over TCP, `TlsStream`'s `Task` methods allocate their tasks as any `Stream`'s do.
 
+The rest of the cryptography goes through it too:
+- the handshake's hashes, the TLS PRF and the TLS 1.3 key schedule (`CreateHash`, `CreateHmac`);
+- the key exchange (`CreateKeyShare` for (EC)DHE, X25519, X448, FFDHE and ML-KEM, `Encapsulate` for ML-KEM);
+- the peer's signatures (`Verify`, with the peer's key as DER SubjectPublicKeyInfo) and RSA key transport
+  (`EncryptPreMasterSecret`).
+
+`NetTlsCrypto` uses .NET's ECDH for P-256, P-384 and P-521 and .NET's RSA and ECDSA to verify signatures
+on .NET 8 and later. X25519, X448, FFDHE, ML-KEM, Ed25519, Ed448 and DSA stay on BouncyCastle.
+
 To sign some other way, implement `ITlsCrypto`, for example to keep keys in a remote signing
 service. A good base class is `BouncyCastleTlsCrypto`: override what you handle and leave the rest
 to it.
