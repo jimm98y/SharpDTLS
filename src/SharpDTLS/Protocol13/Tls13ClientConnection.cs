@@ -826,7 +826,7 @@ namespace SharpDTLS.Protocol13
                     ushort scheme = (ushort)certificateVerify.SignatureType;
                     if (!Dtls13Signatures.Supported.Contains(scheme))
                         throw new DtlsException(AlertDescription.IllegalParameter, $"Server used signature scheme 0x{scheme:X4}, which was not offered.");
-                    if (!Dtls13Signatures.Verify(scheme, _serverPublicKey, content, certificateVerify.Signature))
+                    if (!Dtls13Signatures.Verify(scheme, _serverPublicKey, content, certificateVerify.Signature, Crypto))
                         throw new DtlsException(AlertDescription.DecryptError, "Server CertificateVerify signature is invalid.");
 
                     Session.Transcript.AddHandshake(message);

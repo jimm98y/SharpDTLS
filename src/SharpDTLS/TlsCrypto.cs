@@ -82,6 +82,16 @@ namespace SharpDTLS
         /// <see cref="CryptographicException"/> for an invalid key.
         /// </summary>
         byte[] Encapsulate(ushort group, byte[] encapsulationKey, out byte[] sharedSecret);
+
+        /// <summary>
+        /// Verifies the peer's <paramref name="signature"/> of <paramref name="content"/> with its public key, a DER
+        /// SubjectPublicKeyInfo. <paramref name="scheme"/> fits the key (the protocol checks that first); ECDSA signatures
+        /// are DER encoded.
+        /// </summary>
+        bool Verify(ushort scheme, byte[] subjectPublicKeyInfo, byte[] content, byte[] signature);
+
+        /// <summary>RSA key transport (RFC 5246 §7.4.7.1): the premaster secret encrypted to the server's RSA key, PKCS#1 v1.5.</summary>
+        byte[] EncryptPreMasterSecret(byte[] subjectPublicKeyInfo, byte[] preMasterSecret);
     }
 
     /// <summary>The default <see cref="ITlsCrypto"/>: the private key is BouncyCastle's.</summary>
@@ -135,6 +145,23 @@ namespace SharpDTLS
 
         public virtual byte[] Encapsulate(ushort group, byte[] encapsulationKey, out byte[] sharedSecret)
             => BcKeyShares.Encapsulate(group, encapsulationKey, out sharedSecret);
+
+        public virtual bool Verify(ushort scheme, byte[] subjectPublicKeyInfo, byte[] content, byte[] signature)
+        {
+            var key = PublicKeyFactory.CreateKey(subjectPublicKeyInfo);
+            if (scheme == SignatureSchemes.RsaPkcs1Md5Sha1)
+                return Tls10Signatures.VerifySignature(key, content, signature);
+            return System.Array.IndexOf(Dtls12Signatures.Supported, scheme) >= 0
+                ? Dtls12Signatures.VerifySignature(scheme, key, content, signature)
+                : Dtls13Signatures.VerifySignature(scheme, key, content, signature);
+        }
+
+        public virtual byte[] EncryptPreMasterSecret(byte[] subjectPublicKeyInfo, byte[] preMasterSecret)
+        {
+            var rsa = new Pkcs1Encoding(new RsaBlindedEngine());
+            rsa.Init(true, new ParametersWithRandom(PublicKeyFactory.CreateKey(subjectPublicKeyInfo), new SecureRandom()));
+            return rsa.ProcessBlock(preMasterSecret, 0, preMasterSecret.Length);
+        }
 
         /// <summary>The BouncyCastle private key of <paramref name="credentials"/>: of PKCS#8, or exported of the certificate once.</summary>
         private static AsymmetricKeyParameter PrivateKey(CertificateCredentials credentials)
@@ -268,6 +295,59 @@ namespace SharpDTLS
 #else
             => base.CreateHmac(hash, key);
 #endif
+
+        // RSA (PKCS#1 v1.5, PSS of rsaEncryption keys) and ECDSA of .NET on .NET 8+; the rest of BouncyCastle
+        public override bool Verify(ushort scheme, byte[] subjectPublicKeyInfo, byte[] content, byte[] signature)
+        {
+#if NETCOREAPP
+            HashAlgorithmName hash = Hash(scheme);
+            bool pss = scheme is SignatureSchemes.RsaPssRsaeSha256 or SignatureSchemes.RsaPssRsaeSha384 or SignatureSchemes.RsaPssRsaeSha512;
+            if (hash.Name != null && (pss || (scheme & 0xFF) == 1 || (scheme & 0xFF) == 3))
+            {
+                var key = PublicKey.CreateFromSubjectPublicKeyInfo(subjectPublicKeyInfo, out _);
+                try
+                {
+                    if ((scheme & 0xFF) == 3)
+                    {
+                        using var ecdsa = key.GetECDsaPublicKey();
+                        if (ecdsa != null)
+                            return ecdsa.VerifyData(content, signature, hash, DSASignatureFormat.Rfc3279DerSequence);
+                    }
+                    else
+                    {
+                        using var rsa = key.GetRSAPublicKey();
+                        if (rsa != null)
+                            return rsa.VerifyData(content, signature, hash, pss ? RSASignaturePadding.Pss : RSASignaturePadding.Pkcs1);
+                    }
+                }
+                catch (CryptographicException)
+                {
+                    return false;
+                }
+            }
+#endif
+            return base.Verify(scheme, subjectPublicKeyInfo, content, signature);
+        }
+
+        public override byte[] EncryptPreMasterSecret(byte[] subjectPublicKeyInfo, byte[] preMasterSecret)
+        {
+#if NETCOREAPP
+            var key = PublicKey.CreateFromSubjectPublicKeyInfo(subjectPublicKeyInfo, out _);
+            using var rsa = key.GetRSAPublicKey();
+            if (rsa != null)
+                return rsa.Encrypt(preMasterSecret, RSAEncryptionPadding.Pkcs1);
+#endif
+            return base.EncryptPreMasterSecret(subjectPublicKeyInfo, preMasterSecret);
+        }
+
+        private static HashAlgorithmName Hash(ushort scheme) => (scheme >> 8, scheme & 0xFF) switch
+        {
+            (2, _) => HashAlgorithmName.SHA1,
+            (4, _) or (8, 4) => HashAlgorithmName.SHA256,
+            (5, _) or (8, 5) => HashAlgorithmName.SHA384,
+            (6, _) or (8, 6) => HashAlgorithmName.SHA512,
+            _ => default,
+        };
 
         // ECDHE of .NET's ECDiffieHellman on .NET 8+; X25519, X448, FFDHE and ML-KEM of BouncyCastle
         public override ITlsKeyShare CreateKeyShare(ushort group)

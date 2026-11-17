@@ -647,7 +647,7 @@ namespace SharpDTLS.Protocol13
                         throw new DtlsException(AlertDescription.IllegalParameter, $"Client used signature scheme 0x{scheme:X4}, which was not requested.");
 
                     byte[] content = Dtls13Signatures.BuildSignedContent(server: false, Session.Transcript.Hash(suite, crypto: Crypto));
-                    if (!Dtls13Signatures.Verify(scheme, _clientPublicKey, content, certificateVerify.Signature))
+                    if (!Dtls13Signatures.Verify(scheme, _clientPublicKey, content, certificateVerify.Signature, Crypto))
                         throw new DtlsException(AlertDescription.DecryptError, "Client CertificateVerify signature is invalid.");
 
                     Session.ReceivedClientCertificateVerify = true;
@@ -844,7 +844,7 @@ namespace SharpDTLS.Protocol13
                     if (!auth.Request.SignatureAlgorithms.Contains(scheme))
                         throw new DtlsException(AlertDescription.IllegalParameter, $"Client used signature scheme 0x{scheme:X4}, which was not requested.");
                     byte[] content = Dtls13Signatures.BuildSignedContent(server: false, auth.Transcript.Hash(suite, crypto: Crypto));
-                    if (!Dtls13Signatures.Verify(scheme, auth.PublicKey, content, certificateVerify.Signature))
+                    if (!Dtls13Signatures.Verify(scheme, auth.PublicKey, content, certificateVerify.Signature, Crypto))
                         throw new DtlsException(AlertDescription.DecryptError, "Client CertificateVerify signature is invalid.");
                     auth.Transcript.AddHandshake(message);
                     auth.Stage = 2;

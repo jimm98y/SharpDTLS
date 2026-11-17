@@ -33,6 +33,10 @@ namespace SharpDTLS
     /// <summary>Certificates between the public API's <see cref="X509Certificate2"/> and BouncyCastle's, inside.</summary>
     internal static class Certificates
     {
+        /// <summary>The DER SubjectPublicKeyInfo of a BouncyCastle public key.</summary>
+        public static byte[] Spki(Org.BouncyCastle.Crypto.AsymmetricKeyParameter key)
+            => Org.BouncyCastle.X509.SubjectPublicKeyInfoFactory.CreateSubjectPublicKeyInfo(key).GetEncoded();
+
         public static X509Certificate ToBc(X509Certificate2 certificate)
             => certificate == null ? null : new X509CertificateParser().ReadCertificate(certificate.RawData)
                 ?? throw new ArgumentException("The certificate could not be parsed.", nameof(certificate));

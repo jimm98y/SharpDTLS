@@ -111,11 +111,13 @@ namespace SharpDTLS.Protocol12
             return signer.GenerateSignature();
         }
 
-        public static bool Verify(ushort scheme, AsymmetricKeyParameter publicKey, byte[] content, byte[] signature)
-        {
-            if (!Supported.Contains(scheme) || !IsCompatible(scheme, publicKey))
-                return false;
+        public static bool Verify(ushort scheme, AsymmetricKeyParameter publicKey, byte[] content, byte[] signature, ITlsCrypto crypto = null)
+            => Supported.Contains(scheme) && IsCompatible(scheme, publicKey)
+               && (crypto ?? BouncyCastleTlsCrypto.Default).Verify(scheme, Certificates.Spki(publicKey), content, signature);
 
+        /// <summary>The signature alone, of BouncyCastle: <see cref="BouncyCastleTlsCrypto.Verify"/>.</summary>
+        internal static bool VerifySignature(ushort scheme, AsymmetricKeyParameter publicKey, byte[] content, byte[] signature)
+        {
             ISigner signer = CreateSigner(scheme);
             signer.Init(false, publicKey);
             signer.BlockUpdate(content, 0, content.Length);

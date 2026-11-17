@@ -463,9 +463,7 @@ namespace SharpDTLS.Protocol12
             preMasterSecret[0] = (byte)(_context.ClientHelloVersion >> 8);
             preMasterSecret[1] = (byte)_context.ClientHelloVersion;
 
-            var rsa = new Pkcs1Encoding(new RsaBlindedEngine());
-            rsa.Init(true, new ParametersWithRandom(key, new SecureRandom()));
-            return new TlsWriter().WriteOpaque16(rsa.ProcessBlock(preMasterSecret, 0, preMasterSecret.Length)).ToArray();
+            return new TlsWriter().WriteOpaque16(_context.Crypto.EncryptPreMasterSecret(Certificates.Spki(key), preMasterSecret)).ToArray();
         }
     }
 

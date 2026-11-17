@@ -79,7 +79,7 @@ namespace SharpDTLS.Tests
             using var certificate = SelfSigned(ecdsa: false);
             var suites = new ushort[] { 0x009C }; // TLS_RSA_WITH_AES_128_GCM_SHA256
             using var server = new TlsServer(new ServerCredentials(certificate)) { CipherSuites = suites, Crypto = netCrypto ? new NetTlsCrypto() : null };
-            Assert.AreEqual(TlsVersion.Tls12, await Connect(server, c => { c.MaximumVersion = TlsVersion.Tls12; c.CipherSuites = suites; }));
+            Assert.AreEqual(TlsVersion.Tls12, await Connect(server, c => { c.MaximumVersion = TlsVersion.Tls12; c.CipherSuites = suites; c.Crypto = netCrypto ? new NetTlsCrypto() : null; }));
         }
 
         [TestMethod]

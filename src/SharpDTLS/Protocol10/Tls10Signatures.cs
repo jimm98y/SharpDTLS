@@ -44,7 +44,18 @@ namespace SharpDTLS.Protocol10
             return signer.GenerateSignature();
         }
 
-        public static bool Verify(AsymmetricKeyParameter publicKey, byte[] content, byte[] signature)
+        public static bool Verify(AsymmetricKeyParameter publicKey, byte[] content, byte[] signature, ITlsCrypto crypto = null)
+        {
+            // the fixed signatures of TLS 1.0/1.1, by the key's type
+            ushort scheme = publicKey is RsaKeyParameters ? SignatureSchemes.RsaPkcs1Md5Sha1
+                : publicKey is ECKeyParameters ? SignatureSchemes.EcdsaSha1
+                : publicKey is DsaKeyParameters ? SignatureSchemes.DsaSha1
+                : throw new DtlsException(AlertDescription.UnsupportedCertificate, "Unsupported key type for TLS 1.0 signatures.");
+            return (crypto ?? BouncyCastleTlsCrypto.Default).Verify(scheme, Certificates.Spki(publicKey), content, signature);
+        }
+
+        /// <summary>The MD5 || SHA-1 RSA signature, or SHA-1 ECDSA / DSA, of BouncyCastle.</summary>
+        internal static bool VerifySignature(AsymmetricKeyParameter publicKey, byte[] content, byte[] signature)
         {
             ISigner signer = CreateSigner(publicKey);
             signer.Init(false, publicKey);

@@ -305,11 +305,11 @@ namespace SharpDTLS.Protocol12
         protected bool Verify(AsymmetricKeyParameter publicKey, byte[] content, ushort? scheme, byte[] signature, IEnumerable<ushort> acceptedSchemes)
         {
             if (!IsDtls12)
-                return Tls10Signatures.Verify(publicKey, content, signature);
+                return Tls10Signatures.Verify(publicKey, content, signature, Crypto);
 
             if (scheme == null || !acceptedSchemes.Contains(scheme.Value))
                 throw new DtlsException(AlertDescription.IllegalParameter, $"Signature scheme 0x{scheme:X4} was not offered.");
-            return Dtls12Signatures.Verify(scheme.Value, publicKey, content, signature);
+            return Dtls12Signatures.Verify(scheme.Value, publicKey, content, signature, Crypto);
         }
 
         protected static byte[] Concat(byte[] a, byte[] b)
