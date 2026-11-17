@@ -242,7 +242,7 @@ namespace SharpDTLS.Protocol13
                 // 0-RTT keys come from the ClientHello alone (RFC 8446 §7.1).
                 if (AcceptEarlyData())
                 {
-                    _earlyKeys = Dtls13CryptoUtils.CalculateEarlyKeys(_clientHello.ClientRandom, Session.Transcript.Hash(suite), _psk, suite);
+                    _earlyKeys = Dtls13CryptoUtils.CalculateEarlyKeys(_clientHello.ClientRandom, Session.Transcript.Hash(suite, crypto: Crypto), _psk, suite, crypto: Crypto);
                     InspectSecret(TlsInspector.ClientEarlyTrafficSecret, _earlyKeys.ClientSecret);
                     AddReadKeys(_earlyKeys);
                     _earlyDataAccepted = true;
@@ -309,7 +309,7 @@ namespace SharpDTLS.Protocol13
                 }
 
                 byte[] truncated = PskBinders.TruncatedClientHello(record, offered.BindersLength);
-                byte[] expected = Dtls13CryptoUtils.CalculateBinder(psk, Session.Transcript.HashWith(suite, truncated), suite, external);
+                byte[] expected = Dtls13CryptoUtils.CalculateBinder(psk, Session.Transcript.HashWith(suite, truncated, crypto: Crypto), suite, external, crypto: Crypto);
                 if (!System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(expected, offered.Binders[i]))
                     throw new DtlsException(AlertDescription.DecryptError, "PSK binder verification failed.");
 
@@ -397,12 +397,12 @@ namespace SharpDTLS.Protocol13
             Session.Transcript.AddPlaintextRecord(SendPlaintextHandshake(serverHello));
             suite = Session.CipherSuite; // an inspector may have changed the ServerHello's suite
 
-            var handshakeKeys = Dtls13CryptoUtils.CalculateHandshakeKeys(_clientHello.ClientRandom, Session.Transcript.Hash(suite), sharedSecret, suite, _psk);
+            var handshakeKeys = Dtls13CryptoUtils.CalculateHandshakeKeys(_clientHello.ClientRandom, Session.Transcript.Hash(suite, crypto: Crypto), sharedSecret, suite, _psk, crypto: Crypto);
             if (TlsInspector.Current != null)
             {
                 InspectSecret(TlsInspector.Psk, _psk);
                 InspectSecret(TlsInspector.SharedSecret, sharedSecret);
-                InspectSecret(TlsInspector.HelloHash, Session.Transcript.Hash(suite));
+                InspectSecret(TlsInspector.HelloHash, Session.Transcript.Hash(suite, crypto: Crypto));
                 InspectKeys(handshakeKeys);
             }
             Session.ServerHandshakeKeys = handshakeKeys;
@@ -454,16 +454,16 @@ namespace SharpDTLS.Protocol13
                 var clientSchemes = _clientHello.Extensions.OfType<ClientSignatureAlgorithms>().FirstOrDefault()?.SignatureAlgorithms;
                 ushort scheme = Dtls13Signatures.SelectScheme(_credentials.PublicKey, clientSchemes)
                     ?? throw new DtlsException(AlertDescription.HandshakeFailure, "No signature scheme in common with the client.");
-                byte[] content = Dtls13Signatures.BuildSignedContent(server: true, Session.Transcript.Hash(suite));
+                byte[] content = Dtls13Signatures.BuildSignedContent(server: true, Session.Transcript.Hash(suite, crypto: Crypto));
                 SendHandshake(new CertificateVerifyDatagram(_server.Crypto.Sign(_credentials, scheme, content), scheme), handshakeKeys);
             }
 
-            byte[] verifyData = Dtls13CryptoUtils.CalculateFinished(handshakeKeys.ServerSecret, Session.Transcript.Hash(suite), suite);
+            byte[] verifyData = Dtls13CryptoUtils.CalculateFinished(handshakeKeys.ServerSecret, Session.Transcript.Hash(suite, crypto: Crypto), suite, crypto: Crypto);
             SendHandshake(new FinishedDatagram { VerifyData = verifyData }, handshakeKeys);
 
-            byte[] serverFinishedHash = Session.Transcript.Hash(suite);
-            Session.ServerApplicationKeys = Dtls13CryptoUtils.CalculateApplicationKeys(_clientHello.ClientRandom, serverFinishedHash, handshakeKeys.Secret, suite);
-            Session.ExporterMasterSecret = Dtls13CryptoUtils.CalculateExporterMasterSecret(Session.ServerApplicationKeys.Secret, serverFinishedHash, suite);
+            byte[] serverFinishedHash = Session.Transcript.Hash(suite, crypto: Crypto);
+            Session.ServerApplicationKeys = Dtls13CryptoUtils.CalculateApplicationKeys(_clientHello.ClientRandom, serverFinishedHash, handshakeKeys.Secret, suite, crypto: Crypto);
+            Session.ExporterMasterSecret = Dtls13CryptoUtils.CalculateExporterMasterSecret(Session.ServerApplicationKeys.Secret, serverFinishedHash, suite, crypto: Crypto);
             if (TlsInspector.Current != null)
             {
                 InspectSecret(TlsInspector.HandshakeHash, serverFinishedHash);
@@ -646,7 +646,7 @@ namespace SharpDTLS.Protocol13
                     if (!_certificateRequest.SignatureAlgorithms.Contains(scheme))
                         throw new DtlsException(AlertDescription.IllegalParameter, $"Client used signature scheme 0x{scheme:X4}, which was not requested.");
 
-                    byte[] content = Dtls13Signatures.BuildSignedContent(server: false, Session.Transcript.Hash(suite));
+                    byte[] content = Dtls13Signatures.BuildSignedContent(server: false, Session.Transcript.Hash(suite, crypto: Crypto));
                     if (!Dtls13Signatures.Verify(scheme, _clientPublicKey, content, certificateVerify.Signature))
                         throw new DtlsException(AlertDescription.DecryptError, "Client CertificateVerify signature is invalid.");
 
@@ -670,7 +670,7 @@ namespace SharpDTLS.Protocol13
             var suite = Session.CipherSuite;
             var handshakeKeys = Session.ServerHandshakeKeys;
 
-            byte[] expected = Dtls13CryptoUtils.CalculateFinished(handshakeKeys.ClientSecret, Session.Transcript.Hash(suite), suite);
+            byte[] expected = Dtls13CryptoUtils.CalculateFinished(handshakeKeys.ClientSecret, Session.Transcript.Hash(suite, crypto: Crypto), suite, crypto: Crypto);
             if (!System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(expected, finished.VerifyData))
                 throw new DtlsException(AlertDescription.DecryptError, "Client Finished verification failed.");
 
@@ -685,7 +685,7 @@ namespace SharpDTLS.Protocol13
             }
 
             Session.ResumptionMasterSecret = Dtls13CryptoUtils.CalculateResumptionMasterSecret(
-                Session.ServerApplicationKeys.Secret, Session.Transcript.Hash(suite), suite);
+                Session.ServerApplicationKeys.Secret, Session.Transcript.Hash(suite, crypto: Crypto), suite, crypto: Crypto);
             InspectSecret(TlsInspector.ResumptionMasterSecret, Session.ResumptionMasterSecret);
 
             var applicationKeys = Session.ServerApplicationKeys;
@@ -737,7 +737,7 @@ namespace SharpDTLS.Protocol13
                 ServerName = ServerName,
                 ApplicationProtocol = ApplicationProtocol,
                 CipherSuite = suite.Id,
-                Psk = Dtls13CryptoUtils.CalculateResumptionPsk(Session.ResumptionMasterSecret, nonce, suite),
+                Psk = Dtls13CryptoUtils.CalculateResumptionPsk(Session.ResumptionMasterSecret, nonce, suite, crypto: Crypto),
                 AgeAdd = ageAdd,
                 IssuedUtc = DateTime.UtcNow,
                 ClientCertificate = Session.ClientCertificateBytes,
@@ -843,7 +843,7 @@ namespace SharpDTLS.Protocol13
                     ushort scheme = (ushort)certificateVerify.SignatureType;
                     if (!auth.Request.SignatureAlgorithms.Contains(scheme))
                         throw new DtlsException(AlertDescription.IllegalParameter, $"Client used signature scheme 0x{scheme:X4}, which was not requested.");
-                    byte[] content = Dtls13Signatures.BuildSignedContent(server: false, auth.Transcript.Hash(suite));
+                    byte[] content = Dtls13Signatures.BuildSignedContent(server: false, auth.Transcript.Hash(suite, crypto: Crypto));
                     if (!Dtls13Signatures.Verify(scheme, auth.PublicKey, content, certificateVerify.Signature))
                         throw new DtlsException(AlertDescription.DecryptError, "Client CertificateVerify signature is invalid.");
                     auth.Transcript.AddHandshake(message);
@@ -854,7 +854,7 @@ namespace SharpDTLS.Protocol13
                 case FinishedDatagram finished when auth.Stage == 2:
                 {
                     var clientKeys = Session.ReadKeys[Session.ReadKeys.Count - 1];
-                    byte[] expected = Dtls13CryptoUtils.CalculateFinished(clientKeys.ClientSecret, auth.Transcript.Hash(suite), suite);
+                    byte[] expected = Dtls13CryptoUtils.CalculateFinished(clientKeys.ClientSecret, auth.Transcript.Hash(suite, crypto: Crypto), suite, crypto: Crypto);
                     if (!System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(expected, finished.VerifyData))
                         throw new DtlsException(AlertDescription.DecryptError, "Post-handshake Finished verification failed.");
                     SendAck();

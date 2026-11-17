@@ -36,8 +36,9 @@ namespace SharpDTLS.Protocol10
     {
         // TLS 1.0 PRF = P_MD5(S1, label+seed) XOR P_SHA1(S2, label+seed)
         // S1 = first ceil(len/2) bytes of secret, S2 = last ceil(len/2) bytes
-        public static byte[] PRF(byte[] secret, string label, byte[] seed, int length)
+        public static byte[] PRF(byte[] secret, string label, byte[] seed, int length, ITlsCrypto crypto = null)
         {
+            crypto ??= BouncyCastleTlsCrypto.Default;
             byte[] labelBytes = Encoding.ASCII.GetBytes(label);
             byte[] fullSeed   = labelBytes.Concat(seed).ToArray();
 
@@ -45,8 +46,8 @@ namespace SharpDTLS.Protocol10
             byte[] s1 = secret.Take(halfLen).ToArray();
             byte[] s2 = secret.Skip(secret.Length / 2).ToArray();
 
-            byte[] pMd5  = P_MD5(s1, fullSeed, length);
-            byte[] pSha1 = P_SHA1(s2, fullSeed, length);
+            byte[] pMd5  = TlsKdf.PHash(crypto, TlsHashAlgorithm.Md5, s1, fullSeed, length);
+            byte[] pSha1 = TlsKdf.PHash(crypto, TlsHashAlgorithm.Sha1, s2, fullSeed, length);
 
             byte[] result = new byte[length];
             for (int i = 0; i < length; i++)
@@ -54,67 +55,7 @@ namespace SharpDTLS.Protocol10
             return result;
         }
 
-        private static byte[] P_MD5(byte[] secret, byte[] seed, int length)
-        {
-            var result = new List<byte>();
-            var hmac   = new HMac(new MD5Digest());
 
-            hmac.Init(new KeyParameter(secret));
-            hmac.BlockUpdate(seed, 0, seed.Length);
-            byte[] a = new byte[hmac.GetMacSize()];
-            hmac.DoFinal(a, 0);
-
-            while (result.Count < length)
-            {
-                hmac.Reset();
-                hmac.Init(new KeyParameter(secret));
-                hmac.BlockUpdate(a, 0, a.Length);
-                hmac.BlockUpdate(seed, 0, seed.Length);
-                byte[] output = new byte[hmac.GetMacSize()];
-                hmac.DoFinal(output, 0);
-                result.AddRange(output);
-
-                hmac.Reset();
-                hmac.Init(new KeyParameter(secret));
-                hmac.BlockUpdate(a, 0, a.Length);
-                byte[] newA = new byte[hmac.GetMacSize()];
-                hmac.DoFinal(newA, 0);
-                a = newA;
-            }
-
-            return result.Take(length).ToArray();
-        }
-
-        private static byte[] P_SHA1(byte[] secret, byte[] seed, int length)
-        {
-            var result = new List<byte>();
-            var hmac   = new HMac(new Sha1Digest());
-
-            hmac.Init(new KeyParameter(secret));
-            hmac.BlockUpdate(seed, 0, seed.Length);
-            byte[] a = new byte[hmac.GetMacSize()];
-            hmac.DoFinal(a, 0);
-
-            while (result.Count < length)
-            {
-                hmac.Reset();
-                hmac.Init(new KeyParameter(secret));
-                hmac.BlockUpdate(a, 0, a.Length);
-                hmac.BlockUpdate(seed, 0, seed.Length);
-                byte[] output = new byte[hmac.GetMacSize()];
-                hmac.DoFinal(output, 0);
-                result.AddRange(output);
-
-                hmac.Reset();
-                hmac.Init(new KeyParameter(secret));
-                hmac.BlockUpdate(a, 0, a.Length);
-                byte[] newA = new byte[hmac.GetMacSize()];
-                hmac.DoFinal(newA, 0);
-                a = newA;
-            }
-
-            return result.Take(length).ToArray();
-        }
 
         public static byte[] CalculateMasterSecret(byte[] preMasterSecret, byte[] clientRandom, byte[] serverRandom)
         {

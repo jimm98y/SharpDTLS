@@ -445,8 +445,8 @@ namespace SharpDTLS.Protocol13
             for (int i = 0; i < _offeredPsks.Count; i++)
             {
                 var offered = _offeredPsks[i];
-                extension.Binders[i] = Dtls13CryptoUtils.CalculateBinder(offered.Key, Session.Transcript.HashWith(offered.HashSuite, truncated),
-                    offered.HashSuite, external: offered.Ticket == null);
+                extension.Binders[i] = Dtls13CryptoUtils.CalculateBinder(offered.Key, Session.Transcript.HashWith(offered.HashSuite, truncated, crypto: Crypto),
+                    offered.HashSuite, external: offered.Ticket == null, crypto: Crypto);
             }
         }
 
@@ -456,7 +456,7 @@ namespace SharpDTLS.Protocol13
         private void SendEarlyData()
         {
             var ticketSuite = SuiteFor(_offeredPsks[0].Ticket.CipherSuite);
-            _earlyKeys = Dtls13CryptoUtils.CalculateEarlyKeys(_clientHello.ClientRandom, Session.Transcript.Hash(ticketSuite), _offeredPsks[0].Key, ticketSuite);
+            _earlyKeys = Dtls13CryptoUtils.CalculateEarlyKeys(_clientHello.ClientRandom, Session.Transcript.Hash(ticketSuite, crypto: Crypto), _offeredPsks[0].Key, ticketSuite, crypto: Crypto);
             InspectSecret(TlsInspector.ClientEarlyTrafficSecret, _earlyKeys.ClientSecret);
             SendProtected(_earlyKeys, new ApplicationDataDatagram(EarlyData).ToBytes());
         }
@@ -737,12 +737,12 @@ namespace SharpDTLS.Protocol13
             NextReceiveMessageSeq = serverHello.SequenceNumber + 1;
 
             byte[] sharedSecret = keyShare == null ? null : _keyShares[keyShare.KeyType].Complete(keyShare.PublicKey);
-            var handshakeKeys = Dtls13CryptoUtils.CalculateHandshakeKeys(_clientHello.ClientRandom, Session.Transcript.Hash(suite), sharedSecret, suite, psk);
+            var handshakeKeys = Dtls13CryptoUtils.CalculateHandshakeKeys(_clientHello.ClientRandom, Session.Transcript.Hash(suite, crypto: Crypto), sharedSecret, suite, psk, crypto: Crypto);
             if (TlsInspector.Current != null)
             {
                 InspectSecret(TlsInspector.Psk, psk);
                 InspectSecret(TlsInspector.SharedSecret, sharedSecret);
-                InspectSecret(TlsInspector.HelloHash, Session.Transcript.Hash(suite));
+                InspectSecret(TlsInspector.HelloHash, Session.Transcript.Hash(suite, crypto: Crypto));
                 InspectKeys(handshakeKeys);
             }
 
@@ -822,7 +822,7 @@ namespace SharpDTLS.Protocol13
 
                 case State.WaitCertificateVerify when parsed is CertificateVerifyDatagram certificateVerify:
                 {
-                    byte[] content = Dtls13Signatures.BuildSignedContent(server: true, Session.Transcript.Hash(suite));
+                    byte[] content = Dtls13Signatures.BuildSignedContent(server: true, Session.Transcript.Hash(suite, crypto: Crypto));
                     ushort scheme = (ushort)certificateVerify.SignatureType;
                     if (!Dtls13Signatures.Supported.Contains(scheme))
                         throw new DtlsException(AlertDescription.IllegalParameter, $"Server used signature scheme 0x{scheme:X4}, which was not offered.");
@@ -897,17 +897,17 @@ namespace SharpDTLS.Protocol13
             var suite = Session.CipherSuite;
             var handshakeKeys = Session.ServerHandshakeKeys;
 
-            byte[] expected = Dtls13CryptoUtils.CalculateFinished(handshakeKeys.ServerSecret, Session.Transcript.Hash(suite), suite);
+            byte[] expected = Dtls13CryptoUtils.CalculateFinished(handshakeKeys.ServerSecret, Session.Transcript.Hash(suite, crypto: Crypto), suite, crypto: Crypto);
             if (!CryptographicOperations.FixedTimeEquals(expected, finished.VerifyData))
                 throw new DtlsException(AlertDescription.DecryptError, "Server Finished verification failed.");
 
             Session.Transcript.AddHandshake(message);
 
             // Application secrets are derived from the transcript up to the server Finished.
-            byte[] serverFinishedHash = Session.Transcript.Hash(suite);
-            var applicationKeys = Dtls13CryptoUtils.CalculateApplicationKeys(_clientHello.ClientRandom, serverFinishedHash, handshakeKeys.Secret, suite);
+            byte[] serverFinishedHash = Session.Transcript.Hash(suite, crypto: Crypto);
+            var applicationKeys = Dtls13CryptoUtils.CalculateApplicationKeys(_clientHello.ClientRandom, serverFinishedHash, handshakeKeys.Secret, suite, crypto: Crypto);
             Session.ServerApplicationKeys = applicationKeys;
-            Session.ExporterMasterSecret = Dtls13CryptoUtils.CalculateExporterMasterSecret(applicationKeys.Secret, serverFinishedHash, suite);
+            Session.ExporterMasterSecret = Dtls13CryptoUtils.CalculateExporterMasterSecret(applicationKeys.Secret, serverFinishedHash, suite, crypto: Crypto);
 
             // Client's final flight: [Certificate, CertificateVerify,] Finished in the handshake epoch.
             BeginFlight();
@@ -917,9 +917,9 @@ namespace SharpDTLS.Protocol13
             if (_certificateRequest != null)
                 SendClientCertificate();
 
-            byte[] verifyData = Dtls13CryptoUtils.CalculateFinished(handshakeKeys.ClientSecret, Session.Transcript.Hash(suite), suite);
+            byte[] verifyData = Dtls13CryptoUtils.CalculateFinished(handshakeKeys.ClientSecret, Session.Transcript.Hash(suite, crypto: Crypto), suite, crypto: Crypto);
             SendHandshake(new FinishedDatagram { VerifyData = verifyData }, handshakeKeys);
-            Session.ResumptionMasterSecret = Dtls13CryptoUtils.CalculateResumptionMasterSecret(applicationKeys.Secret, Session.Transcript.Hash(suite), suite);
+            Session.ResumptionMasterSecret = Dtls13CryptoUtils.CalculateResumptionMasterSecret(applicationKeys.Secret, Session.Transcript.Hash(suite, crypto: Crypto), suite, crypto: Crypto);
             if (TlsInspector.Current != null)
             {
                 InspectSecret(TlsInspector.HandshakeHash, serverFinishedHash);
@@ -947,7 +947,7 @@ namespace SharpDTLS.Protocol13
             if (Session.ResumptionMasterSecret == null || nst.TicketLifetime == 0 || nst.Ticket == null || nst.Ticket.Length == 0)
                 return;
             var suite = Session.CipherSuite;
-            byte[] psk = Dtls13CryptoUtils.CalculateResumptionPsk(Session.ResumptionMasterSecret, nst.TicketNonce ?? Array.Empty<byte>(), suite);
+            byte[] psk = Dtls13CryptoUtils.CalculateResumptionPsk(Session.ResumptionMasterSecret, nst.TicketNonce ?? Array.Empty<byte>(), suite, crypto: Crypto);
             SessionTicket = new Dtls13SessionTicket(nst.Ticket, Math.Min(nst.TicketLifetime, 604800u), nst.TicketAgeAdd, suite.Id, psk,
                 Session.PeerCertificate, nst.MaxEarlyDataSize, ServerName, ApplicationProtocol);
         }
@@ -1015,7 +1015,7 @@ namespace SharpDTLS.Protocol13
                 var suite = Session.CipherSuite;
                 var keys = Session.WriteKeys;
                 SendClientCertificate(request, keys, transcript);
-                byte[] verifyData = Dtls13CryptoUtils.CalculateFinished(keys.ClientSecret, transcript.Hash(suite), suite);
+                byte[] verifyData = Dtls13CryptoUtils.CalculateFinished(keys.ClientSecret, transcript.Hash(suite), suite, crypto: Crypto);
                 SendHandshake(new FinishedDatagram { VerifyData = verifyData }, keys, addToTranscript: false);
             });
             RaiseEvent(() => PostHandshakeCertificateRequested?.Invoke(this, EventArgs.Empty));

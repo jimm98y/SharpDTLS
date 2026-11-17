@@ -49,44 +49,12 @@ namespace SharpDTLS.Protocol12
         }
 
         // TLS 1.2 PRF: P_SHA256 by default; P_SHA384 for AES-256-GCM-SHA384 suites.
-        public static byte[] PRF(byte[] secret, string label, byte[] seed, int length, bool useSha384 = false)
+        public static byte[] PRF(byte[] secret, string label, byte[] seed, int length, bool useSha384 = false, ITlsCrypto crypto = null)
         {
-            byte[] labelBytes = Encoding.ASCII.GetBytes(label);
-            byte[] fullSeed = labelBytes.Concat(seed).ToArray();
-            return useSha384 ? P_Hash(new Sha384Digest(), secret, fullSeed, length)
-                             : P_Hash(new Sha256Digest(), secret, fullSeed, length);
+            byte[] fullSeed = Encoding.ASCII.GetBytes(label).Concat(seed).ToArray();
+            return TlsKdf.PHash(crypto ?? BouncyCastleTlsCrypto.Default, useSha384 ? TlsHashAlgorithm.Sha384 : TlsHashAlgorithm.Sha256, secret, fullSeed, length);
         }
 
-        private static byte[] P_Hash(IDigest digest, byte[] secret, byte[] seed, int length)
-        {
-            var result = new List<byte>();
-            var hmac = new HMac(digest);
-
-            hmac.Init(new KeyParameter(secret));
-            hmac.BlockUpdate(seed, 0, seed.Length);
-            byte[] a = new byte[hmac.GetMacSize()];
-            hmac.DoFinal(a, 0);
-
-            while (result.Count < length)
-            {
-                hmac.Reset();
-                hmac.Init(new KeyParameter(secret));
-                hmac.BlockUpdate(a, 0, a.Length);
-                hmac.BlockUpdate(seed, 0, seed.Length);
-                byte[] output = new byte[hmac.GetMacSize()];
-                hmac.DoFinal(output, 0);
-                result.AddRange(output);
-
-                hmac.Reset();
-                hmac.Init(new KeyParameter(secret));
-                hmac.BlockUpdate(a, 0, a.Length);
-                byte[] newA = new byte[hmac.GetMacSize()];
-                hmac.DoFinal(newA, 0);
-                a = newA;
-            }
-
-            return result.Take(length).ToArray();
-        }
 
         public static byte[] CalculateMasterSecret(byte[] preMasterSecret, byte[] clientRandom, byte[] serverRandom, bool useSha384 = false)
         {

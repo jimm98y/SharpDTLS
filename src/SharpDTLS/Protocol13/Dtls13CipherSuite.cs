@@ -19,9 +19,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 // SOFTWARE.
 
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Crypto.Digests;
-using Org.BouncyCastle.Tls.Crypto;
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
@@ -59,22 +56,22 @@ namespace SharpDTLS.Protocol13
 
         private static readonly Dictionary<ushort, Dtls13CipherSuite> _suites = new[]
         {
-            new Dtls13CipherSuite(TLS_AES_128_GCM_SHA256, CryptoHashAlgorithm.sha256, 32, 16, 12, new AeadRecordCipher(TlsAeadAlgorithm.AesGcm, 16, aesMask: true)),
-            new Dtls13CipherSuite(TLS_AES_256_GCM_SHA384, CryptoHashAlgorithm.sha384, 48, 32, 12, new AeadRecordCipher(TlsAeadAlgorithm.AesGcm, 16, aesMask: true)),
-            new Dtls13CipherSuite(TLS_CHACHA20_POLY1305_SHA256, CryptoHashAlgorithm.sha256, 32, 32, 12, new AeadRecordCipher(TlsAeadAlgorithm.ChaCha20Poly1305, 16, aesMask: false)),
-            new Dtls13CipherSuite(TLS_AES_128_CCM_SHA256, CryptoHashAlgorithm.sha256, 32, 16, 12, new AeadRecordCipher(TlsAeadAlgorithm.AesCcm, 16, aesMask: true)),
-            new Dtls13CipherSuite(TLS_AES_128_CCM_8_SHA256, CryptoHashAlgorithm.sha256, 32, 16, 12, new AeadRecordCipher(TlsAeadAlgorithm.AesCcm8, 8, aesMask: true)),
-            new Dtls13CipherSuite(TLS_AEGIS_256_SHA512, CryptoHashAlgorithm.sha512, 64, 32, 32, new AegisCipher(aegis256: true)),
-            new Dtls13CipherSuite(TLS_AEGIS_128L_SHA256, CryptoHashAlgorithm.sha256, 32, 16, 16, new AegisCipher(aegis256: false)),
-            new Dtls13CipherSuite(TLS_SHA256_SHA256, CryptoHashAlgorithm.sha256, 32, 32, 32, new IntegrityOnlyCipher(sha384: false)),
-            new Dtls13CipherSuite(TLS_SHA384_SHA384, CryptoHashAlgorithm.sha384, 48, 48, 48, new IntegrityOnlyCipher(sha384: true)),
+            new Dtls13CipherSuite(TLS_AES_128_GCM_SHA256, TlsHashAlgorithm.Sha256, 32, 16, 12, new AeadRecordCipher(TlsAeadAlgorithm.AesGcm, 16, aesMask: true)),
+            new Dtls13CipherSuite(TLS_AES_256_GCM_SHA384, TlsHashAlgorithm.Sha384, 48, 32, 12, new AeadRecordCipher(TlsAeadAlgorithm.AesGcm, 16, aesMask: true)),
+            new Dtls13CipherSuite(TLS_CHACHA20_POLY1305_SHA256, TlsHashAlgorithm.Sha256, 32, 32, 12, new AeadRecordCipher(TlsAeadAlgorithm.ChaCha20Poly1305, 16, aesMask: false)),
+            new Dtls13CipherSuite(TLS_AES_128_CCM_SHA256, TlsHashAlgorithm.Sha256, 32, 16, 12, new AeadRecordCipher(TlsAeadAlgorithm.AesCcm, 16, aesMask: true)),
+            new Dtls13CipherSuite(TLS_AES_128_CCM_8_SHA256, TlsHashAlgorithm.Sha256, 32, 16, 12, new AeadRecordCipher(TlsAeadAlgorithm.AesCcm8, 8, aesMask: true)),
+            new Dtls13CipherSuite(TLS_AEGIS_256_SHA512, TlsHashAlgorithm.Sha512, 64, 32, 32, new AegisCipher(aegis256: true)),
+            new Dtls13CipherSuite(TLS_AEGIS_128L_SHA256, TlsHashAlgorithm.Sha256, 32, 16, 16, new AegisCipher(aegis256: false)),
+            new Dtls13CipherSuite(TLS_SHA256_SHA256, TlsHashAlgorithm.Sha256, 32, 32, 32, new IntegrityOnlyCipher(sha384: false)),
+            new Dtls13CipherSuite(TLS_SHA384_SHA384, TlsHashAlgorithm.Sha384, 48, 48, 48, new IntegrityOnlyCipher(sha384: true)),
         }.ToDictionary(s => s.Id);
 
         /// <summary>Every implemented DTLS 1.3 suite.</summary>
         public static IReadOnlyCollection<ushort> All => _suites.Keys;
 
         public ushort Id { get; }
-        public int HashAlgorithm { get; }   // CryptoHashAlgorithm value
+        public TlsHashAlgorithm HashAlgorithm { get; }
         public int HashLength { get; }
         public int KeyLength { get; }
         public int IvLength { get; }
@@ -85,7 +82,7 @@ namespace SharpDTLS.Protocol13
 
         internal IDtls13RecordCipher Cipher { get; }
 
-        private Dtls13CipherSuite(ushort id, int hashAlgorithm, int hashLength, int keyLength, int ivLength, IDtls13RecordCipher cipher,
+        private Dtls13CipherSuite(ushort id, TlsHashAlgorithm hashAlgorithm, int hashLength, int keyLength, int ivLength, IDtls13RecordCipher cipher,
             string labelPrefix = "dtls13")
         {
             Id = id;
@@ -145,12 +142,6 @@ namespace SharpDTLS.Protocol13
             return suite;
         }
 
-        public IDigest CreateDigest() => HashAlgorithm switch
-        {
-            CryptoHashAlgorithm.sha512 => new Sha512Digest(),
-            CryptoHashAlgorithm.sha384 => new Sha384Digest(),
-            _ => new Sha256Digest(),
-        };
     }
 
     /// <summary>Record protection of a DTLS 1.3 cipher suite: of each traffic key, an <see cref="IDtls13Protection"/>.</summary>

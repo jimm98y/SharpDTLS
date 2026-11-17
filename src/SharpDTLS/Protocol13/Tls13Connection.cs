@@ -246,7 +246,7 @@ namespace SharpDTLS.Protocol13
         {
             if (Session.ExporterMasterSecret == null)
                 throw new InvalidOperationException("The handshake has not completed.");
-            return Dtls13CryptoUtils.ExportKeyingMaterial(Session.ExporterMasterSecret, label, context, length, Session.CipherSuite);
+            return Dtls13CryptoUtils.ExportKeyingMaterial(Session.ExporterMasterSecret, label, context, length, Session.CipherSuite, crypto: Crypto);
         }
 
         // In TLS 1.3 all alerts except close_notify and user_canceled are fatal (RFC 8446 §6).

@@ -220,28 +220,14 @@ namespace SharpDTLS.Protocol12
         protected byte[] TranscriptHash()
         {
             if (!IsDtls12)
-            {
-                var md5 = new MD5Digest();
-                var sha1 = new Sha1Digest();
-                foreach (var m in _transcript) { md5.BlockUpdate(m, 0, m.Length); sha1.BlockUpdate(m, 0, m.Length); }
-                byte[] result = new byte[36];
-                md5.DoFinal(result, 0);
-                sha1.DoFinal(result, 16);
-                return result;
-            }
-
-            IDigest digest = CipherSuite.Prf == PrfHashAlgorithm.Sha384 ? new Sha384Digest() : new Sha256Digest();
-            foreach (var m in _transcript)
-                digest.BlockUpdate(m, 0, m.Length);
-            byte[] hash = new byte[digest.GetDigestSize()];
-            digest.DoFinal(hash, 0);
-            return hash;
+                return Concat(TlsKdf.Hash(Crypto, TlsHashAlgorithm.Md5, _transcript), TlsKdf.Hash(Crypto, TlsHashAlgorithm.Sha1, _transcript));
+            return TlsKdf.Hash(Crypto, CipherSuite.Prf == PrfHashAlgorithm.Sha384 ? TlsHashAlgorithm.Sha384 : TlsHashAlgorithm.Sha256, _transcript);
         }
 
         protected byte[] Prf(byte[] secret, string label, byte[] seed, int length)
             => IsDtls12
-                ? Dtls12CryptoUtils.PRF(secret, label, seed, length, CipherSuite.Prf == PrfHashAlgorithm.Sha384)
-                : Tls10Prf.PRF(secret, label, seed, length);
+                ? Dtls12CryptoUtils.PRF(secret, label, seed, length, CipherSuite.Prf == PrfHashAlgorithm.Sha384, Crypto)
+                : Tls10Prf.PRF(secret, label, seed, length, Crypto);
 
         /// <summary>
         /// Computes the master secret (with RFC 7627 when negotiated; call after ClientKeyExchange is in the

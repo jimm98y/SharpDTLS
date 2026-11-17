@@ -89,6 +89,9 @@ namespace SharpDTLS.Protocol13
 
         private IDtls13Protection _client, _server;
 
+        /// <summary>The cryptography the keys were derived with, which a KeyUpdate derives the next ones with too.</summary>
+        internal ITlsCrypto Crypto { get; set; } = BouncyCastleTlsCrypto.Default;
+
         /// <summary>
         /// The records of one direction's key: built on first use, of <paramref name="crypto"/> (the default when null),
         /// and kept for every record of the epoch.
