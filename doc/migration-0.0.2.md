@@ -11,6 +11,9 @@ established connection allocates nothing per record.
 Most applications only have to change how they pass their certificate and key, their certificate
 validators and their data handlers. The sections below cover each change.
 
+Code that compiles unchanged still has to be rebuilt: `SendApplicationData` and the transports' `Send`
+take spans now, so assemblies built against 0.0.2 don't bind to this release.
+
 ## At a glance
 
 | 0.0.2 | Now |
@@ -19,6 +22,7 @@ validators and their data handlers. The sections below cover each change.
 | `new TlsServer(keyPair, certificate)` | `new TlsServer(new ServerCredentials(certificate))` |
 | `new ServerCredentials(keyPair, certificate, intermediates)` | `new ServerCredentials(certificate, intermediates)` |
 | `new CertificateCredentials(keyPair, certificate, intermediates)` | `new CertificateCredentials(certificate, intermediates)` |
+| `CertificateCredentials.Certificate`, `IntermediateCertificates`: `X509Certificate`, `IList<X509Certificate>` | `X509Certificate2`, `IList<X509Certificate2>` |
 | `CertificateCredentials.KeyPair` | removed: the key is the certificate's own (`HasPrivateKey`), or the PKCS#8 bytes you passed |
 | `client.ClientCertificate`, `ClientCertificateKeyPair`, `ClientIntermediateCertificates` | `client.ClientCredentials = new CertificateCredentials(certificate, intermediates)` |
 | `Func<X509Certificate, IReadOnlyList<byte[]>, bool>` validators | `Func<X509Certificate2, IReadOnlyList<byte[]>, bool>` |
@@ -37,7 +41,7 @@ validators and their data handlers. The sections below cover each change.
 | `ApplicationDataReceived`: `EventHandler<byte[]>` (clients, connections) | `TlsDataHandler`: `(connection, ReadOnlySpan<byte> data)` |
 | `DtlsServer.ApplicationDataReceived`, `EarlyDataReceived`: `EventHandler<DtlsDataReceivedEventArgs>` | `TlsDataHandler`; `e.RemoteEndPoint` is `connection.RemoteEndPoint` |
 | `TlsServer.ApplicationDataReceived`, `EarlyDataReceived`: `EventHandler<TlsDataReceivedEventArgs>` | `TlsDataHandler` |
-| `SendApplicationData(byte[])` | `SendApplicationData(ReadOnlySpan<byte>)`: a `byte[]` still converts |
+| `SendApplicationData(byte[])`, `DtlsServer.SendApplicationData(EndPoint, byte[])` | `ReadOnlySpan<byte>`: a `byte[]` still converts |
 | `IServerTransport`, `IClientTransport`: `event EventHandler<byte[]> OnDataReceived`, `Send(byte[])` | `event DatagramHandler OnDataReceived`, `Send(ReadOnlySpan<byte>)` |
 
 Some things work as before:
@@ -160,7 +164,8 @@ server.PwdProtectionKey = key;                                     // D and Q
 client.PwdProtectionKey = new ECParameters { Curve = key.Curve, Q = key.Q }; // public part only
 ```
 
-The key must be on a named curve. `null` turns protection off, as before.
+The key must be on a named curve. `null` turns protection off, as before. A client refuses a key
+that has `D` with an `ArgumentException`: the server's private key must not be handed to clients.
 
 ## Received data
 
@@ -202,7 +207,8 @@ sealed class MyTransport : IServerTransport
 
 `IClientTransport` is the same without the endpoint on `Send`. The `ServerTransport` and
 `ClientTransport` classes receive into one buffer and send from spans; on .NET 8 and later the server
-also keeps one `IPEndPoint` per source address instead of creating one for every datagram.
+also keeps one `IPEndPoint` per source address instead of creating one for every datagram. Those
+instances are shared by every datagram and connection of that address: read them, don't change them.
 
 ## The crypto provider
 
@@ -233,8 +239,8 @@ and `CreateHmac` are called once per key, and the object is used for every recor
 - With **`NetTlsCrypto`** on .NET 8 and later, records are protected by .NET's `AesGcm`, `AesCcm` and
   `ChaCha20Poly1305` (where the platform supports it), and no record allocates anything.
 - With **`BouncyCastleTlsCrypto`**, BouncyCastle's GCM, CCM and ChaCha20-Poly1305 still allocate as they
-  are set up for each record's nonce: with BouncyCastle 2.7 about 570 bytes per record for AES-GCM and
-  270 for ChaCha20-Poly1305. CBC suites, the record number mask and the HMACs allocate nothing. On .NET
+  are set up for each record's nonce: with BouncyCastle 2.7 about 1.1 KB on each side of a record for
+  AES-GCM (sealing it, then opening it) and 540 bytes for ChaCha20-Poly1305. CBC suites, the record number mask and the HMACs allocate nothing. On .NET
   Framework and .NET Standard both providers use BouncyCastle.
 - Over TCP, `TlsStream`'s `Task` methods allocate their tasks as any `Stream`'s do.
 
