@@ -110,8 +110,10 @@ namespace SharpDTLS
         }
 
         /// <summary>
-        /// The operations of the server's private keys (signing, RSA key transport, static key agreement):
-        /// <see cref="BouncyCastleTlsCrypto.Default"/> unless set.
+        /// The cryptography of every connection: the private key's operations, the records' protection, the hashes and
+        /// key schedule, the key exchange and the peer's signatures. <see cref="BouncyCastleTlsCrypto.Default"/> unless
+        /// set (null restores it); <see cref="NetTlsCrypto"/> uses .NET's own types, and BouncyCastle where they fall short.
+        /// Set it before the handshake.
         /// </summary>
         public ITlsCrypto Crypto
         {
