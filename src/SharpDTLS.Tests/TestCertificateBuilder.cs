@@ -34,12 +34,12 @@ namespace SharpDTLS.Tests
             // of PKCS#8: the same key again, as credentials of the certificate without its key take it
             var built = CertificateBuilder.CreateSelfSigned("example.test", ECCurve.NamedCurves.nistP256);
             byte[] pkcs8 = built.ExportPkcs8PrivateKey();
-            var again = new CertificateCredentials(built.Certificate, pkcs8);
+            var again = new TransportCertificate(built.Certificate, pkcs8);
             CollectionAssert.AreEqual(pkcs8, again.ExportPkcs8PrivateKey());
 
             // of the certificate's own key, exportable
             var certificate = TestDotNetCredentials.SelfSigned(ecdsa: false);
-            byte[] exported = new CertificateCredentials(certificate).ExportPkcs8PrivateKey();
+            byte[] exported = new TransportCertificate(certificate).ExportPkcs8PrivateKey();
 #if NET
             using var rsa = RSA.Create();
             rsa.ImportPkcs8PrivateKey(exported, out _);

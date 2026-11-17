@@ -32,10 +32,10 @@ namespace SharpDTLS
 {
     // BouncyCastle's side of the credentials: their PKCS#8 key as BouncyCastle's, and credentials of BouncyCastle's key
     // pairs, as the default self-signed certificate and the tests make them.
-    public partial class CertificateCredentials
+    public sealed partial class TransportCertificate
     {
         /// <summary>Credentials of BouncyCastle's key pair and certificate (null for a raw public key), as the engines and tests take them.</summary>
-        internal CertificateCredentials(AsymmetricCipherKeyPair keyPair, BcX509Certificate certificate, IList<BcX509Certificate> intermediateCertificates = null)
+        internal TransportCertificate(AsymmetricCipherKeyPair keyPair, BcX509Certificate certificate, IList<BcX509Certificate> intermediateCertificates = null)
             : this(Certificates.ToNet(certificate), intermediateCertificates?.Select(Certificates.ToNet).ToList(), null)
         {
             KeyPair = keyPair ?? throw new ArgumentNullException(nameof(keyPair));
@@ -43,11 +43,11 @@ namespace SharpDTLS
             PublicKey = TlsPublicKey.Of(keyPair.Public);
         }
 
-        internal static CertificateCredentials Of(AsymmetricCipherKeyPair keyPair, BcX509Certificate certificate, IList<BcX509Certificate> intermediateCertificates = null)
-            => keyPair == null ? null : new CertificateCredentials(keyPair, certificate, intermediateCertificates);
+        internal static TransportCertificate Of(AsymmetricCipherKeyPair keyPair, BcX509Certificate certificate, IList<BcX509Certificate> intermediateCertificates = null)
+            => keyPair == null ? null : new TransportCertificate(keyPair, certificate, intermediateCertificates);
 
         /// <summary>A server's own key pair and certificate: a certificate needs its key pair, and neither is of a PSK-only server.</summary>
-        internal static CertificateCredentials OfServer(AsymmetricCipherKeyPair keyPair, BcX509Certificate certificate)
+        internal static TransportCertificate OfServer(AsymmetricCipherKeyPair keyPair, BcX509Certificate certificate)
             => certificate != null && keyPair == null ? throw new ArgumentException("A certificate needs its key pair.") : Of(keyPair, certificate);
 
         /// <summary>
@@ -90,13 +90,5 @@ namespace SharpDTLS
             Ed448PrivateKeyParameters ed => ed.GeneratePublicKey(),
             _ => throw new ArgumentException("A raw public key of this key type needs its certificate."),
         };
-    }
-
-    public sealed partial class ServerCredentials
-    {
-        internal ServerCredentials(AsymmetricCipherKeyPair keyPair, BcX509Certificate certificate, IList<BcX509Certificate> intermediateCertificates = null)
-            : base(keyPair, certificate, intermediateCertificates)
-        {
-        }
     }
 }

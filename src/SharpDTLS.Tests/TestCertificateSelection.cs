@@ -26,16 +26,16 @@ namespace SharpDTLS.Tests
         private static TestPki A => _a.Value;
         private static TestPki B => _b.Value;
 
-        private static ServerCredentials ServerCredentialsFrom(TestPki pki)
+        private static TransportCertificate ServerCredentialsFrom(TestPki pki)
         {
             var (key, cert) = pki.Leaf(new[] { "server.test" });
-            return new ServerCredentials(key, cert, new[] { pki.Intermediate.Cert });
+            return new TransportCertificate(key, cert, new[] { pki.Intermediate.Cert });
         }
 
-        private static CertificateCredentials ClientCredentialsFrom(TestPki pki)
+        private static TransportCertificate ClientCredentialsFrom(TestPki pki)
         {
             var (key, cert) = pki.Leaf(commonName: "client", usage: KeyPurposeID.id_kp_clientAuth);
-            return new CertificateCredentials(key, cert, new[] { pki.Intermediate.Cert });
+            return new TransportCertificate(key, cert, new[] { pki.Intermediate.Cert });
         }
 
         private static Exception Handshake(TlsConnectionBase client, Action<Action> onFinished, Action begin)
@@ -101,7 +101,7 @@ namespace SharpDTLS.Tests
             var fromB = ClientCredentialsFrom(B);
             var pair = new ScriptedTransportPair();
             CertificateSelectionContext seen = null;
-            Func<CertificateSelectionContext, CertificateCredentials> selector = context => { seen = context; return new[] { fromA, fromB }.First(context.IsIssuedByAcceptedAuthority); };
+            Func<CertificateSelectionContext, TransportCertificate> selector = context => { seen = context; return new[] { fromA, fromB }.First(context.IsIssuedByAcceptedAuthority); };
             var validator = new CertificateValidator(new[] { B.Root.Cert }.Net()).ForClient();
             Func<Org.BouncyCastle.X509.X509Certificate> received;
             Exception error;

@@ -37,7 +37,7 @@ namespace SharpDTLS
     /// </summary>
     public class NetTlsCrypto : BouncyCastleTlsCrypto
     {
-        public override byte[] Sign(CertificateCredentials credentials, ushort scheme, byte[] content)
+        public override byte[] Sign(TransportCertificate credentials, ushort scheme, byte[] content)
         {
             if (!OwnKey(credentials))
                 return base.Sign(credentials, scheme, content);
@@ -82,7 +82,7 @@ namespace SharpDTLS
         }
 
         // Static ECDH (the ECDH_ECDSA and ECDH_RSA suites) of the certificate's own key, on .NET 8+
-        public override byte[] Agree(CertificateCredentials credentials, byte[] peerPublicKey)
+        public override byte[] Agree(TransportCertificate credentials, byte[] peerPublicKey)
         {
 #if NETCOREAPP
             using var ecdh = OwnKey(credentials) ? credentials.Certificate.GetECDiffieHellmanPrivateKey() : null;
@@ -112,7 +112,7 @@ namespace SharpDTLS
             return base.Agree(credentials, peerPublicKey);
         }
 
-        public override byte[] DecryptPreMasterSecret(CertificateCredentials credentials, byte[] encrypted)
+        public override byte[] DecryptPreMasterSecret(TransportCertificate credentials, byte[] encrypted)
         {
             using var rsa = OwnKey(credentials) ? credentials.Certificate.GetRSAPrivateKey() : null;
             if (rsa == null)
@@ -257,7 +257,7 @@ namespace SharpDTLS
 #endif
 
         // The certificate holds the key, and BouncyCastle has none of it: of PKCS#8, or of the engines' key pairs.
-        private static bool OwnKey(CertificateCredentials credentials)
+        private static bool OwnKey(TransportCertificate credentials)
             => credentials.Certificate != null && credentials.Certificate.HasPrivateKey && !credentials.HasPkcs8PrivateKey && credentials.KeyPair == null;
     }
 }

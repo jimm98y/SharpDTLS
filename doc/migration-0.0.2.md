@@ -18,13 +18,14 @@ take spans now, so assemblies built against 0.0.2 don't bind to 0.1.0.
 
 | 0.0.2 | Now |
 |---|---|
-| `new DtlsServer(transport, keyPair, certificate)` | `new DtlsServer(transport, new ServerCredentials(certificate))` |
-| `new TlsServer(keyPair, certificate)` | `new TlsServer(new ServerCredentials(certificate))` |
-| `new ServerCredentials(keyPair, certificate, intermediates)` | `new ServerCredentials(certificate, intermediates)` |
-| `new CertificateCredentials(keyPair, certificate, intermediates)` | `new CertificateCredentials(certificate, intermediates)` |
+| `new DtlsServer(transport, keyPair, certificate)` | `new DtlsServer(transport, new TransportCertificate(certificate))` |
+| `new TlsServer(keyPair, certificate)` | `new TlsServer(new TransportCertificate(certificate))` |
+| `ServerCredentials`, `CertificateCredentials` | `TransportCertificate`, one type for servers and clients; `OcspResponse` is on it |
+| `new ServerCredentials(keyPair, certificate, intermediates)` | `new TransportCertificate(certificate, intermediates)` |
+| `new CertificateCredentials(keyPair, certificate, intermediates)` | `new TransportCertificate(certificate, intermediates)` |
 | `CertificateCredentials.Certificate`, `IntermediateCertificates`: `X509Certificate`, `IList<X509Certificate>` | `X509Certificate2`, `IList<X509Certificate2>` |
 | `CertificateCredentials.KeyPair` | removed: the key is the certificate's own (`HasPrivateKey`), or the PKCS#8 bytes you passed |
-| `client.ClientCertificate`, `ClientCertificateKeyPair`, `ClientIntermediateCertificates` | `client.ClientCredentials = new CertificateCredentials(certificate, intermediates)` |
+| `client.ClientCertificate`, `ClientCertificateKeyPair`, `ClientIntermediateCertificates` | `client.ClientCredentials = new TransportCertificate(certificate, intermediates)` |
 | `Func<X509Certificate, IReadOnlyList<byte[]>, bool>` validators | `Func<X509Certificate2, IReadOnlyList<byte[]>, bool>` |
 | `CertificateValidator(IEnumerable<X509Certificate>)` | `CertificateValidator(IEnumerable<X509Certificate2>)` |
 | `CertificateValidator.HostNameValidator`: `Func<X509Certificate, string, bool>` | `Func<X509Certificate2, string, bool>` |
@@ -60,7 +61,7 @@ var certificate = X509Certificate2.CreateFromPemFile("server.crt", "server.key")
 // any framework: a PFX / PKCS#12 file
 var certificate = new X509Certificate2("server.pfx", password, X509KeyStorageFlags.Exportable);
 
-var server = new DtlsServer(transport, new ServerCredentials(certificate, intermediates));
+var server = new DtlsServer(transport, new TransportCertificate(certificate, intermediates));
 ```
 
 With the default `BouncyCastleTlsCrypto`, the private key must be **exportable**, because it is
@@ -76,14 +77,14 @@ handed to BouncyCastle:
 next to the certificate:
 
 ```cs
-var credentials = new ServerCredentials(certificate, pkcs8PrivateKey, intermediates);
+var credentials = new TransportCertificate(certificate, pkcs8PrivateKey, intermediates);
 ```
 
 **Raw public keys (RFC 7250).** A server or client that authenticates only with a raw public key
 can pass the PKCS#8 key and no certificate. This works for RSA, EC, Ed25519 and Ed448 keys:
 
 ```cs
-new ServerCredentials(null, pkcs8PrivateKey)
+new TransportCertificate(null, pkcs8PrivateKey)
 ```
 
 A PSK-only server passes `null` credentials.
@@ -112,7 +113,7 @@ using Org.BouncyCastle.Pkcs;
 
 var certificate = new X509Certificate2(bcCertificate.GetEncoded());
 byte[] pkcs8 = PrivateKeyInfoFactory.CreatePrivateKeyInfo(bcKeyPair.Private).GetEncoded();
-var credentials = new ServerCredentials(certificate, pkcs8);
+var credentials = new TransportCertificate(certificate, pkcs8);
 ```
 
 Intermediates: `new X509Certificate2(bcIntermediate.GetEncoded())` for each.
@@ -120,7 +121,7 @@ Trusted roots and OCSP issuers convert the same way.
 
 ## Client certificates
 
-Replace the three client properties with one `CertificateCredentials`:
+Replace the three client properties with one `TransportCertificate`:
 
 ```cs
 // 0.0.2
@@ -129,10 +130,10 @@ client.ClientCertificateKeyPair = keyPair;
 client.ClientIntermediateCertificates = intermediates;
 
 // now
-client.ClientCredentials = new CertificateCredentials(certificate, intermediates);
+client.ClientCredentials = new TransportCertificate(certificate, intermediates);
 ```
 
-`ClientCredentialsSelector` is unchanged. It still returns `CertificateCredentials`, built as shown above.
+`ClientCredentialsSelector` is used as before. It returns a `TransportCertificate`, built as shown above, as the servers' `CredentialsSelector` and `CertificateSelector` do.
 
 ## Validators
 

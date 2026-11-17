@@ -110,7 +110,7 @@ namespace SharpDTLS.Tests
         private sealed record Result(Exception Error, byte[] Stapled);
 
         private static Result Run(int version, byte[] serverStaple, bool request, IOcspStapleValidator validator,
-            Func<string, ServerCredentials> selector = null, string serverName = null, (Org.BouncyCastle.Crypto.AsymmetricCipherKeyPair Key, X509Certificate Cert)? leaf = null)
+            Func<string, TransportCertificate> selector = null, string serverName = null, (Org.BouncyCastle.Crypto.AsymmetricCipherKeyPair Key, X509Certificate Cert)? leaf = null)
         {
             var pair = new ScriptedTransportPair();
             var credentials = leaf ?? Pki.Leaf(new[] { "server.test" });
@@ -196,7 +196,7 @@ namespace SharpDTLS.Tests
         {
             var named = Pki.Leaf(new[] { "named.test" });
             byte[] namedStaple = Pki.OcspResponse(named.Cert);
-            var credentials = new ServerCredentials(named.Key, named.Cert, new[] { Pki.Intermediate.Cert }) { OcspResponse = namedStaple };
+            var credentials = new TransportCertificate(named.Key, named.Cert, new[] { Pki.Intermediate.Cert }) { OcspResponse = namedStaple };
             var defaultLeaf = Pki.Leaf(new[] { "server.test" });
             var result = Run(version, Pki.OcspResponse(defaultLeaf.Cert), request: true, new OcspStapleValidator { Required = true },
                 name => name == "named.test" ? credentials : null, "named.test", defaultLeaf);

@@ -34,7 +34,7 @@ namespace SharpDTLS.Protocol12
     internal sealed class Tls12ServerSettings
     {
         /// <summary>The default key and certificate; null for a server of PSK, SRP or PWD alone.</summary>
-        public CertificateCredentials Credentials { get; set; }
+        public TransportCertificate Credentials { get; set; }
         public ITlsCrypto Crypto { get; set; } = BouncyCastleTlsCrypto.Default;
         public ushort MinimumVersion { get; set; } = DtlsVersion.Dtls12;
         public ushort MaximumVersion { get; set; } = DtlsVersion.Dtls12;
@@ -52,7 +52,7 @@ namespace SharpDTLS.Protocol12
         /// Chooses credentials from what the client said (server name, signature schemes); returning null falls back to
         /// <see cref="CertificateSelector"/> and then the default certificate.
         /// </summary>
-        public Func<CertificateSelectionContext, ServerCredentials> CredentialsSelector { get; set; }
+        public Func<CertificateSelectionContext, TransportCertificate> CredentialsSelector { get; set; }
 
         /// <summary>CAs whose names a CertificateRequest lists, to guide the client's choice; null lists none.</summary>
         public IList<System.Security.Cryptography.X509Certificates.X509Certificate2> ClientCertificateAuthorities { get; set; }
@@ -101,7 +101,7 @@ namespace SharpDTLS.Protocol12
         /// Chooses the credentials for the client's server_name (RFC 6066), which is null when the client sent none.
         /// Returning null uses the default certificate.
         /// </summary>
-        public Func<string, ServerCredentials> CertificateSelector { get; set; }
+        public Func<string, TransportCertificate> CertificateSelector { get; set; }
 
         /// <summary>Application protocols (ALPN, RFC 7301) in server preference order; null to ignore ALPN.</summary>
         public IList<string> ApplicationProtocols { get; set; }
@@ -114,7 +114,7 @@ namespace SharpDTLS.Protocol12
 
         /// <summary>
         /// A DER OCSP response for <see cref="Certificate"/> to staple for clients that ask (RFC 6066 §8); null for none.
-        /// Certificates from the CertificateSelector staple their own <see cref="ServerCredentials.OcspResponse"/>.
+        /// Certificates from the CertificateSelector staple their own <see cref="TransportCertificate.OcspResponse"/>.
         /// </summary>
         public byte[] OcspResponse { get; set; }
 
@@ -171,7 +171,7 @@ namespace SharpDTLS.Protocol12
         private Dtls12SessionState _resumedSession;
         private byte[] _sessionId = Array.Empty<byte>();
         private bool _issueTicket;
-        private CertificateCredentials _credentials;
+        private TransportCertificate _credentials;
         private X509Certificate2 _certificate;
         private IEnumerable<byte[]> _intermediates;
         private byte[] _ocspResponse;
@@ -329,7 +329,7 @@ namespace SharpDTLS.Protocol12
             (_credentials, _intermediates, _ocspResponse) = selected != null
                 ? (selected, selected.IntermediateChain, selected.OcspResponse)
                 : (_settings.Credentials, _settings.IntermediateCertificates?.Select(c => c.RawData) ?? _settings.Credentials?.IntermediateChain,
-                   _settings.OcspResponse ?? (_settings.Credentials as ServerCredentials)?.OcspResponse);
+                   _settings.OcspResponse ?? _settings.Credentials?.OcspResponse);
             _certificate = _credentials?.Certificate;
             if (ch.Extension<StatusRequestExtension>()?.StatusType != StatusRequestExtension.Ocsp)
                 _ocspResponse = null;

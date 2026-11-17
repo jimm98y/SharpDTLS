@@ -31,7 +31,7 @@ namespace SharpDTLS.Protocol12
     /// </summary>
     internal abstract class Tls12ServerBase
     {
-        protected Tls12ServerBase(CertificateCredentials credentials, ushort version)
+        protected Tls12ServerBase(TransportCertificate credentials, ushort version)
         {
             Settings = new Tls12ServerSettings
             {
@@ -63,7 +63,7 @@ namespace SharpDTLS.Protocol12
         /// Chooses the credentials for the client's server_name (RFC 6066), which is null when the client sent none.
         /// Returning null uses the default certificate.
         /// </summary>
-        public Func<string, ServerCredentials> CertificateSelector { get => Settings.CertificateSelector; set => Settings.CertificateSelector = value; }
+        public Func<string, TransportCertificate> CertificateSelector { get => Settings.CertificateSelector; set => Settings.CertificateSelector = value; }
 
         /// <summary>Application protocols (ALPN, RFC 7301) in server preference order; null to ignore ALPN.</summary>
         public IList<string> ApplicationProtocols { get => Settings.ApplicationProtocols; set => Settings.ApplicationProtocols = value; }
@@ -85,7 +85,7 @@ namespace SharpDTLS.Protocol12
         /// Chooses credentials from what the client said (server name, signature schemes); returning null falls back to
         /// <see cref="CertificateSelector"/> and then the default certificate.
         /// </summary>
-        public Func<CertificateSelectionContext, ServerCredentials> CredentialsSelector { get => Settings.CredentialsSelector; set => Settings.CredentialsSelector = value; }
+        public Func<CertificateSelectionContext, TransportCertificate> CredentialsSelector { get => Settings.CredentialsSelector; set => Settings.CredentialsSelector = value; }
 
         /// <summary>CAs whose names a CertificateRequest lists, to guide the client's choice; null lists none.</summary>
         public IList<System.Security.Cryptography.X509Certificates.X509Certificate2> ClientCertificateAuthorities { get => Settings.ClientCertificateAuthorities; set => Settings.ClientCertificateAuthorities = value; }

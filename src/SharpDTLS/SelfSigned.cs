@@ -37,10 +37,10 @@ namespace SharpDTLS
     internal static class SelfSigned
     {
         /// <summary>An RSA-2048 certificate and its key, the default of a server with no credentials.</summary>
-        public static ServerCredentials Credentials()
+        public static TransportCertificate Credentials()
         {
             var (keyPair, certificate) = Rsa();
-            return new ServerCredentials(keyPair, certificate);
+            return new TransportCertificate(keyPair, certificate);
         }
 
         public static (AsymmetricCipherKeyPair keyPair, X509Certificate certificate) Rsa(string hostName = null, int keySize = 2048)

@@ -47,7 +47,7 @@ namespace SharpDTLS.Protocol12.TLS12
         }
 
 
-        public Tls12Server(CertificateCredentials credentials)
+        public Tls12Server(TransportCertificate credentials)
             : base(credentials, TlsVersion.Tls12)
         {
         }

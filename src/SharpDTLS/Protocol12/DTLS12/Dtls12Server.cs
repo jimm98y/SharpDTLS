@@ -47,7 +47,7 @@ namespace SharpDTLS.Protocol12.DTLS12
 
 
         /// <param name="credentials">The default key and certificate; null for a server of PSK, SRP or PWD alone.</param>
-        public Dtls12Server(IServerTransport serverTransport, CertificateCredentials credentials)
+        public Dtls12Server(IServerTransport serverTransport, TransportCertificate credentials)
             : base(serverTransport, credentials, DtlsVersion.Dtls12)
         {
         }

@@ -63,7 +63,7 @@ namespace SharpDTLS
         /// Whether <paramref name="credentials"/> chain up to a CA the peer named: some certificate in it is issued by, or
         /// is, one of <see cref="CertificateAuthorities"/>. True when the peer named none.
         /// </summary>
-        public bool IsIssuedByAcceptedAuthority(CertificateCredentials credentials)
+        public bool IsIssuedByAcceptedAuthority(TransportCertificate credentials)
         {
             if (_authorities.Count == 0)
                 return true;

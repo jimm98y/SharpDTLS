@@ -38,13 +38,13 @@ namespace SharpDTLS
         /// <summary>The instance used when none is set.</summary>
         public static BouncyCastleTlsCrypto Default { get; } = new BouncyCastleTlsCrypto();
 
-        public virtual byte[] Sign(CertificateCredentials credentials, ushort scheme, byte[] content)
+        public virtual byte[] Sign(TransportCertificate credentials, ushort scheme, byte[] content)
         {
             var key = PrivateKey(credentials);
             return BcSignatures.Sign(scheme, key, content);
         }
 
-        public virtual byte[] DecryptPreMasterSecret(CertificateCredentials credentials, byte[] encrypted)
+        public virtual byte[] DecryptPreMasterSecret(TransportCertificate credentials, byte[] encrypted)
         {
             // of a padding or length failure, 48 random bytes in constant time
             var rsa = new Pkcs1Encoding(new RsaBlindedEngine(), 48);
@@ -59,7 +59,7 @@ namespace SharpDTLS
             }
         }
 
-        public virtual byte[] Agree(CertificateCredentials credentials, byte[] peerPublicKey) => PrivateKey(credentials) switch
+        public virtual byte[] Agree(TransportCertificate credentials, byte[] peerPublicKey) => PrivateKey(credentials) switch
         {
             DHPrivateKeyParameters dh => DhUtilities.Agree(dh.Parameters, dh.X, new BigInteger(1, peerPublicKey)),
             ECPrivateKeyParameters ec => StaticEcdh.Agree(ec, peerPublicKey),
@@ -96,7 +96,7 @@ namespace SharpDTLS
         }
 
         /// <summary>The BouncyCastle private key of <paramref name="credentials"/>: of PKCS#8, or exported of the certificate once.</summary>
-        internal static AsymmetricKeyParameter PrivateKey(CertificateCredentials credentials)
+        internal static AsymmetricKeyParameter PrivateKey(TransportCertificate credentials)
             => credentials.BcPrivateKey ??= Export(credentials.Certificate);
 
         // The certificate's own key, which must be exportable.

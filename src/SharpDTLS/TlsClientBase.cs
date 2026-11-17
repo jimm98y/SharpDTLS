@@ -131,7 +131,7 @@ namespace SharpDTLS
         /// The certificate (or raw public key) and key we answer a CertificateRequest with, and the intermediates sent
         /// after the certificate; null to send none.
         /// </summary>
-        public CertificateCredentials ClientCredentials
+        public TransportCertificate ClientCredentials
         {
             get => Engine13.ClientCredentials;
             set { Engine12.ClientCredentials = value; Engine13.ClientCredentials = value; }
@@ -141,7 +141,7 @@ namespace SharpDTLS
         /// Chooses the client credentials for a CertificateRequest (the CAs and signature schemes the server accepts);
         /// returning null uses <see cref="ClientCredentials"/>.
         /// </summary>
-        public Func<CertificateSelectionContext, CertificateCredentials> ClientCredentialsSelector
+        public Func<CertificateSelectionContext, TransportCertificate> ClientCredentialsSelector
         {
             get => Engine13.ClientCredentialsSelector;
             set { Engine12.ClientCredentialsSelector = value; Engine13.ClientCredentialsSelector = value; }

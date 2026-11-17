@@ -35,7 +35,7 @@ server.ApplicationDataReceived += (connection, data) =>
 };
 ```
 `data` is a `ReadOnlySpan<byte>` that is valid only during the call: the buffer is reused for the next record, so copy it (`data.ToArray()`) to keep it.
-To use your own certificate, pass it with its private key: `new DtlsServer(serverTransport, new ServerCredentials(certificate))`, where `certificate` is an `X509Certificate2` that has its key (see [doc/migration-0.0.2.md](doc/migration-0.0.2.md) for keys .NET cannot hold). A server keeps at most `MaxConnections` connections (10,000 by default) and creates one only for a client that passed the cookie exchange.
+To use your own certificate, pass it with its private key: `new DtlsServer(serverTransport, new TransportCertificate(certificate))`, where `certificate` is an `X509Certificate2` that has its key (see [doc/migration-0.0.2.md](doc/migration-0.0.2.md) for keys .NET cannot hold). A server keeps at most `MaxConnections` connections (10,000 by default) and creates one only for a client that passed the cookie exchange.
 
 Create the client and start the handshake. The handshake runs in the background and `HandshakeFinished` is raised when it completes, or `Failed` when it does not:
 ```cs

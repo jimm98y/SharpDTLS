@@ -66,7 +66,7 @@ namespace SharpDTLS.Protocol13
         private bool _helloRetried;
         private Dtls13TicketState _ticketState;
         private Dtls13CryptoContext _earlyKeys;
-        private CertificateCredentials _credentials;
+        private TransportCertificate _credentials;
         private X509Certificate2 _certificate;
         private IEnumerable<byte[]> _intermediates;
         private bool _serverNameUsed;
@@ -201,7 +201,7 @@ namespace SharpDTLS.Protocol13
                 (_credentials, _intermediates, _ocspResponse) = selected != null
                     ? (selected, selected.IntermediateChain, selected.OcspResponse)
                     : (_server.Credentials, _server.IntermediateCertificates?.Select(c => c.RawData) ?? _server.Credentials?.IntermediateChain,
-                       _server.OcspResponse ?? (_server.Credentials as ServerCredentials)?.OcspResponse);
+                       _server.OcspResponse ?? _server.Credentials?.OcspResponse);
                 _certificate = _credentials?.Certificate;
                 if (_clientHello.Extensions.OfType<StatusRequestExtension>().FirstOrDefault()?.StatusType != StatusRequestExtension.Ocsp)
                     _ocspResponse = null;

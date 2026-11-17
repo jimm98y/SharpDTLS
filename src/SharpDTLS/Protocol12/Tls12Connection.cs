@@ -281,7 +281,7 @@ namespace SharpDTLS.Protocol12
         /// Signs <paramref name="content"/>. In DTLS 1.2 the scheme is the first supported one the peer
         /// accepts; DTLS 1.0 uses the fixed TLS 1.1 algorithms and returns a null scheme.
         /// </summary>
-        protected byte[] Sign(ITlsCrypto crypto, CertificateCredentials credentials, byte[] content, IEnumerable<ushort> peerSchemes, out ushort? scheme)
+        protected byte[] Sign(ITlsCrypto crypto, TransportCertificate credentials, byte[] content, IEnumerable<ushort> peerSchemes, out ushort? scheme)
         {
             var key = credentials.PublicKey;
             if (!IsDtls12)

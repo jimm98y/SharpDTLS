@@ -34,13 +34,13 @@ namespace SharpDTLS.Protocol13
     /// </summary>
     internal abstract class Tls13ServerBase
     {
-        protected Tls13ServerBase(CertificateCredentials credentials)
+        protected Tls13ServerBase(TransportCertificate credentials)
         {
             Credentials = credentials;
         }
 
         /// <summary>The default key and certificate; null for a PSK-only server.</summary>
-        internal CertificateCredentials Credentials { get; }
+        internal TransportCertificate Credentials { get; }
 
         /// <summary>The operations of the server's private keys.</summary>
         public ITlsCrypto Crypto { get; set; } = BouncyCastleTlsCrypto.Default;
@@ -58,7 +58,7 @@ namespace SharpDTLS.Protocol13
         /// Chooses the credentials for the client's server_name (RFC 6066), which is null when the client sent none.
         /// Returning null uses the default certificate.
         /// </summary>
-        public Func<string, ServerCredentials> CertificateSelector { get; set; }
+        public Func<string, TransportCertificate> CertificateSelector { get; set; }
 
         /// <summary>Application protocols (ALPN, RFC 7301) in server preference order; null to ignore ALPN.</summary>
         public IList<string> ApplicationProtocols { get; set; }
@@ -71,7 +71,7 @@ namespace SharpDTLS.Protocol13
 
         /// <summary>
         /// A DER OCSP response for the server certificate to staple for clients that ask (RFC 8446 §4.4.2.1); null for
-        /// none. Certificates from the CertificateSelector staple their own <see cref="ServerCredentials.OcspResponse"/>.
+        /// none. Certificates from the CertificateSelector staple their own <see cref="TransportCertificate.OcspResponse"/>.
         /// </summary>
         public byte[] OcspResponse { get; set; }
 
@@ -107,7 +107,7 @@ namespace SharpDTLS.Protocol13
         /// Chooses credentials from what the client said (server name, trusted CAs, signature schemes); returning null
         /// falls back to <see cref="CertificateSelector"/> and then the default certificate.
         /// </summary>
-        public Func<CertificateSelectionContext, ServerCredentials> CredentialsSelector { get; set; }
+        public Func<CertificateSelectionContext, TransportCertificate> CredentialsSelector { get; set; }
 
         /// <summary>CAs named in our CertificateRequests (certificate_authorities), to guide the client's choice; null names none.</summary>
         public IList<System.Security.Cryptography.X509Certificates.X509Certificate2> ClientCertificateAuthorities { get; set; }

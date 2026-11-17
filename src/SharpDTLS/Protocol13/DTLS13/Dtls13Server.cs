@@ -107,7 +107,7 @@ namespace SharpDTLS.Protocol13.DTLS13
 
 
         /// <param name="credentials">The default key and certificate; null for a PSK-only server.</param>
-        public Dtls13Server(IServerTransport serverTransport, CertificateCredentials credentials)
+        public Dtls13Server(IServerTransport serverTransport, TransportCertificate credentials)
             : base(credentials)
         {
             ServerTransport = serverTransport;

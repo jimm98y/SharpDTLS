@@ -20,15 +20,15 @@ namespace SharpDTLS.Tests
         public static bool Equivalent(this X500DistinguishedName name, X509Name other) => X509Name.GetInstance(name.RawData).Equivalent(other);
 
         /// <summary>A server's credentials of a BouncyCastle key pair and certificate (null and null for a PSK-only server).</summary>
-        public static CertificateCredentials Server(AsymmetricCipherKeyPair keyPair, BcX509Certificate certificate) => CertificateCredentials.OfServer(keyPair, certificate);
+        public static TransportCertificate Server(AsymmetricCipherKeyPair keyPair, BcX509Certificate certificate) => TransportCertificate.OfServer(keyPair, certificate);
 
-        public static CertificateCredentials Server((AsymmetricCipherKeyPair Key, BcX509Certificate Cert) pair) => Server(pair.Key, pair.Cert);
+        public static TransportCertificate Server((AsymmetricCipherKeyPair Key, BcX509Certificate Cert) pair) => Server(pair.Key, pair.Cert);
 
         /// <summary>A client's credentials of a BouncyCastle key pair, its certificate (null for a raw public key) and intermediates.</summary>
-        public static CertificateCredentials Credentials(AsymmetricCipherKeyPair keyPair, BcX509Certificate certificate, IList<BcX509Certificate> intermediates = null)
-            => CertificateCredentials.Of(keyPair, certificate, intermediates);
+        public static TransportCertificate Credentials(AsymmetricCipherKeyPair keyPair, BcX509Certificate certificate, IList<BcX509Certificate> intermediates = null)
+            => TransportCertificate.Of(keyPair, certificate, intermediates);
 
-        public static CertificateCredentials Credentials((AsymmetricCipherKeyPair Key, BcX509Certificate Cert) pair, IList<BcX509Certificate> intermediates = null)
+        public static TransportCertificate Credentials((AsymmetricCipherKeyPair Key, BcX509Certificate Cert) pair, IList<BcX509Certificate> intermediates = null)
             => Credentials(pair.Key, pair.Cert, intermediates);
 
         /// <summary>The .NET certificates of BouncyCastle's, or null.</summary>

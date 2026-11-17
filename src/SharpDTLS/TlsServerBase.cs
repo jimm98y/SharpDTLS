@@ -93,7 +93,7 @@ namespace SharpDTLS
         /// Chooses the credentials for the client's server_name (RFC 6066), which is null when the client sent none.
         /// Returning null uses the default certificate.
         /// </summary>
-        public Func<string, ServerCredentials> CertificateSelector
+        public Func<string, TransportCertificate> CertificateSelector
         {
             get => Engine13.CertificateSelector;
             set { Engine12.CertificateSelector = value; Engine13.CertificateSelector = value; }
@@ -103,7 +103,7 @@ namespace SharpDTLS
         /// Chooses credentials from what the client said (server name, trusted CAs, signature schemes); returning null
         /// falls back to <see cref="CertificateSelector"/> and then the default certificate.
         /// </summary>
-        public Func<CertificateSelectionContext, ServerCredentials> CredentialsSelector
+        public Func<CertificateSelectionContext, TransportCertificate> CredentialsSelector
         {
             get => Engine13.CredentialsSelector;
             set { Engine12.CredentialsSelector = value; Engine13.CredentialsSelector = value; }
@@ -174,7 +174,7 @@ namespace SharpDTLS
 
         /// <summary>
         /// A DER OCSP response for the server certificate to staple for clients that ask (RFC 8446 §4.4.2.1); null for
-        /// none. Certificates from the CertificateSelector staple their own <see cref="ServerCredentials.OcspResponse"/>.
+        /// none. Certificates from the CertificateSelector staple their own <see cref="TransportCertificate.OcspResponse"/>.
         /// </summary>
         public byte[] OcspResponse
         {

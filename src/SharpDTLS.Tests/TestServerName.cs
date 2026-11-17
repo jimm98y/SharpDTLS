@@ -21,17 +21,17 @@ namespace SharpDTLS.Tests
         private static readonly TimeSpan Timeout = TestTimeouts.Interop;
         private static readonly Lazy<TestPki> _pki = new(() => new TestPki("SNI"));
         private static TestPki Pki => _pki.Value;
-        private static readonly Lazy<ServerCredentials> _a = new(() => Credentials("a.test"));
-        private static readonly Lazy<ServerCredentials> _b = new(() => Credentials("b.test"));
-        private static readonly Lazy<ServerCredentials> _default = new(() => Credentials("default.test"));
+        private static readonly Lazy<TransportCertificate> _a = new(() => Credentials("a.test"));
+        private static readonly Lazy<TransportCertificate> _b = new(() => Credentials("b.test"));
+        private static readonly Lazy<TransportCertificate> _default = new(() => Credentials("default.test"));
 
-        private static ServerCredentials Credentials(string name)
+        private static TransportCertificate Credentials(string name)
         {
             var leaf = Pki.Leaf(new[] { name });
-            return new ServerCredentials(leaf.Key, leaf.Cert, new[] { Pki.Intermediate.Cert });
+            return new TransportCertificate(leaf.Key, leaf.Cert, new[] { Pki.Intermediate.Cert });
         }
 
-        private static ServerCredentials Select(string name) => name switch { "a.test" => _a.Value, "b.test" => _b.Value, _ => null };
+        private static TransportCertificate Select(string name) => name switch { "a.test" => _a.Value, "b.test" => _b.Value, _ => null };
 
         private static Exception Wait(Action begin, Action<Action> onSuccess, Action<Action<Exception>> onFailure)
         {

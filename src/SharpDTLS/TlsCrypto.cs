@@ -36,20 +36,20 @@ namespace SharpDTLS
         /// <see cref="SignatureSchemes"/> value the key fits, <see cref="SignatureSchemes.RsaPkcs1Md5Sha1"/> included; ECDSA
         /// signatures are DER encoded.
         /// </summary>
-        byte[] Sign(CertificateCredentials credentials, ushort scheme, byte[] content);
+        byte[] Sign(TransportCertificate credentials, ushort scheme, byte[] content);
 
         /// <summary>
         /// RSA key transport (RFC 5246 §7.4.7.1): the 48-byte premaster secret in <paramref name="encrypted"/>, PKCS#1 v1.5.
         /// Bad padding should not be told apart from good padding by time: return random bytes, or throw a
         /// <see cref="CryptographicException"/>, which the caller treats the same way.
         /// </summary>
-        byte[] DecryptPreMasterSecret(CertificateCredentials credentials, byte[] encrypted);
+        byte[] DecryptPreMasterSecret(TransportCertificate credentials, byte[] encrypted);
 
         /// <summary>
         /// Static (EC)DH of the key of <paramref name="credentials"/> with the peer's public value: an uncompressed EC point,
         /// or a DH public value as unsigned big-endian bytes. Returns the shared secret as TLS uses it (RFC 8422 §5.10, RFC 5246 §8.1.2).
         /// </summary>
-        byte[] Agree(CertificateCredentials credentials, byte[] peerPublicKey);
+        byte[] Agree(TransportCertificate credentials, byte[] peerPublicKey);
 
         /// <summary>The AEAD of one record protection key, used for every record of that key.</summary>
         ITlsAead CreateAead(TlsAeadAlgorithm algorithm, ReadOnlySpan<byte> key);

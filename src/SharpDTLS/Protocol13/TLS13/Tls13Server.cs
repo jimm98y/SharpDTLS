@@ -48,7 +48,7 @@ namespace SharpDTLS.Protocol13.TLS13
         }
 
 
-        public Tls13Server(CertificateCredentials credentials)
+        public Tls13Server(TransportCertificate credentials)
             : base(credentials)
         {
         }

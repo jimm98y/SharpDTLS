@@ -54,7 +54,7 @@ namespace SharpDTLS
         /// <param name="credentials">
         /// The certificate and key, with the intermediates and OCSP staple to send; null for a server of PSK, SRP or PWD alone.
         /// </param>
-        public TlsServer(ServerCredentials credentials)
+        public TlsServer(TransportCertificate credentials)
             : base(new Tls12Server(credentials), new Tls13Server(credentials))
         {
             Tls12.HandshakeFinished += (_, c) => OnHandshakeFinished(c);

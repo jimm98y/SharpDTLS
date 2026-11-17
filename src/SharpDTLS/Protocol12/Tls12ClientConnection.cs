@@ -85,13 +85,13 @@ namespace SharpDTLS.Protocol12
 
 
         /// <summary>The client's credentials, before <see cref="ClientCertificate"/> and <see cref="ClientCertificateKeyPair"/>.</summary>
-        public CertificateCredentials ClientCredentials { get; set; }
+        public TransportCertificate ClientCredentials { get; set; }
 
         /// <summary>
         /// Chooses the client credentials for a CertificateRequest (the CAs and signature schemes the server accepts);
         /// returning null uses <see cref="ClientCertificate"/> and <see cref="ClientCertificateKeyPair"/>.
         /// </summary>
-        public Func<CertificateSelectionContext, CertificateCredentials> ClientCredentialsSelector { get; set; }
+        public Func<CertificateSelectionContext, TransportCertificate> ClientCredentialsSelector { get; set; }
 
         /// <summary>Signature schemes we accept in certificates (signature_algorithms_cert, RFC 8446 §4.2.3); null to not send it.</summary>
         public IList<ushort> SignatureAlgorithmsCert { get; set; }
@@ -715,7 +715,7 @@ namespace SharpDTLS.Protocol12
         }
 
         // The credentials for the server's CertificateRequest: the selector's choice, or the configured ones.
-        private CertificateCredentials ResolveClientCredentials()
+        private TransportCertificate ResolveClientCredentials()
         {
             if (_certificateRequest != null && ClientCredentialsSelector != null)
             {

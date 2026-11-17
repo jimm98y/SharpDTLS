@@ -181,13 +181,13 @@ namespace SharpDTLS.Protocol13
 
 
         /// <summary>The client's credentials, before <see cref="ClientCertificate"/> and <see cref="ClientCertificateKeyPair"/>.</summary>
-        public CertificateCredentials ClientCredentials { get; set; }
+        public TransportCertificate ClientCredentials { get; set; }
 
         /// <summary>
         /// Chooses the client credentials for a CertificateRequest (the CAs and signature schemes the server accepts);
         /// returning null uses <see cref="ClientCertificate"/> and <see cref="ClientCertificateKeyPair"/>.
         /// </summary>
-        public Func<CertificateSelectionContext, CertificateCredentials> ClientCredentialsSelector { get; set; }
+        public Func<CertificateSelectionContext, TransportCertificate> ClientCredentialsSelector { get; set; }
 
         /// <summary>CAs we trust, named in certificate_authorities (RFC 8446 §4.2.4) so the server can pick a matching chain.</summary>
         public IList<System.Security.Cryptography.X509Certificates.X509Certificate2> CertificateAuthorities { get; set; }

@@ -52,12 +52,12 @@ namespace SharpDTLS
         /// <param name="credentials">
         /// The certificate and key, with the intermediates and OCSP staple to send; null for a server of PSK, SRP or PWD alone.
         /// </param>
-        public DtlsServer(IServerTransport serverTransport, ServerCredentials credentials)
+        public DtlsServer(IServerTransport serverTransport, TransportCertificate credentials)
             : this(serverTransport, new EnginePort(serverTransport), new EnginePort(serverTransport), credentials)
         {
         }
 
-        private DtlsServer(IServerTransport serverTransport, EnginePort port12, EnginePort port13, ServerCredentials credentials)
+        private DtlsServer(IServerTransport serverTransport, EnginePort port12, EnginePort port13, TransportCertificate credentials)
             : base(new Dtls12Server(port12, credentials), new Dtls13Server(port13, credentials))
         {
             ServerTransport = serverTransport;

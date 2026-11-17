@@ -38,7 +38,7 @@ namespace SharpDTLS.Tests
             using var serverCertificate = SelfSigned(ecdsa);
             using var clientCertificate = SelfSigned(ecdsa, "CN=client.test");
             X509Certificate2 seenByClient = null, seenByServer = null;
-            using var server = new TlsServer(new ServerCredentials(serverCertificate))
+            using var server = new TlsServer(new TransportCertificate(serverCertificate))
             {
                 RequireClientCertificate = true,
                 ClientCertificateValidator = (certificate, chain) => (seenByServer = certificate) != null,
@@ -59,7 +59,7 @@ namespace SharpDTLS.Tests
             {
                 c.MaximumVersion = version;
                 c.ServerCertificateValidator = (certificate, chain) => (seenByClient = certificate) != null;
-                c.ClientCredentials = new CertificateCredentials(clientCertificate);
+                c.ClientCredentials = new TransportCertificate(clientCertificate);
                 c.Crypto = netCrypto ? new NetTlsCrypto() : null;
             }).WaitAsync(Timeout);
 
@@ -79,7 +79,7 @@ namespace SharpDTLS.Tests
         {
             using var certificate = SelfSigned(ecdsa: false);
             var suites = new ushort[] { 0x009C }; // TLS_RSA_WITH_AES_128_GCM_SHA256
-            using var server = new TlsServer(new ServerCredentials(certificate)) { CipherSuites = suites, Crypto = netCrypto ? new NetTlsCrypto() : null };
+            using var server = new TlsServer(new TransportCertificate(certificate)) { CipherSuites = suites, Crypto = netCrypto ? new NetTlsCrypto() : null };
             Assert.AreEqual(TlsVersion.Tls12, await Connect(server, c => { c.MaximumVersion = TlsVersion.Tls12; c.CipherSuites = suites; c.Crypto = netCrypto ? new NetTlsCrypto() : null; }));
         }
 
@@ -91,7 +91,7 @@ namespace SharpDTLS.Tests
         {
             using var certificate = SelfSigned(ecdsa: true);
             var suites = new ushort[] { 0xC02D }; // TLS_ECDH_ECDSA_WITH_AES_128_GCM_SHA256
-            using var server = new TlsServer(new ServerCredentials(certificate)) { CipherSuites = suites, Crypto = netCrypto ? new NetTlsCrypto() : null };
+            using var server = new TlsServer(new TransportCertificate(certificate)) { CipherSuites = suites, Crypto = netCrypto ? new NetTlsCrypto() : null };
             Assert.AreEqual(TlsVersion.Tls12, await Connect(server, c => { c.MaximumVersion = TlsVersion.Tls12; c.CipherSuites = suites; }));
         }
 
@@ -113,9 +113,9 @@ namespace SharpDTLS.Tests
                 using var certificate = new CertificateRequest("CN=cng.test", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)
                     .CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
 
-                using (var server = new TlsServer(new ServerCredentials(certificate)))
+                using (var server = new TlsServer(new TransportCertificate(certificate)))
                     await Assert.ThrowsExactlyAsync<IOException>(() => Connect(server, null));
-                using (var server = new TlsServer(new ServerCredentials(certificate)) { Crypto = new NetTlsCrypto() })
+                using (var server = new TlsServer(new TransportCertificate(certificate)) { Crypto = new NetTlsCrypto() })
                     Assert.AreEqual(TlsVersion.Tls13, await Connect(server, null));
             }
             finally
@@ -155,7 +155,7 @@ namespace SharpDTLS.Tests
             try
             {
                 X509Certificate2 seenByServer = null;
-                using var server = new TlsServer(new ServerCredentials(serverCertificate))
+                using var server = new TlsServer(new TransportCertificate(serverCertificate))
                 {
                     Crypto = new NetTlsCrypto(),
                     RequireClientCertificate = true,
@@ -164,7 +164,7 @@ namespace SharpDTLS.Tests
                 Assert.AreEqual(version, await Connect(server, c =>
                 {
                     c.MaximumVersion = version;
-                    c.ClientCredentials = new CertificateCredentials(clientCertificate);
+                    c.ClientCredentials = new TransportCertificate(clientCertificate);
                     c.Crypto = new NetTlsCrypto();
                 }));
                 // in TLS 1.3 the client is done before the server has read its certificate
@@ -194,7 +194,7 @@ namespace SharpDTLS.Tests
             {
                 var (serverTransport, clientTransport) = MockTransportPair.Create();
                 X509Certificate2 seenByServer = null, seenByClient = null;
-                var server = new DtlsServer(serverTransport, new ServerCredentials(serverCertificate))
+                var server = new DtlsServer(serverTransport, new TransportCertificate(serverCertificate))
                 {
                     Crypto = new NetTlsCrypto(),
                     RequireClientCertificate = true,
@@ -203,7 +203,7 @@ namespace SharpDTLS.Tests
                 var client = new DtlsClient(clientTransport)
                 {
                     MaximumVersion = version,
-                    ClientCredentials = new CertificateCredentials(clientCertificate),
+                    ClientCredentials = new TransportCertificate(clientCertificate),
                     Crypto = new NetTlsCrypto(),
                     ServerCertificateValidator = (certificate, chain) => (seenByClient = certificate) != null,
                 };
@@ -281,7 +281,7 @@ namespace SharpDTLS.Tests
         {
             using var certificate = SelfSigned(ecdsa: true);
             using var publicOnly = Certificates.Load(certificate.RawData);
-            Assert.ThrowsExactly<ArgumentException>(() => new ServerCredentials(publicOnly));
+            Assert.ThrowsExactly<ArgumentException>(() => new TransportCertificate(publicOnly));
         }
     }
 }
