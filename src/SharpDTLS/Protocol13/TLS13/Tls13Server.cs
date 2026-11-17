@@ -33,18 +33,6 @@ using System.Threading.Tasks;
 
 namespace SharpDTLS.Protocol13.TLS13
 {
-    internal class Tls13DataReceivedEventArgs : EventArgs
-    {
-        public Tls13DataReceivedEventArgs(Tls13ServerConnection connection, byte[] data)
-        {
-            Connection = connection;
-            Data = data;
-        }
-
-        public Tls13ServerConnection Connection { get; }
-        public byte[] Data { get; }
-    }
-
     /// <summary>
     /// TLS 1.3 server: <see cref="Start"/> listens on TCP, or <see cref="Accept"/> serves any connected stream. Each
     /// connection runs the DTLS 1.3 server handshake over TLS records with the shared settings; a HelloRetryRequest is
@@ -77,12 +65,12 @@ namespace SharpDTLS.Protocol13.TLS13
         }
 
         public event EventHandler<Tls13ServerConnection> HandshakeFinished;
-        public event EventHandler<Tls13DataReceivedEventArgs> ApplicationDataReceived;
+        public event TlsDataHandler ApplicationDataReceived;
         public event EventHandler<KeyUpdateDatagram> KeyUpdateReceived;
         public event EventHandler<Tls13ServerConnection> ConnectionClosed;
 
         /// <summary>0-RTT data accepted before the handshake completes (see MaxEarlyDataSize); it may be a replay.</summary>
-        public event EventHandler<Tls13DataReceivedEventArgs> EarlyDataReceived;
+        public event TlsDataHandler EarlyDataReceived;
 
         public IReadOnlyCollection<Tls13ServerConnection> Connections => _connections.Keys.ToList();
 
@@ -137,11 +125,11 @@ namespace SharpDTLS.Protocol13.TLS13
 
         internal override void OnConnectionEstablished(Tls13ServerConnection connection) => HandshakeFinished?.Invoke(this, connection);
 
-        internal override void OnApplicationData(Tls13ServerConnection connection, byte[] data)
-            => ApplicationDataReceived?.Invoke(this, new Tls13DataReceivedEventArgs(connection, data));
+        internal override void OnApplicationData(Tls13ServerConnection connection, ReadOnlySpan<byte> data)
+            => ApplicationDataReceived?.Invoke(connection, data);
 
         internal override void OnEarlyData(Tls13ServerConnection connection, byte[] data)
-            => EarlyDataReceived?.Invoke(this, new Tls13DataReceivedEventArgs(connection, data));
+            => EarlyDataReceived?.Invoke(connection, data);
 
         internal override void OnKeyUpdate(KeyUpdateDatagram keyUpdate) => KeyUpdateReceived?.Invoke(this, keyUpdate);
 

@@ -7,7 +7,7 @@ var client = new DtlsClient(new ClientTransport());
 // the sample server's certificate is self-signed: accept it (check its fingerprint, or set a CertificateValidator, in real use)
 client.ServerCertificateValidator = (certificate, chain) => true;
 client.HandshakeFinished += (sender, e) => client.SendApplicationData(Encoding.UTF8.GetBytes("Hello over DTLS!"));
-client.ApplicationDataReceived += (sender, data) => Console.WriteLine($"Received: {Encoding.UTF8.GetString(data)}");
+client.ApplicationDataReceived += (connection, data) => Console.WriteLine($"Received: {Encoding.UTF8.GetString(data)}");
 client.Failed += (sender, ex) => Console.WriteLine($"Failed: {ex.Message}");
 client.BeginHandshake();
 Console.WriteLine("Press Enter to stop.");

@@ -47,7 +47,7 @@ namespace SharpDTLS.Tests
         {
             var server = new DtlsServer(transport);
             configure?.Invoke(server);
-            server.ApplicationDataReceived += (_, e) => e.Connection.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.Data)));
+            server.ApplicationDataReceived += (conn, e) => conn.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.ToArray())));
             return server;
         }
 
@@ -55,7 +55,7 @@ namespace SharpDTLS.Tests
         {
             var server = new Dtls12Server(transport);
             configure?.Invoke(server);
-            server.ApplicationDataReceived += (_, e) => server.SendApplicationData(e.RemoteEndPoint, Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.Data)));
+            server.ApplicationDataReceived += (conn, e) => server.SendApplicationData(conn.RemoteEndPoint, Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.ToArray())));
             return server;
         }
 
@@ -74,7 +74,7 @@ namespace SharpDTLS.Tests
         private static void AssertEcho(DtlsClient client)
         {
             var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-            client.ApplicationDataReceived += (_, d) => received.TrySetResult(Encoding.UTF8.GetString(d));
+            client.ApplicationDataReceived += (_, d) => received.TrySetResult(Encoding.UTF8.GetString(d.ToArray()));
             client.SendApplicationData(Encoding.UTF8.GetBytes("ping"));
             Assert.IsTrue(received.Task.Wait(Timeout), "no reply");
             Assert.AreEqual("pong:ping", received.Task.Result);
@@ -93,7 +93,7 @@ namespace SharpDTLS.Tests
         {
             using var e = new Endpoints();
             var server = new Dtls13Server(e.Server);
-            server.ApplicationDataReceived += (_, d) => d.Connection.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(d.Data)));
+            server.ApplicationDataReceived += (conn, d) => conn.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(d.ToArray())));
             var (client, error) = Connect(e.NewClient());
             Assert.IsNull(error, error?.ToString());
             Assert.AreEqual(DtlsVersion.Dtls13, client.NegotiatedVersion);
@@ -120,7 +120,7 @@ namespace SharpDTLS.Tests
         {
             using var e = new Endpoints();
             var server = new Dtls12Server(e.Server) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10 };
-            server.ApplicationDataReceived += (_, d) => server.SendApplicationData(d.RemoteEndPoint, Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(d.Data)));
+            server.ApplicationDataReceived += (conn, d) => server.SendApplicationData(conn.RemoteEndPoint, Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(d.ToArray())));
 
             var (client, error) = Connect(e.NewClient(), c => c.MinimumVersion = DtlsVersion.Dtls10);
             Assert.IsNull(error, error?.ToString());
@@ -238,7 +238,7 @@ namespace SharpDTLS.Tests
             Assert.AreSame(connection, server.GetConnection(connection.RemoteEndPoint));
 
             var reply = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-            dtls12.ApplicationDataReceived += (_, d) => reply.TrySetResult(Encoding.UTF8.GetString(d));
+            dtls12.ApplicationDataReceived += (_, d) => reply.TrySetResult(Encoding.UTF8.GetString(d.ToArray()));
             dtls12.SendApplicationData(Encoding.UTF8.GetBytes("ping"));
             Assert.IsTrue(reply.Task.Wait(Timeout));
             Assert.AreEqual("pong:ping", reply.Task.Result);

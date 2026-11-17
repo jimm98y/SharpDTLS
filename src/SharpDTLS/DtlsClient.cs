@@ -52,7 +52,7 @@ namespace SharpDTLS
 
             foreach (TlsConnectionBase engine in new TlsConnectionBase[] { Dtls12, Dtls13 })
             {
-                engine.ApplicationDataReceived += (_, data) => ApplicationDataReceived?.Invoke(this, data);
+                engine.ApplicationDataReceived += (connection, data) => ApplicationDataReceived?.Invoke(connection, data);
                 engine.Failed += (sender, ex) => { if (sender == _active) Failed?.Invoke(this, ex); };
                 engine.Closed += (sender, _) => { if (sender == _active) Closed?.Invoke(this, EventArgs.Empty); };
                 engine.AlertReceived += (_, alert) => AlertReceived?.Invoke(this, alert);
@@ -130,7 +130,8 @@ namespace SharpDTLS
         }
 
         public event EventHandler HandshakeFinished;
-        public event EventHandler<byte[]> ApplicationDataReceived;
+        /// <summary>Application data received: the span is valid only during the call (copy it to keep it).</summary>
+        public event TlsDataHandler ApplicationDataReceived;
         public event EventHandler<Exception> Failed;
         public event EventHandler Closed;
         public event EventHandler<AlertDescription> AlertReceived;
@@ -157,7 +158,7 @@ namespace SharpDTLS
                 Dtls13.BeginMergedHandshake(Dtls12.PrepareClientHello(), MinimumVersion);
         }
 
-        public void SendApplicationData(byte[] data) => (_active ?? throw new InvalidOperationException("The handshake has not started.")).SendApplicationData(data);
+        public void SendApplicationData(ReadOnlySpan<byte> data) => (_active ?? throw new InvalidOperationException("The handshake has not started.")).SendApplicationData(data);
 
         public byte[] ExportKeyingMaterial(string label, byte[] context, int length) => _active.ExportKeyingMaterial(label, context, length);
 

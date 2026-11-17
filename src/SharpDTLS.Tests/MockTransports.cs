@@ -8,11 +8,13 @@ namespace SharpDTLS.Tests
     // Wire up with MockTransportPair.Create() and pass Server/Client to the DTLS constructors.
     public class MockServerTransport : IServerTransport
     {
-        public event EventHandler<byte[]> OnDataReceived;
+        public event DatagramHandler OnDataReceived;
         public MockClientTransport ConnectedClient { get; set; }
         public static readonly EndPoint FakeClientEndpoint = IPEndPoint.Parse("127.0.0.1:49152");
 
-        public void Send(EndPoint endpoint, byte[] buf)
+        public void Send(EndPoint endpoint, ReadOnlySpan<byte> datagram) => Send(endpoint, datagram.ToArray());
+
+        private void Send(EndPoint endpoint, byte[] buf)
             => ConnectedClient.InjectFromServer(buf);
 
         // Simulate the DTLS client sending to the server.
@@ -22,10 +24,12 @@ namespace SharpDTLS.Tests
 
     public class MockClientTransport : IClientTransport
     {
-        public event EventHandler<byte[]> OnDataReceived;
+        public event DatagramHandler OnDataReceived;
         public MockServerTransport ConnectedServer { get; set; }
 
-        public void Send(byte[] buf)
+        public void Send(ReadOnlySpan<byte> datagram) => Send(datagram.ToArray());
+
+        private void Send(byte[] buf)
             => ConnectedServer.InjectFromClient(buf);
 
         // Called by MockServerTransport.Send to deliver bytes to the client.

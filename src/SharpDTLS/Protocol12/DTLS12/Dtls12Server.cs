@@ -29,18 +29,6 @@ using System.Net;
 
 namespace SharpDTLS.Protocol12.DTLS12
 {
-    internal class Dtls12DataReceivedEventArgs : EventArgs
-    {
-        public Dtls12DataReceivedEventArgs(EndPoint remoteEndPoint, byte[] data)
-        {
-            RemoteEndPoint = remoteEndPoint;
-            Data = data;
-        }
-
-        public EndPoint RemoteEndPoint { get; }
-        public byte[] Data { get; }
-    }
-
     /// <summary>
     /// DTLS 1.2 server. Set <see cref="Dtls12ServerBase.MinimumVersion"/> to <see cref="DtlsVersion.Dtls10"/>
     /// to also accept DTLS 1.0 clients.
@@ -53,7 +41,7 @@ namespace SharpDTLS.Protocol12.DTLS12
 
         public event EventHandler<EventArgs> HandshakeFinished;
         public event EventHandler<AlertDatagram> AlertReceived;
-        public event EventHandler<Dtls12DataReceivedEventArgs> ApplicationDataReceived;
+        public event TlsDataHandler ApplicationDataReceived;
 
         public Dtls12Server(IServerTransport serverTransport)
             : this(serverTransport, Dtls12CryptoUtils.GenerateSelfSignedCertificate())
@@ -79,8 +67,8 @@ namespace SharpDTLS.Protocol12.DTLS12
         protected override void OnConnectionEstablished(Tls12ServerConnection connection)
             => HandshakeFinished?.Invoke(this, EventArgs.Empty);
 
-        protected override void OnApplicationData(Tls12ServerConnection connection, byte[] data)
-            => ApplicationDataReceived?.Invoke(this, new Dtls12DataReceivedEventArgs(connection.RemoteEndPoint, data));
+        protected override void OnApplicationData(Tls12ServerConnection connection, ReadOnlySpan<byte> data)
+            => ApplicationDataReceived?.Invoke(connection, data);
 
         protected override void OnAlert(Tls12ServerConnection connection, AlertDescription description)
             => AlertReceived?.Invoke(this, new AlertDatagram(description == AlertDescription.CloseNotify ? (byte)1 : (byte)2, (byte)description));

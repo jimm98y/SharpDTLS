@@ -37,11 +37,11 @@ namespace SharpDTLS.Tests
                 UseConnectionIds = serverCids, AutoUpdatePeerAddress = autoUpdate, ShouldSendHelloRetry = helloRetry,
                 InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50),
             };
-            r.Server.ApplicationDataReceived += (_, e) => { lock (r.ServerReceived) r.ServerReceived.Add(Encoding.UTF8.GetString(e.Data)); };
+            r.Server.ApplicationDataReceived += (_, e) => { lock (r.ServerReceived) r.ServerReceived.Add(Encoding.UTF8.GetString(e.ToArray())); };
             r.Server.HandshakeFinished += (_, e) =>
                 ((Dtls13ConnectionEventArgs)e).Connection.PeerAddressChanged += (_, c) => { lock (r.Changes) r.Changes.Add(c); };
             r.Client = new Dtls13Client(r.Pair.Client) { UseConnectionId = true, ConnectionIdLength = clientCidLength, InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50) };
-            r.Client.ApplicationDataReceived += (_, d) => { lock (r.ClientReceived) r.ClientReceived.Add(Encoding.UTF8.GetString(d)); };
+            r.Client.ApplicationDataReceived += (_, d) => { lock (r.ClientReceived) r.ClientReceived.Add(Encoding.UTF8.GetString(d.ToArray())); };
 
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             r.Client.HandshakeFinished += (_, _) => done.TrySetResult(true);
@@ -231,7 +231,7 @@ namespace SharpDTLS.Tests
             var pair = new ScriptedTransportPair();
             var received = new List<string>();
             var server = new Dtls12Server(pair.Server) { UseConnectionIds = true, AutoUpdatePeerAddress = false };
-            server.ApplicationDataReceived += (_, e) => { lock (received) received.Add(Encoding.UTF8.GetString(e.Data)); };
+            server.ApplicationDataReceived += (_, e) => { lock (received) received.Add(Encoding.UTF8.GetString(e.ToArray())); };
             var client = new Dtls12Client(pair.Client) { UseConnectionId = true };
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.HandshakeFinished += (_, _) => done.TrySetResult(true);

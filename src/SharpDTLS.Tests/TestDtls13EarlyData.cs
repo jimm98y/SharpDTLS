@@ -35,8 +35,8 @@ namespace SharpDTLS.Tests
                 TicketKeys = keys, MaxEarlyDataSize = maxEarlyData, ShouldSendHelloRetry = helloRetry,
                 InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50),
             };
-            r.Server.EarlyDataReceived += (_, e) => { lock (r.EarlyData) r.EarlyData.Add(Encoding.UTF8.GetString(e.Data)); };
-            r.Server.ApplicationDataReceived += (_, e) => { lock (r.ServerReceived) r.ServerReceived.Add(Encoding.UTF8.GetString(e.Data)); };
+            r.Server.EarlyDataReceived += (_, e) => { lock (r.EarlyData) r.EarlyData.Add(Encoding.UTF8.GetString(e.ToArray())); };
+            r.Server.ApplicationDataReceived += (_, e) => { lock (r.ServerReceived) r.ServerReceived.Add(Encoding.UTF8.GetString(e.ToArray())); };
             r.Client = new Dtls13Client(r.Pair.Client) { ResumptionTicket = ticket, EarlyData = earlyData, InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50) };
 
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);

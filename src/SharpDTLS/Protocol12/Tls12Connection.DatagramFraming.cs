@@ -20,6 +20,7 @@
 // SOFTWARE.
 
 using System;
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -96,21 +97,22 @@ namespace SharpDTLS.Protocol12
 
             // ── Receiving ────────────────────────────────────────────────────────────────────
 
-            public override void ProcessRecord(byte[] record)
+            public override void ProcessRecord(ReadOnlySpan<byte> record)
             {
                 if (record.Length < 13 || record[1] != 0xFE)
                     throw new DtlsRecordDiscardedException("Not a DTLS 1.0/1.2 record");
 
                 byte contentType = record[0];
-                ushort recordVersion = BinaryPrimitives.ReadUInt16BigEndian(record.AsSpan(1));
-                ushort epoch = BinaryPrimitives.ReadUInt16BigEndian(record.AsSpan(3));
+                ushort recordVersion = BinaryPrimitives.ReadUInt16BigEndian(record.Slice(1));
+                ushort epoch = BinaryPrimitives.ReadUInt16BigEndian(record.Slice(3));
                 ulong sequenceNumber = 0;
                 for (int i = 5; i < 11; i++)
                     sequenceNumber = (sequenceNumber << 8) | record[i];
 
                 // RFC 9146 §3: with a CID negotiated for this direction, encrypted records carry it in tls12_cid records;
                 // any other encrypted record is invalid. Plaintext records never carry one.
-                byte[] connectionId = null;
+                ReadOnlySpan<byte> connectionId = default;
+                bool withCid = false;
                 int headerLength = 13;
                 byte[] readCid = C.ReadConnectionId;
                 bool expectCid = readCid is { Length: > 0 };
@@ -118,22 +120,23 @@ namespace SharpDTLS.Protocol12
                 {
                     if (!expectCid || epoch == 0 || record.Length < 13 + readCid.Length)
                         throw new DtlsRecordDiscardedException("Unexpected tls12_cid record");
-                    connectionId = record.AsSpan(11, readCid.Length).ToArray();
-                    if (!connectionId.AsSpan().SequenceEqual(readCid))
+                    connectionId = record.Slice(11, readCid.Length);
+                    if (!connectionId.SequenceEqual(readCid))
                         throw new DtlsRecordDiscardedException("Record for another connection ID");
                     headerLength += connectionId.Length;
+                    withCid = true;
                 }
                 else if (expectCid && epoch > 0)
                 {
                     throw new DtlsRecordDiscardedException("Encrypted record without the connection ID");
                 }
-                byte[] fragment = record.AsSpan(headerLength).ToArray();
+                var fragment = record.Slice(headerLength);
 
                 if (epoch > _readEpoch)
                 {
                     // The next epoch's records can overtake the ChangeCipherSpec; keep a few until it arrives.
                     if (epoch == _readEpoch + 1 && _futureEpochRecords.Count < MaxFutureEpochRecords)
-                        _futureEpochRecords.Add(record);
+                        _futureEpochRecords.Add(record.ToArray());
                     return;
                 }
 
@@ -146,9 +149,9 @@ namespace SharpDTLS.Protocol12
                     // epoch-0 record only tells that the peer retransmitted a flight we already answered.
                     if (contentType != 0x16)
                         throw new DtlsRecordDiscardedException("Unprotected record after keys were established");
-                    if (C.IsHandshakeComplete || !IsWellFormedHandshake(fragment))
+                    if (C.IsHandshakeComplete || !IsWellFormedHandshake(fragment.ToArray()))
                     {
-                        if (IsRetransmittedHandshake(fragment))
+                        if (IsRetransmittedHandshake(fragment.ToArray()))
                             OnDuplicateHandshake();
                         throw new DtlsRecordDiscardedException("Unprotected handshake record after keys were established");
                     }
@@ -162,27 +165,56 @@ namespace SharpDTLS.Protocol12
                     throw new DtlsRecordDiscardedException($"Replayed record {epoch}:{sequenceNumber}");
 
                 var cipher = _readCiphers[epoch];
-                if (connectionId != null && cipher == null)
+                if (withCid && cipher == null)
                     throw new DtlsRecordDiscardedException("tls12_cid record without keys");
-                byte[] plaintext = cipher == null ? fragment : cipher.Decrypt(contentType, recordVersion, epoch, sequenceNumber, fragment, connectionId);
+
+                // the plaintext of a buffer of the pool's: application data's goes on with the event, any other's back
+                byte[] buffer = ArrayPool<byte>.Shared.Rent(Math.Max(fragment.Length, 1));
+                bool handedOver = false;
+                try
+                {
+                    ProcessPlaintext(ref contentType, epoch, sequenceNumber, recordVersion, cipher, fragment, connectionId, withCid, buffer, ref handedOver);
+                }
+                finally
+                {
+                    if (!handedOver)
+                        ArrayPool<byte>.Shared.Return(buffer);
+                }
+            }
+
+            private void ProcessPlaintext(ref byte contentType, ushort epoch, ulong sequenceNumber, ushort recordVersion, IRecordCipher cipher,
+                ReadOnlySpan<byte> fragment, ReadOnlySpan<byte> connectionId, bool withCid, byte[] buffer, ref bool handedOver)
+            {
+                var window = _readWindows[epoch];
+                int length;
+                if (cipher == null)
+                {
+                    fragment.CopyTo(buffer);
+                    length = fragment.Length;
+                }
+                else
+                {
+                    length = cipher.Decrypt(contentType, recordVersion, epoch, sequenceNumber, fragment, buffer, connectionId);
+                }
                 window.Mark(sequenceNumber);
 
-                if (connectionId != null)
+                if (withCid)
                 {
                     // DTLSInnerPlaintext: content || real_type || zeros
-                    int end = plaintext.Length;
-                    while (end > 0 && plaintext[end - 1] == 0)
+                    int end = length;
+                    while (end > 0 && buffer[end - 1] == 0)
                         end--;
                     if (end == 0)
                         throw new DtlsException(AlertDescription.UnexpectedMessage, "tls12_cid record without a content type.");
-                    contentType = plaintext[end - 1];
-                    plaintext = plaintext.AsSpan(0, end - 1).ToArray();
+                    contentType = buffer[end - 1];
+                    length = end - 1;
                 }
+                var plaintext = new ReadOnlySpan<byte>(buffer, 0, length);
                 if (cipher != null)
                 {
                     C.InspectRecord(false, contentType, epoch, sequenceNumber, plaintext);
                     C.CheckReceivedRecordSize(plaintext.Length);
-                    C.OnRecordAuthenticated(epoch, sequenceNumber, connectionId != null);
+                    C.OnRecordAuthenticated(epoch, sequenceNumber, withCid);
                 }
 
                 switch (contentType)
@@ -203,7 +235,7 @@ namespace SharpDTLS.Protocol12
                         break;
 
                     case 0x16:
-                        ProcessHandshakeFragments(plaintext, epoch);
+                        ProcessHandshakeFragments(plaintext.ToArray(), epoch);
                         break;
 
                     case 0x17:
@@ -211,7 +243,8 @@ namespace SharpDTLS.Protocol12
                             throw new DtlsException(AlertDescription.UnexpectedMessage, "Unprotected application data.");
                         if (!C.IsHandshakeComplete)
                             throw new DtlsRecordDiscardedException("Application data before handshake completion");
-                        C.RaiseApplicationData(plaintext);
+                        handedOver = true;
+                        C.RaiseApplicationData(buffer, length);
                         break;
 
                     default:
@@ -375,7 +408,27 @@ namespace SharpDTLS.Protocol12
 
             // ── Sending ──────────────────────────────────────────────────────────────────────
 
+            // RFC 9146 §4: once encrypting, a peer that asked for a CID gets tls12_cid records with the real content
+            // type inside DTLSInnerPlaintext.
+            private byte[] WriteCid(IRecordCipher cipher) => cipher != null && C.WriteConnectionId is { Length: > 0 } ? C.WriteConnectionId : Array.Empty<byte>();
+
+            private int RecordLength(ushort epoch, int plaintextLength)
+            {
+                var cipher = _writeCiphers[epoch];
+                int cid = WriteCid(cipher).Length;
+                int inner = plaintextLength + (cid > 0 ? 1 : 0);
+                return 13 + cid + (cipher == null ? inner : cipher.FragmentLength(inner));
+            }
+
             private byte[] WriteRecord(byte contentType, ushort epoch, byte[] plaintext)
+            {
+                byte[] record = new byte[RecordLength(epoch, plaintext.Length)];
+                WriteRecord(contentType, epoch, plaintext, record);
+                return record;
+            }
+
+            /// <summary>Writes the record into <paramref name="record"/>, of <see cref="RecordLength"/> bytes.</summary>
+            private void WriteRecord(byte contentType, ushort epoch, ReadOnlySpan<byte> plaintext, Span<byte> record)
             {
                 ulong seq = _writeSequence[epoch]++;
                 if (seq >= (1UL << 48))
@@ -385,34 +438,44 @@ namespace SharpDTLS.Protocol12
                 if (cipher != null)
                     C.InspectRecord(true, contentType, epoch, seq, plaintext);
 
-                // RFC 9146 §4: once encrypting, a peer that asked for a CID gets tls12_cid records with the real content
-                // type inside DTLSInnerPlaintext.
-                byte[] cid = cipher != null && C.WriteConnectionId is { Length: > 0 } ? C.WriteConnectionId : Array.Empty<byte>();
+                byte[] cid = WriteCid(cipher);
                 ushort recordVersion = C.RecordVersion;
-                byte[] fragment;
+                var fragment = record.Slice(13 + cid.Length);
+                int fragmentLength;
                 if (cid.Length > 0)
                 {
-                    byte[] inner = new byte[plaintext.Length + 1];
-                    plaintext.CopyTo(inner, 0);
-                    inner[^1] = contentType;
-                    fragment = cipher.Encrypt(Tls12Cid, recordVersion, epoch, seq, inner, cid);
+                    byte[] inner = ArrayPool<byte>.Shared.Rent(plaintext.Length + 1);
+                    try
+                    {
+                        plaintext.CopyTo(inner);
+                        inner[plaintext.Length] = contentType;
+                        cipher.Encrypt(Tls12Cid, recordVersion, epoch, seq, inner.AsSpan(0, plaintext.Length + 1), fragment, cid);
+                    }
+                    finally
+                    {
+                        ArrayPool<byte>.Shared.Return(inner);
+                    }
+                    fragmentLength = cipher.FragmentLength(plaintext.Length + 1);
                     contentType = Tls12Cid;
+                }
+                else if (cipher == null)
+                {
+                    plaintext.CopyTo(fragment);
+                    fragmentLength = plaintext.Length;
                 }
                 else
                 {
-                    fragment = cipher == null ? plaintext : cipher.Encrypt(contentType, recordVersion, epoch, seq, plaintext);
+                    cipher.Encrypt(contentType, recordVersion, epoch, seq, plaintext, fragment, default);
+                    fragmentLength = cipher.FragmentLength(plaintext.Length);
                 }
 
-                byte[] record = new byte[13 + cid.Length + fragment.Length];
                 record[0] = contentType;
-                BinaryPrimitives.WriteUInt16BigEndian(record.AsSpan(1), recordVersion);
-                BinaryPrimitives.WriteUInt16BigEndian(record.AsSpan(3), epoch);
+                BinaryPrimitives.WriteUInt16BigEndian(record.Slice(1), recordVersion);
+                BinaryPrimitives.WriteUInt16BigEndian(record.Slice(3), epoch);
                 for (int i = 0; i < 6; i++)
                     record[10 - i] = (byte)(seq >> (8 * i));
-                cid.CopyTo(record, 11);
-                BinaryPrimitives.WriteUInt16BigEndian(record.AsSpan(11 + cid.Length), (ushort)fragment.Length);
-                Buffer.BlockCopy(fragment, 0, record, 13 + cid.Length, fragment.Length);
-                return record;
+                cid.CopyTo(record.Slice(11));
+                BinaryPrimitives.WriteUInt16BigEndian(record.Slice(11 + cid.Length), (ushort)fragmentLength);
             }
 
             private static byte[] HandshakeHeader(byte type, int length, int messageSeq, int offset, int fragmentLength, byte[] body, int bodyOffset)
@@ -467,7 +530,13 @@ namespace SharpDTLS.Protocol12
                 _pendingWriteCipher = null;
             }
 
-            public override void WriteApplicationData(byte[] data) => C.Enqueue(WriteRecord(0x17, _writeEpoch, data));
+            public override void WriteApplicationData(ReadOnlySpan<byte> data)
+            {
+                int length = RecordLength(_writeEpoch, data.Length);
+                byte[] record = ArrayPool<byte>.Shared.Rent(length);
+                WriteRecord(0x17, _writeEpoch, data, record);
+                C.EnqueueRented(record, length);
+            }
 
             public override void SendAlert(byte level, AlertDescription description)
                 => C.Enqueue(WriteRecord(0x15, _writeEpoch, new[] { level, (byte)description }));

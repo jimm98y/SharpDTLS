@@ -181,13 +181,13 @@ namespace SharpDTLS.Protocol12
 
         public event EventHandler<EventArgs> HandshakeFinished;
 
-        public Tls12ServerConnection(Tls12ServerSettings settings, EndPoint remoteEndPoint, Action<byte[]> send)
+        public Tls12ServerConnection(Tls12ServerSettings settings, EndPoint remoteEndPoint, DatagramSink send)
             : this(settings, remoteEndPoint, send, stream: false)
         {
         }
 
         /// <param name="stream">TLS over a reliable byte stream: the ClientHello arrives on it (no cookie exchange).</param>
-        internal Tls12ServerConnection(Tls12ServerSettings settings, EndPoint remoteEndPoint, Action<byte[]> send, bool stream)
+        internal Tls12ServerConnection(Tls12ServerSettings settings, EndPoint remoteEndPoint, DatagramSink send, bool stream)
             : base(isClient: false, send, stream)
         {
             _settings = settings;
@@ -219,8 +219,13 @@ namespace SharpDTLS.Protocol12
 
         protected override void OnRecordAuthenticated(ushort epoch, ulong sequenceNumber, bool withConnectionId)
         {
-            if (!_address.Observe(epoch, sequenceNumber, withConnectionId, DatagramSource, _settings.AutoUpdatePeerAddress, out var old))
-                return;
+            if (_address.Observe(epoch, sequenceNumber, withConnectionId, DatagramSource, _settings.AutoUpdatePeerAddress, out var old))
+                OnPeerAddressChange(old);
+        }
+
+        // apart: its closure would otherwise be allocated for every record
+        private void OnPeerAddressChange(EndPoint old)
+        {
             var change = (old, DatagramSource);
             Debug.WriteLine($"{LogPrefix} Peer address {(_settings.AutoUpdatePeerAddress ? "changed" : "pending")}: {old} -> {DatagramSource}");
             RaisePeerAddressChanged(change);

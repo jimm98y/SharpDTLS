@@ -107,7 +107,7 @@ namespace SharpDTLS.Tests
                 {
                     lock (text)
                     {
-                        text.Append(Encoding.UTF8.GetString(d));
+                        text.Append(Encoding.UTF8.GetString(d.ToArray()));
                         if (text.Length >= "pong:ping".Length)
                             received.TrySetResult(text.ToString());
                     }
@@ -151,13 +151,13 @@ namespace SharpDTLS.Tests
                 (server.PskIdentityResolver, server.PskIdentityHint) = (TestCredentials.ResolvePsk, TestCredentials.PskHint);
             SharpDTLS.Protocol12.Tls12ServerConnection connection = null;
             var request = new StringBuilder();
-            server.ApplicationDataReceived += (_, e) =>
+            server.ApplicationDataReceived += (conn, e) =>
             {
-                connection = e.Connection; // the connection is gone from Connections once the client hangs up
+                connection = (Protocol12.Tls12ServerConnection)conn; // the connection is gone from Connections once the client hangs up
                 // TLS is a byte stream: with TLS 1.0's 1/n-1 split "ping" comes in two records.
-                request.Append(Encoding.UTF8.GetString(e.Data));
+                request.Append(Encoding.UTF8.GetString(e.ToArray()));
                 if (request.Length == 4)
-                    e.Connection.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + request));
+                    conn.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + request));
             };
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
 

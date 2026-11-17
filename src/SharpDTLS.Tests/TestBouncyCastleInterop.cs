@@ -380,7 +380,7 @@ namespace SharpDTLS.Tests
             var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
             client.Failed += (_, ex) => handshake.TrySetException(ex);
-            client.ApplicationDataReceived += (_, d) => received.TrySetResult(Encoding.UTF8.GetString(d));
+            client.ApplicationDataReceived += (_, d) => received.TrySetResult(Encoding.UTF8.GetString(d.ToArray()));
             client.BeginHandshake();
             Assert.IsTrue(handshake.Task.Wait(Timeout), "handshake did not complete: " + (bcServer.IsFaulted ? bcServer.Exception.GetBaseException().Message : ""));
             CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 }, client.PeerConnectionId);
@@ -405,7 +405,7 @@ namespace SharpDTLS.Tests
             {
                 MinimumVersion = DtlsVersion.Dtls10, CipherSuites = new List<ushort> { id }, UseConnectionIds = true,
             };
-            server.ApplicationDataReceived += (_, e) => server.SendApplicationData(e.RemoteEndPoint, Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.Data)));
+            server.ApplicationDataReceived += (conn, e) => server.SendApplicationData(conn.RemoteEndPoint, Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.ToArray())));
 
             using var clientSocket = LoopbackSocket();
             clientSocket.Connect(new IPEndPoint(IPAddress.Loopback, transport.LocalEndpoint.Port));
@@ -469,7 +469,7 @@ namespace SharpDTLS.Tests
             var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
             client.Failed += (_, ex) => handshake.TrySetException(ex);
-            client.ApplicationDataReceived += (_, data) => received.TrySetResult(Encoding.UTF8.GetString(data));
+            client.ApplicationDataReceived += (_, data) => received.TrySetResult(Encoding.UTF8.GetString(data.ToArray()));
             var clock = Stopwatch.StartNew();
             transport.OnDataReceived += (_, d) => log.Enqueue($"{clock.ElapsedMilliseconds,6} ms client recv {d.Length} bytes type 0x{d[0]:X2}");
 
@@ -507,7 +507,7 @@ namespace SharpDTLS.Tests
                 server.PskIdentityResolver = TestCredentials.ResolvePsk;
                 server.PskIdentityHint = TestCredentials.PskHint;
             }
-            server.ApplicationDataReceived += (_, e) => server.SendApplicationData(e.RemoteEndPoint, Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.Data)));
+            server.ApplicationDataReceived += (conn, e) => server.SendApplicationData(conn.RemoteEndPoint, Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.ToArray())));
 
             using var clientSocket = LoopbackSocket();
             clientSocket.Connect(new IPEndPoint(IPAddress.Loopback, transport.LocalEndpoint.Port));

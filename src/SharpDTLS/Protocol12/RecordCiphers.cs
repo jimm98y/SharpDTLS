@@ -31,15 +31,27 @@ namespace SharpDTLS.Protocol12
     /// </summary>
     internal interface IRecordCipher : IDisposable
     {
-        /// <param name="connectionId">The CID of a tls12_cid record (RFC 9146), which changes the MAC / AEAD input; null otherwise.</param>
-        byte[] Encrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] plaintext, byte[] connectionId = null);
+        /// <summary>The length of the fragment of <paramref name="plaintextLength"/> bytes.</summary>
+        int FragmentLength(int plaintextLength);
 
-        /// <summary>Throws <see cref="DtlsRecordDiscardedException"/> when the record does not authenticate.</summary>
-        byte[] Decrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment, byte[] connectionId = null);
+        /// <summary>Writes the fragment of <paramref name="plaintext"/>: <see cref="FragmentLength"/> bytes.</summary>
+        /// <param name="connectionId">The CID of a tls12_cid record (RFC 9146), which changes the MAC / AEAD input; empty otherwise.</param>
+        void Encrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, ReadOnlySpan<byte> plaintext, Span<byte> fragment,
+            ReadOnlySpan<byte> connectionId);
+
+        /// <summary>
+        /// Writes the plaintext (at most <paramref name="fragment"/>.Length bytes) and returns its length. Throws
+        /// <see cref="DtlsRecordDiscardedException"/> when the record does not authenticate.
+        /// </summary>
+        int Decrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, ReadOnlySpan<byte> fragment, Span<byte> plaintext,
+            ReadOnlySpan<byte> connectionId);
     }
 
     internal static class RecordCiphers
     {
+        /// <summary>The longest additional data: the CID form with a 255-byte CID.</summary>
+        internal const int MaxAdditionalDataLength = 8 + 3 + 2 + 2 + 6 + 255 + 2;
+
         /// <summary>
         /// Length of the key block: MAC keys, encryption keys and fixed IVs for both directions. With
         /// <paramref name="implicitIv"/> (TLS 1.0, RFC 2246 §6.3) CBC suites also take their initial IVs from it.
@@ -118,32 +130,64 @@ namespace SharpDTLS.Protocol12
 
         internal static void Dispose(object primitive) => (primitive as IDisposable)?.Dispose();
 
+        /// <summary>A fragment of a new array, for the handshake and the tests.</summary>
+        public static byte[] Encrypt(this IRecordCipher cipher, byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] plaintext,
+            byte[] connectionId = null)
+        {
+            byte[] fragment = new byte[cipher.FragmentLength(plaintext.Length)];
+            cipher.Encrypt(contentType, version, epoch, sequenceNumber, plaintext, fragment, connectionId);
+            return fragment;
+        }
+
+        /// <summary>The plaintext as a new array, for the tests.</summary>
+        public static byte[] Decrypt(this IRecordCipher cipher, byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment,
+            byte[] connectionId = null)
+        {
+            byte[] plaintext = new byte[fragment.Length];
+            int length = cipher.Decrypt(contentType, version, epoch, sequenceNumber, fragment, plaintext, connectionId);
+            return plaintext.AsSpan(0, length).ToArray();
+        }
+
         /// <summary>
         /// seq_num(8) || type(1) || version(2) || length(2): the MAC / AEAD additional data prefix. With a CID
         /// (RFC 9146 §5): seq_num_placeholder(8 × 0xff) || tls12_cid || cid_length || tls12_cid || version || epoch ||
-        /// sequence_number || cid || length.
+        /// sequence_number || cid || length. Written to <paramref name="aad"/>, of <see cref="MaxAdditionalDataLength"/>
+        /// bytes; returns its length.
         /// </summary>
-        internal static byte[] AdditionalData(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, int length, byte[] connectionId = null)
+        internal static int AdditionalData(Span<byte> aad, byte contentType, ushort version, ushort epoch, ulong sequenceNumber, int length,
+            ReadOnlySpan<byte> connectionId)
         {
-            if (connectionId != null)
+            if (connectionId.Length > 0)
             {
                 const byte Tls12Cid = 25;
-                return new TlsWriter()
-                    .WriteBytes(new byte[] { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff })
-                    .WriteUInt8(Tls12Cid).WriteUInt8((byte)connectionId.Length).WriteUInt8(Tls12Cid)
-                    .WriteUInt16(version).WriteUInt16(epoch)
-                    .WriteUInt16((int)(sequenceNumber >> 32)).WriteUInt32((uint)sequenceNumber)
-                    .WriteBytes(connectionId)
-                    .WriteUInt16(length)
-                    .ToArray();
+                aad.Slice(0, 8).Fill(0xff);
+                aad[8] = Tls12Cid;
+                aad[9] = (byte)connectionId.Length;
+                aad[10] = Tls12Cid;
+                BinaryPrimitives.WriteUInt16BigEndian(aad.Slice(11), version);
+                BinaryPrimitives.WriteUInt16BigEndian(aad.Slice(13), epoch);
+                BinaryPrimitives.WriteUInt16BigEndian(aad.Slice(15), (ushort)(sequenceNumber >> 32));
+                BinaryPrimitives.WriteUInt32BigEndian(aad.Slice(17), (uint)sequenceNumber);
+                connectionId.CopyTo(aad.Slice(21));
+                BinaryPrimitives.WriteUInt16BigEndian(aad.Slice(21 + connectionId.Length), (ushort)length);
+                return 23 + connectionId.Length;
             }
 
-            byte[] aad = new byte[13];
             BinaryPrimitives.WriteUInt64BigEndian(aad, ((ulong)epoch << 48) | (sequenceNumber & 0xFFFFFFFFFFFFUL));
             aad[8] = contentType;
-            BinaryPrimitives.WriteUInt16BigEndian(aad.AsSpan(9), version);
-            BinaryPrimitives.WriteUInt16BigEndian(aad.AsSpan(11), (ushort)length);
-            return aad;
+            BinaryPrimitives.WriteUInt16BigEndian(aad.Slice(9), version);
+            BinaryPrimitives.WriteUInt16BigEndian(aad.Slice(11), (ushort)length);
+            return 13;
+        }
+
+        /// <summary>HMAC(additional data || data) into <paramref name="mac"/>.</summary>
+        internal static void Mac(ITlsHash hmac, byte contentType, ushort version, ushort epoch, ulong sequenceNumber, ReadOnlySpan<byte> data,
+            ReadOnlySpan<byte> connectionId, Span<byte> mac)
+        {
+            Span<byte> aad = stackalloc byte[MaxAdditionalDataLength];
+            hmac.Append(aad.Slice(0, AdditionalData(aad, contentType, version, epoch, sequenceNumber, data.Length, connectionId)));
+            hmac.Append(data);
+            hmac.Finish(mac);
         }
     }
 
@@ -163,31 +207,34 @@ namespace SharpDTLS.Protocol12
             _fixedIv = fixedIv;
         }
 
-        public byte[] Encrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] plaintext, byte[] connectionId = null)
+        public int FragmentLength(int plaintextLength) => ExplicitNonceLength + plaintextLength + _aead.TagLength;
+
+        public void Encrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, ReadOnlySpan<byte> plaintext, Span<byte> fragment,
+            ReadOnlySpan<byte> connectionId)
         {
-            byte[] output = new byte[ExplicitNonceLength + plaintext.Length + _aead.TagLength];
             // The explicit nonce is the 64-bit record sequence number, which never repeats under one key.
-            BinaryPrimitives.WriteUInt64BigEndian(output, ((ulong)epoch << 48) | sequenceNumber);
+            BinaryPrimitives.WriteUInt64BigEndian(fragment, ((ulong)epoch << 48) | sequenceNumber);
             Span<byte> nonce = stackalloc byte[12];
-            Nonce(output, nonce);
-            _aead.Seal(nonce, RecordCiphers.AdditionalData(contentType, version, epoch, sequenceNumber, plaintext.Length, connectionId), plaintext,
-                output.AsSpan(ExplicitNonceLength));
-            return output;
+            Nonce(fragment, nonce);
+            Span<byte> aad = stackalloc byte[RecordCiphers.MaxAdditionalDataLength];
+            int aadLength = RecordCiphers.AdditionalData(aad, contentType, version, epoch, sequenceNumber, plaintext.Length, connectionId);
+            _aead.Seal(nonce, aad.Slice(0, aadLength), plaintext, fragment.Slice(ExplicitNonceLength, plaintext.Length + _aead.TagLength));
         }
 
-        public byte[] Decrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment, byte[] connectionId = null)
+        public int Decrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, ReadOnlySpan<byte> fragment, Span<byte> plaintext,
+            ReadOnlySpan<byte> connectionId)
         {
             int plaintextLength = fragment.Length - ExplicitNonceLength - _aead.TagLength;
             if (plaintextLength < 0)
                 throw new DtlsRecordDiscardedException("Record too short");
 
-            byte[] plaintext = new byte[plaintextLength];
             Span<byte> nonce = stackalloc byte[12];
             Nonce(fragment, nonce);
-            if (!_aead.Open(nonce, RecordCiphers.AdditionalData(contentType, version, epoch, sequenceNumber, plaintextLength, connectionId),
-                    fragment.AsSpan(ExplicitNonceLength), plaintext))
+            Span<byte> aad = stackalloc byte[RecordCiphers.MaxAdditionalDataLength];
+            int aadLength = RecordCiphers.AdditionalData(aad, contentType, version, epoch, sequenceNumber, plaintextLength, connectionId);
+            if (!_aead.Open(nonce, aad.Slice(0, aadLength), fragment.Slice(ExplicitNonceLength), plaintext))
                 throw new DtlsRecordDiscardedException("Record failed authentication");
-            return plaintext;
+            return plaintextLength;
         }
 
         private void Nonce(ReadOnlySpan<byte> record, Span<byte> nonce)
@@ -206,31 +253,27 @@ namespace SharpDTLS.Protocol12
 
         public NullRecordCipher(ITlsHash mac) => _mac = mac;
 
-        public byte[] Encrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] plaintext, byte[] connectionId = null)
+        public int FragmentLength(int plaintextLength) => plaintextLength + _mac.HashLength;
+
+        public void Encrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, ReadOnlySpan<byte> plaintext, Span<byte> fragment,
+            ReadOnlySpan<byte> connectionId)
         {
-            byte[] output = new byte[plaintext.Length + _mac.HashLength];
-            Buffer.BlockCopy(plaintext, 0, output, 0, plaintext.Length);
-            ComputeMac(contentType, version, epoch, sequenceNumber, plaintext, connectionId, output.AsSpan(plaintext.Length));
-            return output;
+            plaintext.CopyTo(fragment);
+            RecordCiphers.Mac(_mac, contentType, version, epoch, sequenceNumber, plaintext, connectionId, fragment.Slice(plaintext.Length, _mac.HashLength));
         }
 
-        public byte[] Decrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment, byte[] connectionId = null)
+        public int Decrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, ReadOnlySpan<byte> fragment, Span<byte> plaintext,
+            ReadOnlySpan<byte> connectionId)
         {
             int length = fragment.Length - _mac.HashLength;
             if (length < 0)
                 throw new DtlsRecordDiscardedException("Record too short");
             Span<byte> expected = stackalloc byte[_mac.HashLength];
-            ComputeMac(contentType, version, epoch, sequenceNumber, fragment.AsSpan(0, length), connectionId, expected);
-            if (!CryptographicOperations.FixedTimeEquals(expected, fragment.AsSpan(length)))
+            RecordCiphers.Mac(_mac, contentType, version, epoch, sequenceNumber, fragment.Slice(0, length), connectionId, expected);
+            if (!CryptographicOperations.FixedTimeEquals(expected, fragment.Slice(length)))
                 throw new DtlsRecordDiscardedException("Record failed authentication");
-            return fragment.AsSpan(0, length).ToArray();
-        }
-
-        private void ComputeMac(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, ReadOnlySpan<byte> data, byte[] connectionId, Span<byte> mac)
-        {
-            _mac.Append(RecordCiphers.AdditionalData(contentType, version, epoch, sequenceNumber, data.Length, connectionId));
-            _mac.Append(data);
-            _mac.Finish(mac);
+            fragment.Slice(0, length).CopyTo(plaintext);
+            return length;
         }
 
         public void Dispose() => RecordCiphers.Dispose(_mac);
@@ -248,27 +291,32 @@ namespace SharpDTLS.Protocol12
             _iv = iv;
         }
 
-        public byte[] Encrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] plaintext, byte[] connectionId = null)
+        public int FragmentLength(int plaintextLength) => plaintextLength + _aead.TagLength;
+
+        public void Encrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, ReadOnlySpan<byte> plaintext, Span<byte> fragment,
+            ReadOnlySpan<byte> connectionId)
         {
-            byte[] output = new byte[plaintext.Length + _aead.TagLength];
             Span<byte> nonce = stackalloc byte[12];
             Nonce(epoch, sequenceNumber, nonce);
-            _aead.Seal(nonce, RecordCiphers.AdditionalData(contentType, version, epoch, sequenceNumber, plaintext.Length, connectionId), plaintext, output);
-            return output;
+            Span<byte> aad = stackalloc byte[RecordCiphers.MaxAdditionalDataLength];
+            int aadLength = RecordCiphers.AdditionalData(aad, contentType, version, epoch, sequenceNumber, plaintext.Length, connectionId);
+            _aead.Seal(nonce, aad.Slice(0, aadLength), plaintext, fragment.Slice(0, plaintext.Length + _aead.TagLength));
         }
 
-        public byte[] Decrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment, byte[] connectionId = null)
+        public int Decrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, ReadOnlySpan<byte> fragment, Span<byte> plaintext,
+            ReadOnlySpan<byte> connectionId)
         {
             int plaintextLength = fragment.Length - _aead.TagLength;
             if (plaintextLength < 0)
                 throw new DtlsRecordDiscardedException("Record too short");
 
-            byte[] plaintext = new byte[plaintextLength];
             Span<byte> nonce = stackalloc byte[12];
             Nonce(epoch, sequenceNumber, nonce);
-            if (!_aead.Open(nonce, RecordCiphers.AdditionalData(contentType, version, epoch, sequenceNumber, plaintextLength, connectionId), fragment, plaintext))
+            Span<byte> aad = stackalloc byte[RecordCiphers.MaxAdditionalDataLength];
+            int aadLength = RecordCiphers.AdditionalData(aad, contentType, version, epoch, sequenceNumber, plaintextLength, connectionId);
+            if (!_aead.Open(nonce, aad.Slice(0, aadLength), fragment, plaintext))
                 throw new DtlsRecordDiscardedException("Record failed authentication");
-            return plaintext;
+            return plaintextLength;
         }
 
         private void Nonce(ushort epoch, ulong sequenceNumber, Span<byte> nonce)
@@ -310,34 +358,42 @@ namespace SharpDTLS.Protocol12
 
         private int ExplicitIvLength => _chainedIv == null ? _blockSize : 0;
 
-        public byte[] Encrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] plaintext, byte[] connectionId = null)
+        // MtE pads plaintext || MAC; EtM pads the plaintext and MACs IV || ciphertext
+        private int Padded(int plaintextLength)
         {
-            // MtE pads plaintext || MAC; EtM pads the plaintext and MACs IV || ciphertext
+            int content = plaintextLength + (_encryptThenMac ? 0 : _macLength);
+            return content + _blockSize - content % _blockSize;
+        }
+
+        public int FragmentLength(int plaintextLength) => ExplicitIvLength + Padded(plaintextLength) + (_encryptThenMac ? _macLength : 0);
+
+        public void Encrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, ReadOnlySpan<byte> plaintext, Span<byte> fragment,
+            ReadOnlySpan<byte> connectionId)
+        {
             int content = plaintext.Length + (_encryptThenMac ? 0 : _macLength);
-            int padded = content + _blockSize - content % _blockSize;
-            byte[] record = new byte[ExplicitIvLength + padded + (_encryptThenMac ? _macLength : 0)];
+            int padded = Padded(plaintext.Length);
 
             Span<byte> iv = stackalloc byte[_blockSize];
             if (_chainedIv == null)
             {
                 RandomNumberGenerator.Fill(iv);
-                iv.CopyTo(record);
+                iv.CopyTo(fragment);
             }
             else
             {
                 _chainedIv.CopyTo(iv);
             }
 
-            var body = record.AsSpan(ExplicitIvLength, padded);
+            var body = fragment.Slice(ExplicitIvLength, padded);
             plaintext.CopyTo(body);
             if (!_encryptThenMac)
-                ComputeMac(contentType, version, epoch, sequenceNumber, plaintext, connectionId, body.Slice(plaintext.Length, _macLength));
+                RecordCiphers.Mac(_mac, contentType, version, epoch, sequenceNumber, plaintext, connectionId, body.Slice(plaintext.Length, _macLength));
             body.Slice(content).Fill((byte)(padded - content - 1));
             _cipher.EncryptCbc(iv, body, body);
             if (_encryptThenMac)
-                ComputeMac(contentType, version, epoch, sequenceNumber, record.AsSpan(0, ExplicitIvLength + padded), connectionId, record.AsSpan(ExplicitIvLength + padded));
+                RecordCiphers.Mac(_mac, contentType, version, epoch, sequenceNumber, fragment.Slice(0, ExplicitIvLength + padded), connectionId,
+                    fragment.Slice(ExplicitIvLength + padded, _macLength));
             Chain(body);
-            return record;
         }
 
         // The next record's IV is this record's last ciphertext block (TLS 1.0).
@@ -347,32 +403,34 @@ namespace SharpDTLS.Protocol12
                 ciphertext.Slice(ciphertext.Length - _blockSize).CopyTo(_chainedIv);
         }
 
-        public byte[] Decrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment, byte[] connectionId = null)
+        public int Decrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, ReadOnlySpan<byte> fragment, Span<byte> plaintext,
+            ReadOnlySpan<byte> connectionId)
             => _encryptThenMac
-                ? DecryptEncryptThenMac(contentType, version, epoch, sequenceNumber, fragment, connectionId)
-                : DecryptMacThenEncrypt(contentType, version, epoch, sequenceNumber, fragment, connectionId);
+                ? DecryptEncryptThenMac(contentType, version, epoch, sequenceNumber, fragment, plaintext, connectionId)
+                : DecryptMacThenEncrypt(contentType, version, epoch, sequenceNumber, fragment, plaintext, connectionId);
 
-        private byte[] DecryptEncryptThenMac(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment, byte[] connectionId)
+        private int DecryptEncryptThenMac(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, ReadOnlySpan<byte> fragment,
+            Span<byte> plaintext, ReadOnlySpan<byte> connectionId)
         {
             int ivAndCiphertextLength = fragment.Length - _macLength;
             if (ivAndCiphertextLength < ExplicitIvLength + _blockSize || (ivAndCiphertextLength - ExplicitIvLength) % _blockSize != 0)
                 throw new DtlsRecordDiscardedException("Invalid CBC record length");
 
             Span<byte> expected = stackalloc byte[_macLength];
-            ComputeMac(contentType, version, epoch, sequenceNumber, fragment.AsSpan(0, ivAndCiphertextLength), connectionId, expected);
-            if (!CryptographicOperations.FixedTimeEquals(expected, fragment.AsSpan(ivAndCiphertextLength, _macLength)))
+            RecordCiphers.Mac(_mac, contentType, version, epoch, sequenceNumber, fragment.Slice(0, ivAndCiphertextLength), connectionId, expected);
+            if (!CryptographicOperations.FixedTimeEquals(expected, fragment.Slice(ivAndCiphertextLength, _macLength)))
                 throw new DtlsRecordDiscardedException("Record failed authentication");
 
             // The MAC was verified first, so padding errors cannot act as an oracle.
-            byte[] padded = new byte[ivAndCiphertextLength - ExplicitIvLength];
-            Decrypt(fragment.AsSpan(0, ivAndCiphertextLength), padded);
+            var padded = plaintext.Slice(0, ivAndCiphertextLength - ExplicitIvLength);
+            Decrypt(fragment.Slice(0, ivAndCiphertextLength), padded);
             int padLength = padded[padded.Length - 1];
             if (padLength + 1 > padded.Length)
                 throw new DtlsRecordDiscardedException("Invalid padding");
             for (int i = padded.Length - padLength - 1; i < padded.Length; i++)
                 if (padded[i] != padLength)
                     throw new DtlsRecordDiscardedException("Invalid padding");
-            return padded.AsSpan(0, padded.Length - padLength - 1).ToArray();
+            return padded.Length - padLength - 1;
         }
 
         /// <summary>
@@ -380,13 +438,14 @@ namespace SharpDTLS.Protocol12
         /// possible padding length, so the result cannot be used as a padding oracle. Residual timing
         /// from the MAC length (Lucky13) is not fully eliminated.
         /// </summary>
-        private byte[] DecryptMacThenEncrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, byte[] fragment, byte[] connectionId)
+        private int DecryptMacThenEncrypt(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, ReadOnlySpan<byte> fragment,
+            Span<byte> output, ReadOnlySpan<byte> connectionId)
         {
             int ciphertextLength = fragment.Length - ExplicitIvLength;
             if (ciphertextLength < _macLength + 1 || ciphertextLength % _blockSize != 0)
                 throw new DtlsRecordDiscardedException("Invalid CBC record length");
 
-            byte[] plaintext = new byte[ciphertextLength];
+            var plaintext = output.Slice(0, ciphertextLength);
             Decrypt(fragment, plaintext);
 
             int padLength = plaintext[plaintext.Length - 1];
@@ -405,12 +464,12 @@ namespace SharpDTLS.Protocol12
             int contentLength = plaintext.Length - _macLength - effectivePad;
 
             Span<byte> expected = stackalloc byte[_macLength];
-            ComputeMac(contentType, version, epoch, sequenceNumber, plaintext.AsSpan(0, contentLength), connectionId, expected);
-            good &= CryptographicOperations.FixedTimeEquals(expected, plaintext.AsSpan(contentLength, _macLength)) ? 1 : 0;
+            RecordCiphers.Mac(_mac, contentType, version, epoch, sequenceNumber, plaintext.Slice(0, contentLength), connectionId, expected);
+            good &= CryptographicOperations.FixedTimeEquals(expected, plaintext.Slice(contentLength, _macLength)) ? 1 : 0;
 
             if (good != 1)
                 throw new DtlsRecordDiscardedException("Record failed authentication");
-            return plaintext.AsSpan(0, contentLength).ToArray();
+            return contentLength;
         }
 
         // IV (explicit, or chained) || ciphertext into output; the chained IV moves on.
@@ -419,13 +478,6 @@ namespace SharpDTLS.Protocol12
             var ciphertext = ivAndCiphertext.Slice(ExplicitIvLength);
             _cipher.DecryptCbc(_chainedIv ?? ivAndCiphertext.Slice(0, _blockSize), ciphertext, output);
             Chain(ciphertext);
-        }
-
-        private void ComputeMac(byte contentType, ushort version, ushort epoch, ulong sequenceNumber, ReadOnlySpan<byte> data, byte[] connectionId, Span<byte> mac)
-        {
-            _mac.Append(RecordCiphers.AdditionalData(contentType, version, epoch, sequenceNumber, data.Length, connectionId));
-            _mac.Append(data);
-            _mac.Finish(mac);
         }
 
         public void Dispose()

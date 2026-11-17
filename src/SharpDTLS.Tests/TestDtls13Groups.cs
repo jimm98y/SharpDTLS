@@ -26,7 +26,7 @@ namespace SharpDTLS.Tests
             var pair = new ScriptedTransportPair();
             var server = new Dtls13Server(pair.Server) { SupportedGroups = serverSupported, ShouldSendHelloRetry = helloRetry };
             var received = new List<string>();
-            server.ApplicationDataReceived += (_, e) => { lock (received) received.Add(Encoding.UTF8.GetString(e.Data)); };
+            server.ApplicationDataReceived += (_, e) => { lock (received) received.Add(Encoding.UTF8.GetString(e.ToArray())); };
             var client = new Dtls13Client(pair.Client) { KeyShareGroups = clientShares, SupportedGroups = clientSupported };
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.HandshakeFinished += (_, _) => done.TrySetResult(true);

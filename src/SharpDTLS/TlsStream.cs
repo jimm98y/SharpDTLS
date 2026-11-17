@@ -39,10 +39,8 @@ namespace SharpDTLS
     public sealed class TlsStream : Stream
     {
         private readonly object _sync = new();
-        private readonly Queue<byte[]> _received = new();
+        private readonly ByteQueue _received = new();
         private readonly Func<TlsConnectionBase> _connection;
-        private byte[] _current;
-        private int _currentOffset;
         private bool _ended;
         private bool _disposed;
         private Exception _error;
@@ -75,7 +73,7 @@ namespace SharpDTLS
             var stream = new TlsStream(() => client.Connection);
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.HandshakeFinished += (_, _) => done.TrySetResult(true);
-            client.ApplicationDataReceived += (_, data) => stream.Signal(() => stream.Received(data));
+            client.ApplicationDataReceived += (_, data) => stream.Received(data);
             client.Closed += (_, _) => { stream.Signal(() => stream._ended = true); done.TrySetException(new IOException("The connection closed during the TLS handshake.")); };
             client.Failed += (_, ex) => { stream.Signal(() => stream._error = ex); done.TrySetException(new IOException("The TLS handshake failed: " + ex.Message, ex)); };
             client.BeginHandshake();
@@ -105,7 +103,7 @@ namespace SharpDTLS
                 tls12.HandshakeFinished += finished;
             else
                 ((Tls13ServerConnection)connection).HandshakeFinished += finished;
-            connection.ApplicationDataReceived += (_, data) => stream.Signal(() => stream.Received(data));
+            connection.ApplicationDataReceived += (_, data) => stream.Received(data);
             connection.Closed += (_, _) => { stream.Signal(() => stream._ended = true); done.TrySetException(new IOException("The connection closed during the TLS handshake.")); };
             connection.Failed += (_, ex) => { stream.Signal(() => stream._error = ex); done.TrySetException(new IOException("The TLS handshake failed: " + ex.Message, ex)); };
             connection.ReceiveGate = stream.WaitForRoomAsync;
@@ -115,10 +113,17 @@ namespace SharpDTLS
             return stream;
         }
 
-        private void Received(byte[] data)
+        // copied: the span is the connection's only during the call
+        private void Received(ReadOnlySpan<byte> data)
         {
-            _received.Enqueue(data);
-            _buffered += data.Length;
+            TaskCompletionSource<bool> waiting;
+            lock (_sync)
+            {
+                _received.AddRange(data);
+                _buffered += data.Length;
+                waiting = _dataAvailable;
+            }
+            waiting.TrySetResult(true);
         }
 
         /// <summary>Completes once less than <see cref="MaxBufferedBytes"/> wait to be read, or the stream is done.</summary>
@@ -182,27 +187,19 @@ namespace SharpDTLS
                 Task wait;
                 lock (_sync)
                 {
-                    if (_current == null && _received.Count > 0)
+                    if (_received.Count > 0)
                     {
-                        (_current, _currentOffset) = (_received.Dequeue(), 0);
-                        _buffered -= _current.Length;
+                        int n = Math.Min(buffer.Length, _received.Count);
+                        _received.Slice(0, n).CopyTo(buffer.Span);
+                        _received.RemoveRange(0, n);
+                        _buffered -= n;
                         if (_buffered < MaxBufferedBytes && _roomAvailable != null)
                         {
                             var room = _roomAvailable;
                             _roomAvailable = null;
                             room.TrySetResult(true); // continuations run asynchronously, not under the lock
                         }
-                    }
-                    if (_current != null)
-                    {
-                        int n = Math.Min(buffer.Length, _current.Length - _currentOffset);
-                        _current.AsMemory(_currentOffset, n).CopyTo(buffer);
-                        _currentOffset += n;
-                        if (_currentOffset == _current.Length)
-                            _current = null;
-                        if (n > 0)
-                            return n;
-                        continue; // an empty record
+                        return n;
                     }
                     if (_error != null)
                         throw new IOException("The TLS connection failed: " + _error.Message, _error);
@@ -236,7 +233,7 @@ namespace SharpDTLS
                 while (buffer.Length > 0)
                 {
                     int n = Math.Min(buffer.Length, connection.MaxApplicationDataSize);
-                    connection.SendApplicationData(buffer.Slice(0, n).ToArray());
+                    connection.SendApplicationData(buffer.Slice(0, n));
                     buffer = buffer.Slice(n);
                 }
             }

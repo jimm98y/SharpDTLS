@@ -43,13 +43,13 @@ namespace SharpDTLS.Protocol12
         /// <summary>Handshake messages as hashed: in DTLS with the full 12-byte header (RFC 6347 §4.2.6).</summary>
         private readonly List<byte[]> _transcript = new();
 
-        protected Tls12Connection(bool isClient, Action<byte[]> send)
+        protected Tls12Connection(bool isClient, DatagramSink send)
             : this(isClient, send, stream: false)
         {
         }
 
         /// <param name="stream">TLS over a reliable byte stream instead of DTLS over datagrams.</param>
-        protected Tls12Connection(bool isClient, Action<byte[]> send, bool stream)
+        protected Tls12Connection(bool isClient, DatagramSink send, bool stream)
             : base(isClient, send, stream ? "TLS12" : "DTLS12")
         {
             _framing = stream ? new StreamFraming(this) : new DatagramFraming(this);
@@ -71,10 +71,10 @@ namespace SharpDTLS.Protocol12
         });
 
         /// <summary>Processes bytes received from a TLS stream (any amount: partial or several records).</summary>
-        public void ProcessStreamData(byte[] data, int offset, int count) => Run(() =>
+        public void ProcessStreamData(byte[] data, int offset, int count) => Run((this, data, offset, count), static s =>
         {
-            if (!IsClosed)
-                _framing.ProcessInput(data, offset, count);
+            if (!s.Item1.IsClosed)
+                s.Item1._framing.ProcessInput(s.data, s.offset, s.count);
         });
 
         /// <summary>Oldest protocol version this endpoint accepts.</summary>
@@ -142,7 +142,7 @@ namespace SharpDTLS.Protocol12
 
         // ── Record layer and handshake transport (delegated to the framing) ──────────────────
 
-        protected override void ProcessRecord(byte[] record) => _framing.ProcessRecord(record);
+        protected override void ProcessRecord(ReadOnlySpan<byte> record) => _framing.ProcessRecord(record);
 
         /// <summary>Epoch-0 record sequence numbers continue from here (a stateless server continues after HelloVerifyRequest).</summary>
         protected void SetInitialRecordSequence(ulong next) => _framing.SetInitialRecordSequence(next);
@@ -192,7 +192,7 @@ namespace SharpDTLS.Protocol12
         }
 
         /// <summary>Reports the content of a protected record to the inspector, if there is one.</summary>
-        private void InspectRecord(bool sent, byte contentType, ulong epoch, ulong sequenceNumber, byte[] content)
+        private void InspectRecord(bool sent, byte contentType, ulong epoch, ulong sequenceNumber, ReadOnlySpan<byte> content)
             => TlsInspector.Current?.OnProtectedRecord(this, IsClient, sent, contentType, epoch, sequenceNumber, content);
 
         /// <summary>Sends ChangeCipherSpec (in the current epoch) and switches writes to the pending cipher.</summary>
@@ -203,7 +203,7 @@ namespace SharpDTLS.Protocol12
 
         public override int MaxApplicationDataSize => PeerRecordLimit - _framing.RecordOverhead;
 
-        protected override void WriteApplicationData(byte[] data) => _framing.WriteApplicationData(data);
+        protected override void WriteApplicationData(ReadOnlySpan<byte> data) => _framing.WriteApplicationData(data);
 
         protected override void SendAlert(AlertDescription description, bool fatal) => _framing.SendAlert(fatal ? (byte)2 : (byte)1, description);
 

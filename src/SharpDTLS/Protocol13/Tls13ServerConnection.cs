@@ -98,8 +98,13 @@ namespace SharpDTLS.Protocol13
 
         protected override void OnRecordAuthenticated(ulong epoch, ulong sequenceNumber, bool withConnectionId)
         {
-            if (!_address.Observe(epoch, sequenceNumber, withConnectionId, DatagramSource, DatagramServer.AutoUpdatePeerAddress, out var old))
-                return;
+            if (_address.Observe(epoch, sequenceNumber, withConnectionId, DatagramSource, DatagramServer.AutoUpdatePeerAddress, out var old))
+                OnPeerAddressChange(old);
+        }
+
+        // apart: its closure would otherwise be allocated for every record
+        private void OnPeerAddressChange(EndPoint old)
+        {
             var change = (old, DatagramSource);
             RaisePeerAddressChanged(change);
             if (DatagramServer.AutoUpdatePeerAddress)
@@ -140,14 +145,14 @@ namespace SharpDTLS.Protocol13
         public event EventHandler<EventArgs> HandshakeFinished;
 
         /// <summary>A TLS 1.3 connection over a stream: the ClientHello arrives on it.</summary>
-        internal Tls13ServerConnection(Tls13ServerBase server, EndPoint remoteEndPoint, Action<byte[]> send)
+        internal Tls13ServerConnection(Tls13ServerBase server, EndPoint remoteEndPoint, DatagramSink send)
             : base(isClient: false, send, stream: true)
         {
             _server = server;
             _address = new PeerAddressTracker(remoteEndPoint);
             KeyLogWriter = server.KeyLogWriter;
 
-            ApplicationDataReceived += (_, data) => _server.OnApplicationData(this, data);
+            ApplicationDataReceived += (connection, data) => _server.OnApplicationData((Tls13ServerConnection)connection, data);
             KeyUpdateMessageReceived += (_, keyUpdate) => _server.OnKeyUpdate(keyUpdate);
             Closed += (_, _) => _server.OnConnectionClosed(this);
         }
@@ -161,7 +166,7 @@ namespace SharpDTLS.Protocol13
             InitialRetransmitTimeout = server.InitialRetransmitTimeout;
             KeyLogWriter = server.KeyLogWriter;
 
-            ApplicationDataReceived += (_, data) => _server.OnApplicationData(this, data);
+            ApplicationDataReceived += (connection, data) => _server.OnApplicationData((Tls13ServerConnection)connection, data);
             KeyUpdateMessageReceived += (_, keyUpdate) => _server.OnKeyUpdate(keyUpdate);
             Closed += (_, _) => _server.OnConnectionClosed(this);
         }

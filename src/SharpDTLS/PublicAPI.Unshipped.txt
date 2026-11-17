@@ -19,7 +19,12 @@ SharpDTLS.CertificateSelectionContext.CertificateAuthorities.get -> System.Colle
 SharpDTLS.CertificateValidator.CertificateValidator(System.Collections.Generic.IEnumerable<System.Security.Cryptography.X509Certificates.X509Certificate2> trustedRoots = null) -> void
 SharpDTLS.CertificateValidator.HostNameValidator.get -> System.Func<System.Security.Cryptography.X509Certificates.X509Certificate2, string, bool>
 SharpDTLS.CertificateValidatorExtensions
+SharpDTLS.DtlsClient.ApplicationDataReceived -> SharpDTLS.TlsDataHandler
+SharpDTLS.DtlsClient.SendApplicationData(System.ReadOnlySpan<byte> data) -> void
+SharpDTLS.DtlsServer.ApplicationDataReceived -> SharpDTLS.TlsDataHandler
 SharpDTLS.DtlsServer.DtlsServer(SharpDTLS.UDP.IServerTransport serverTransport, SharpDTLS.ServerCredentials credentials) -> void
+SharpDTLS.DtlsServer.EarlyDataReceived -> SharpDTLS.TlsDataHandler
+SharpDTLS.DtlsServer.SendApplicationData(System.Net.EndPoint endpoint, System.ReadOnlySpan<byte> data) -> void
 SharpDTLS.ICertificateValidator
 SharpDTLS.ICertificateValidator.Validate(System.Collections.Generic.IReadOnlyList<byte[]> chain, string usage, string hostName) -> void
 SharpDTLS.ITlsAead
@@ -69,6 +74,8 @@ SharpDTLS.TlsBlockCipherAlgorithm.Des = 5 -> SharpDTLS.TlsBlockCipherAlgorithm
 SharpDTLS.TlsBlockCipherAlgorithm.Idea = 6 -> SharpDTLS.TlsBlockCipherAlgorithm
 SharpDTLS.TlsBlockCipherAlgorithm.Seed = 3 -> SharpDTLS.TlsBlockCipherAlgorithm
 SharpDTLS.TlsBlockCipherAlgorithm.TripleDes = 4 -> SharpDTLS.TlsBlockCipherAlgorithm
+SharpDTLS.TlsClient.ApplicationDataReceived -> SharpDTLS.TlsDataHandler
+SharpDTLS.TlsClient.SendApplicationData(System.ReadOnlySpan<byte> data) -> void
 SharpDTLS.TlsClientBase.CertificateAuthorities.get -> System.Collections.Generic.IList<System.Security.Cryptography.X509Certificates.X509Certificate2>
 SharpDTLS.TlsClientBase.ClientCredentials.get -> SharpDTLS.CertificateCredentials
 SharpDTLS.TlsClientBase.ClientCredentials.set -> void
@@ -76,14 +83,19 @@ SharpDTLS.TlsClientBase.Crypto.get -> SharpDTLS.ITlsCrypto
 SharpDTLS.TlsClientBase.Crypto.set -> void
 SharpDTLS.TlsClientBase.PwdProtectionKey.get -> System.Security.Cryptography.ECParameters?
 SharpDTLS.TlsClientBase.ServerCertificateValidator.get -> System.Func<System.Security.Cryptography.X509Certificates.X509Certificate2, System.Collections.Generic.IReadOnlyList<byte[]>, bool>
+SharpDTLS.TlsConnectionBase.ApplicationDataReceived -> SharpDTLS.TlsDataHandler
 SharpDTLS.TlsConnectionBase.LocalCertificate.get -> System.Security.Cryptography.X509Certificates.X509Certificate2
 SharpDTLS.TlsConnectionBase.PeerCertificate.get -> System.Security.Cryptography.X509Certificates.X509Certificate2
+SharpDTLS.TlsConnectionBase.SendApplicationData(System.ReadOnlySpan<byte> data) -> void
+SharpDTLS.TlsDataHandler
 SharpDTLS.TlsHashAlgorithm
 SharpDTLS.TlsHashAlgorithm.Md5 = 0 -> SharpDTLS.TlsHashAlgorithm
 SharpDTLS.TlsHashAlgorithm.Sha1 = 1 -> SharpDTLS.TlsHashAlgorithm
 SharpDTLS.TlsHashAlgorithm.Sha256 = 2 -> SharpDTLS.TlsHashAlgorithm
 SharpDTLS.TlsHashAlgorithm.Sha384 = 3 -> SharpDTLS.TlsHashAlgorithm
 SharpDTLS.TlsHashAlgorithm.Sha512 = 4 -> SharpDTLS.TlsHashAlgorithm
+SharpDTLS.TlsServer.ApplicationDataReceived -> SharpDTLS.TlsDataHandler
+SharpDTLS.TlsServer.EarlyDataReceived -> SharpDTLS.TlsDataHandler
 SharpDTLS.TlsServer.TlsServer(SharpDTLS.ServerCredentials credentials) -> void
 SharpDTLS.TlsServerBase.ClientCertificateAuthorities.get -> System.Collections.Generic.IList<System.Security.Cryptography.X509Certificates.X509Certificate2>
 SharpDTLS.TlsServerBase.ClientCertificateValidator.get -> System.Func<System.Security.Cryptography.X509Certificates.X509Certificate2, System.Collections.Generic.IReadOnlyList<byte[]>, bool>
@@ -91,6 +103,16 @@ SharpDTLS.TlsServerBase.Crypto.get -> SharpDTLS.ITlsCrypto
 SharpDTLS.TlsServerBase.Crypto.set -> void
 SharpDTLS.TlsServerBase.IntermediateCertificates.get -> System.Collections.Generic.IList<System.Security.Cryptography.X509Certificates.X509Certificate2>
 SharpDTLS.TlsServerBase.PwdProtectionKey.get -> System.Security.Cryptography.ECParameters?
+SharpDTLS.UDP.ClientTransport.OnDataReceived -> SharpDTLS.UDP.DatagramHandler
+SharpDTLS.UDP.ClientTransport.Send(System.ReadOnlySpan<byte> datagram) -> void
+SharpDTLS.UDP.DatagramHandler
+SharpDTLS.UDP.IClientTransport.OnDataReceived -> SharpDTLS.UDP.DatagramHandler
+SharpDTLS.UDP.IClientTransport.Send(System.ReadOnlySpan<byte> datagram) -> void
+SharpDTLS.UDP.IServerTransport.OnDataReceived -> SharpDTLS.UDP.DatagramHandler
+SharpDTLS.UDP.IServerTransport.Send(System.Net.EndPoint endpoint, System.ReadOnlySpan<byte> datagram) -> void
+SharpDTLS.UDP.ServerTransport.OnDataReceived -> SharpDTLS.UDP.DatagramHandler
+SharpDTLS.UDP.ServerTransport.Send(System.Net.EndPoint endpoint, System.ReadOnlySpan<byte> datagram) -> void
+SharpDTLS.UDP.ServerTransport.Send(System.ReadOnlySpan<byte> datagram) -> void
 static SharpDTLS.BouncyCastleTlsCrypto.Default.get -> SharpDTLS.BouncyCastleTlsCrypto
 *REMOVED*SharpDTLS.OcspStapleValidator.ForServer() -> System.Func<byte[], System.Collections.Generic.IReadOnlyList<byte[]>, bool>
 SharpDTLS.IOcspStapleValidator
@@ -152,3 +174,34 @@ virtual SharpDTLS.BouncyCastleTlsCrypto.Sign(SharpDTLS.CertificateCredentials cr
 *REMOVED*static SharpDTLS.PwdCredential.GenerateProtectionKeyPair(string curveName = "P-256") -> Org.BouncyCastle.Crypto.AsymmetricCipherKeyPair
 *REMOVED*static SharpDTLS.SrpVerifier.Create(byte[] identity, byte[] password, Org.BouncyCastle.Crypto.Parameters.Srp6GroupParameters group = null) -> SharpDTLS.SrpVerifier
 *REMOVED*static SharpDTLS.SrpVerifier.StandardGroups.get -> System.Collections.Generic.IReadOnlyList<Org.BouncyCastle.Crypto.Parameters.Srp6GroupParameters>
+*REMOVED*SharpDTLS.DtlsClient.ApplicationDataReceived -> System.EventHandler<byte[]>
+*REMOVED*SharpDTLS.DtlsDataReceivedEventArgs
+*REMOVED*SharpDTLS.DtlsDataReceivedEventArgs.Connection.get -> SharpDTLS.TlsConnectionBase
+*REMOVED*SharpDTLS.DtlsDataReceivedEventArgs.Data.get -> byte[]
+*REMOVED*SharpDTLS.DtlsDataReceivedEventArgs.DtlsDataReceivedEventArgs(System.Net.EndPoint remoteEndPoint, SharpDTLS.TlsConnectionBase connection, byte[] data) -> void
+*REMOVED*SharpDTLS.DtlsDataReceivedEventArgs.RemoteEndPoint.get -> System.Net.EndPoint
+*REMOVED*SharpDTLS.DtlsServer.ApplicationDataReceived -> System.EventHandler<SharpDTLS.DtlsDataReceivedEventArgs>
+*REMOVED*SharpDTLS.DtlsServer.EarlyDataReceived -> System.EventHandler<SharpDTLS.DtlsDataReceivedEventArgs>
+*REMOVED*SharpDTLS.DtlsServer.SendApplicationData(System.Net.EndPoint endpoint, byte[] data) -> void
+*REMOVED*SharpDTLS.TlsClient.ApplicationDataReceived -> System.EventHandler<byte[]>
+*REMOVED*SharpDTLS.TlsConnectionBase.ApplicationDataReceived -> System.EventHandler<byte[]>
+*REMOVED*SharpDTLS.TlsConnectionBase.SendApplicationData(byte[] data) -> void
+*REMOVED*SharpDTLS.TlsDataReceivedEventArgs
+*REMOVED*SharpDTLS.TlsDataReceivedEventArgs.Connection.get -> SharpDTLS.TlsConnectionBase
+*REMOVED*SharpDTLS.TlsDataReceivedEventArgs.Data.get -> byte[]
+*REMOVED*SharpDTLS.TlsDataReceivedEventArgs.TlsDataReceivedEventArgs(SharpDTLS.TlsConnectionBase connection, byte[] data) -> void
+*REMOVED*SharpDTLS.TlsServer.ApplicationDataReceived -> System.EventHandler<SharpDTLS.TlsDataReceivedEventArgs>
+*REMOVED*SharpDTLS.TlsServer.EarlyDataReceived -> System.EventHandler<SharpDTLS.TlsDataReceivedEventArgs>
+*REMOVED*SharpDTLS.UDP.ClientTransport.OnDataReceived -> System.EventHandler<byte[]>
+*REMOVED*SharpDTLS.UDP.ClientTransport.Send(byte[] buf) -> void
+*REMOVED*SharpDTLS.UDP.IClientTransport.OnDataReceived -> System.EventHandler<byte[]>
+*REMOVED*SharpDTLS.UDP.IClientTransport.Send(byte[] buf) -> void
+*REMOVED*SharpDTLS.UDP.IServerTransport.OnDataReceived -> System.EventHandler<byte[]>
+*REMOVED*SharpDTLS.UDP.IServerTransport.Send(System.Net.EndPoint endpoint, byte[] buf) -> void
+*REMOVED*SharpDTLS.UDP.ServerTransport.OnDataReceived -> System.EventHandler<byte[]>
+*REMOVED*SharpDTLS.UDP.ServerTransport.Send(byte[] buf) -> void
+*REMOVED*SharpDTLS.UDP.ServerTransport.Send(System.Net.EndPoint endpoint, byte[] buf) -> void
+virtual SharpDTLS.TlsDataHandler.Invoke(SharpDTLS.TlsConnectionBase connection, System.ReadOnlySpan<byte> data) -> void
+virtual SharpDTLS.UDP.DatagramHandler.Invoke(System.Net.EndPoint remoteEndPoint, System.ReadOnlySpan<byte> datagram) -> void
+*REMOVED*SharpDTLS.DtlsClient.SendApplicationData(byte[] data) -> void
+*REMOVED*SharpDTLS.TlsClient.SendApplicationData(byte[] data) -> void

@@ -40,7 +40,7 @@ namespace SharpDTLS.Tests
         {
             var s = new Setup();
             s.Server = new Dtls13Server(s.Pair.Server) { ClientCertificateValidator = validator ?? new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForClient() };
-            s.Server.ApplicationDataReceived += (_, e) => { lock (s.ServerReceived) s.ServerReceived.Add(Encoding.UTF8.GetString(e.Data)); };
+            s.Server.ApplicationDataReceived += (_, e) => { lock (s.ServerReceived) s.ServerReceived.Add(Encoding.UTF8.GetString(e.ToArray())); };
             s.Client = new Dtls13Client(s.Pair.Client) { AllowPostHandshakeAuthentication = allow };
             if (withCertificate)
             {

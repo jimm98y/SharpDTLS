@@ -42,7 +42,7 @@ namespace SharpDTLS.Tests
             var server = new Dtls12Server(pair.Server, credentials.keyPair, credentials.certificate) { CipherSuites = new List<ushort> { suite } };
             var client = new Dtls12Client(pair.Client) { CipherSuites = new List<ushort> { suite } };
             var received = new List<string>();
-            server.ApplicationDataReceived += (_, e) => received.Add(Encoding.UTF8.GetString(e.Data));
+            server.ApplicationDataReceived += (_, e) => received.Add(Encoding.UTF8.GetString(e.ToArray()));
 
             Handshake(client, server, client.BeginHandshake);
 

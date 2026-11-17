@@ -74,12 +74,12 @@ namespace SharpDTLS.Protocol12
         /// <summary>Raised when the server issues an RFC 5077 session ticket during the handshake.</summary>
         public event EventHandler<NewSessionTicketMessage> NewSessionTicketMessageReceived;
 
-        public Tls12ClientConnection(Action<byte[]> send) : base(isClient: true, send)
+        public Tls12ClientConnection(DatagramSink send) : base(isClient: true, send)
         {
         }
 
         /// <param name="stream">TLS over a reliable byte stream instead of DTLS over datagrams.</param>
-        protected Tls12ClientConnection(Action<byte[]> send, bool stream) : base(isClient: true, send, stream)
+        protected Tls12ClientConnection(DatagramSink send, bool stream) : base(isClient: true, send, stream)
         {
         }
 

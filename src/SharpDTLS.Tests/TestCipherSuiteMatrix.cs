@@ -177,7 +177,7 @@ namespace SharpDTLS.Tests
 
             var received = new List<string>();
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            server.ApplicationDataReceived += (_, e) => received.Add(Encoding.UTF8.GetString(e.Data));
+            server.ApplicationDataReceived += (_, e) => received.Add(Encoding.UTF8.GetString(e.ToArray()));
             client.HandshakeFinished += (_, _) => done.TrySetResult(true);
             client.Failed += (_, ex) => done.TrySetException(ex);
 

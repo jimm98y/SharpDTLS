@@ -71,6 +71,10 @@ namespace SharpDTLS.UDP
         private readonly int _mtu = MTU;
         private readonly Action<UdpTransport> _onClose;
         private readonly BlockingCollection<byte[]> _receiveQueue = new BlockingCollection<byte[]>();
+#if !NETCOREAPP
+        // .NET Framework's sockets take arrays alone: buffers of the transport's own, grown once
+        private byte[] _receiveBuffer, _sendBuffer;
+#endif
 
         public string RemoteEndpoint { get { return _remote.ToString(); } }
         public DateTime LastReceived { get; private set; } = DateTime.UtcNow;
@@ -121,11 +125,27 @@ namespace SharpDTLS.UDP
                     // state, and a datagram arriving at that moment can be lost.
                     if (!this._socket.Poll(PollMicroseconds(waitMillis), SelectMode.SelectRead))
                         return -1;
+#if NETCOREAPP
+                    if (_socket.Connected)
+                        return _socket.Receive(buffer);
                     EndPoint remote = new IPEndPoint(IPAddress.Any, 0);
-                    var byteBuffer = buffer.ToArray();
-                    int len = this._socket.ReceiveFrom(byteBuffer, ref remote);
-                    byteBuffer.AsSpan().CopyTo(buffer);
+                    return _socket.ReceiveFrom(buffer, SocketFlags.None, ref remote);
+#else
+                    if (_receiveBuffer == null || _receiveBuffer.Length < buffer.Length)
+                        _receiveBuffer = new byte[buffer.Length];
+                    int len;
+                    if (_socket.Connected)
+                    {
+                        len = _socket.Receive(_receiveBuffer, 0, buffer.Length, SocketFlags.None);
+                    }
+                    else
+                    {
+                        EndPoint remote = new IPEndPoint(IPAddress.Any, 0);
+                        len = _socket.ReceiveFrom(_receiveBuffer, 0, buffer.Length, SocketFlags.None, ref remote);
+                    }
+                    _receiveBuffer.AsSpan(0, len).CopyTo(buffer);
                     return len;
+#endif
                 }
                 catch (SocketException)
                 {
@@ -165,14 +185,23 @@ namespace SharpDTLS.UDP
         {
             LastSent = DateTime.UtcNow;
 
+#if NETCOREAPP
             if (_remote == null)
-            {
-                _socket.Send(buffer.ToArray());
-            }
+                _socket.Send(buffer);
             else
+                _socket.SendTo(buffer, SocketFlags.None, _remote);
+#else
+            lock (_receiveQueue)
             {
-                _socket.SendTo(buffer.ToArray(), _remote);
+                if (_sendBuffer == null || _sendBuffer.Length < buffer.Length)
+                    _sendBuffer = new byte[Math.Max(buffer.Length, _mtu)];
+                buffer.CopyTo(_sendBuffer);
+                if (_remote == null)
+                    _socket.Send(_sendBuffer, 0, buffer.Length, SocketFlags.None);
+                else
+                    _socket.SendTo(_sendBuffer, 0, buffer.Length, SocketFlags.None, _remote);
             }
+#endif
         }
 
         public virtual void Close()
@@ -181,16 +210,22 @@ namespace SharpDTLS.UDP
         }
     }
 
+    /// <summary>The datagrams of a DTLS server: received ones are handed over as spans valid only during the call.</summary>
     public interface IServerTransport
     {
-        event EventHandler<byte[]> OnDataReceived;
-        void Send(EndPoint endpoint, byte[] buf);
+        event DatagramHandler OnDataReceived;
+
+        /// <summary>Sends one datagram; <paramref name="datagram"/> is not kept after the call.</summary>
+        void Send(EndPoint endpoint, ReadOnlySpan<byte> datagram);
     }
 
+    /// <summary>The datagrams of a DTLS client: received ones are handed over as spans valid only during the call.</summary>
     public interface IClientTransport
     {
-        event EventHandler<byte[]> OnDataReceived;
-        void Send(byte[] buf);
+        event DatagramHandler OnDataReceived;
+
+        /// <summary>Sends one datagram; <paramref name="datagram"/> is not kept after the call.</summary>
+        void Send(ReadOnlySpan<byte> datagram);
     }
 
     public class ServerTransport : IServerTransport, IDisposable
@@ -198,7 +233,15 @@ namespace SharpDTLS.UDP
         private readonly Socket _listenSocket;
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
         private volatile IPEndPoint _lastSender;
-        public event EventHandler<byte[]> OnDataReceived;
+        public event DatagramHandler OnDataReceived;
+#if NETCOREAPP
+        // One endpoint per source address, so a datagram makes none; bounded, as any address can be spoofed.
+        private const int MaxCachedAddresses = 4096;
+        private readonly System.Collections.Generic.Dictionary<SocketAddress, IPEndPoint> _senders = new();
+        private readonly ConcurrentDictionary<EndPoint, SocketAddress> _destinations = new();
+#else
+        private readonly byte[] _sendBuffer = new byte[UdpTransport.MTU];
+#endif
 
         /// <summary>The bound local endpoint (useful when binding to port 0).</summary>
         public IPEndPoint LocalEndpoint { get; }
@@ -229,7 +272,11 @@ namespace SharpDTLS.UDP
         private void ListenLoop()
         {
             byte[] buffer = new byte[UdpTransport.MTU];
+#if NETCOREAPP
+            var address = new SocketAddress(_listenSocket.AddressFamily);
+#else
             EndPoint remoteEndpoint = new IPEndPoint(IPAddress.Any, 0);
+#endif
 
             while (!_cts.IsCancellationRequested)
             {
@@ -239,7 +286,11 @@ namespace SharpDTLS.UDP
                     // Poll, not ReceiveTimeout, which can lose a datagram arriving as it expires (see UdpTransport.Receive).
                     if (!_listenSocket.Poll(1_000_000, SelectMode.SelectRead))
                         continue;
+#if NETCOREAPP
+                    length = _listenSocket.ReceiveFrom(buffer, SocketFlags.None, address);
+#else
                     length = _listenSocket.ReceiveFrom(buffer, ref remoteEndpoint);
+#endif
                 }
                 catch (SocketException ex)
                 {
@@ -254,8 +305,12 @@ namespace SharpDTLS.UDP
                 if (length <= 0)
                     continue;
 
+#if NETCOREAPP
+                var sender = Sender(address);
+#else
                 // copy: ReceiveFrom may reuse the endpoint instance on the next call
                 var sender = new IPEndPoint(((IPEndPoint)remoteEndpoint).Address, ((IPEndPoint)remoteEndpoint).Port);
+#endif
                 _lastSender = sender;
 
                 // Every datagram is handed to the handler on this one thread. No per-source state or thread is
@@ -263,7 +318,7 @@ namespace SharpDTLS.UDP
                 // that passed its cookie exchange.
                 try
                 {
-                    OnDataReceived?.Invoke(sender, buffer.AsSpan(0, length).ToArray());
+                    OnDataReceived?.Invoke(sender, buffer.AsSpan(0, length));
                 }
                 catch (Exception ex)
                 {
@@ -272,19 +327,48 @@ namespace SharpDTLS.UDP
             }
         }
 
-        public void Send(EndPoint endpoint, byte[] buf)
+#if NETCOREAPP
+        private IPEndPoint Sender(SocketAddress address)
+        {
+            if (_senders.TryGetValue(address, out var sender))
+                return sender;
+            if (_senders.Count >= MaxCachedAddresses)
+                _senders.Clear();
+            var key = new SocketAddress(address.Family, address.Size);
+            address.Buffer.CopyTo(key.Buffer);
+            sender = (IPEndPoint)new IPEndPoint(IPAddress.Any, 0).Create(key);
+            _senders[key] = sender;
+            return sender;
+        }
+#endif
+
+        public void Send(EndPoint endpoint, ReadOnlySpan<byte> datagram)
         {
             if (endpoint == null)
                 throw new ArgumentNullException(nameof(endpoint));
-            if (buf.Length > UdpTransport.MTU)
-                throw new ArgumentException($"A datagram of {buf.Length} bytes is larger than the MTU ({UdpTransport.MTU}).", nameof(buf));
-            _listenSocket.SendTo(buf, endpoint);
+            if (datagram.Length > UdpTransport.MTU)
+                throw new ArgumentException($"A datagram of {datagram.Length} bytes is larger than the MTU ({UdpTransport.MTU}).", nameof(datagram));
+#if NETCOREAPP
+            if (!_destinations.TryGetValue(endpoint, out var address))
+            {
+                if (_destinations.Count >= MaxCachedAddresses)
+                    _destinations.Clear();
+                address = _destinations.GetOrAdd(endpoint, static e => e.Serialize());
+            }
+            _listenSocket.SendTo(datagram, SocketFlags.None, address);
+#else
+            lock (_sendBuffer)
+            {
+                datagram.CopyTo(_sendBuffer);
+                _listenSocket.SendTo(_sendBuffer, 0, datagram.Length, SocketFlags.None, endpoint);
+            }
+#endif
         }
 
         /// <summary>Sends to the source of the last datagram received.</summary>
-        public void Send(byte[] buf)
+        public void Send(ReadOnlySpan<byte> datagram)
         {
-            Send(_lastSender ?? throw new InvalidOperationException("No datagram has been received yet."), buf);
+            Send(_lastSender ?? throw new InvalidOperationException("No datagram has been received yet."), datagram);
         }
 
         public void Dispose()
@@ -302,7 +386,7 @@ namespace SharpDTLS.UDP
         private readonly Socket _socket;
         private readonly UdpTransport _udpClientTransport;
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
-        public event EventHandler<byte[]> OnDataReceived;
+        public event DatagramHandler OnDataReceived;
 
         public ClientTransport() : this(IPEndPoint.Parse("127.0.0.1:8888"))
         {
@@ -333,7 +417,7 @@ namespace SharpDTLS.UDP
                     {
                         try
                         {
-                            OnDataReceived?.Invoke(remoteEndpoint, buffer.AsSpan(0, len).ToArray());
+                            OnDataReceived?.Invoke(remoteEndpoint, buffer.AsSpan(0, len));
                         }
                         catch (Exception ex)
                         {
@@ -344,9 +428,11 @@ namespace SharpDTLS.UDP
             });
         }
 
-        public void Send(byte[] buf)
+        public void Send(ReadOnlySpan<byte> datagram)
         {
-            _udpClientTransport.Send(buf, 0, buf.Length);
+            if (datagram.Length > _udpClientTransport.GetSendLimit())
+                throw new ArgumentException($"A datagram of {datagram.Length} bytes is larger than the MTU ({UdpTransport.MTU}).", nameof(datagram));
+            _udpClientTransport.Send(datagram);
         }
 
         public void Dispose()

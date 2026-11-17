@@ -95,7 +95,7 @@ namespace SharpDTLS.Tests
                 {
                     TicketKeys = keys, MaxEarlyDataSize = 100, ShouldSendHelloRetry = false, ApplicationProtocols = new[] { "coap", "h2" },
                 };
-                server.EarlyDataReceived += (_, e) => { lock (early) early.Add(Encoding.UTF8.GetString(e.Data)); };
+                server.EarlyDataReceived += (_, e) => { lock (early) early.Add(Encoding.UTF8.GetString(e.ToArray())); };
                 var client = new Dtls13Client(pair.Client) { ApplicationProtocols = protocols, ResumptionTicket = ticket, EarlyData = ticket == null ? null : Encoding.UTF8.GetBytes("early") };
                 Assert.IsNull(Wait(client.BeginHandshake, s => client.HandshakeFinished += (_, _) => s(), f => client.Failed += (_, ex) => f(ex)));
                 return (client, early);

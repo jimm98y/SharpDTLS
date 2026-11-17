@@ -32,18 +32,6 @@ using System.Threading.Tasks;
 
 namespace SharpDTLS.Protocol12.TLS12
 {
-    internal class Tls12DataReceivedEventArgs : EventArgs
-    {
-        public Tls12DataReceivedEventArgs(Tls12ServerConnection connection, byte[] data)
-        {
-            Connection = connection;
-            Data = data;
-        }
-
-        public Tls12ServerConnection Connection { get; }
-        public byte[] Data { get; }
-    }
-
     /// <summary>
     /// TLS 1.2 server: <see cref="Start"/> listens on TCP, or <see cref="Accept"/> serves any connected stream. Each
     /// connection runs the DTLS 1.0/1.2 server handshake over TLS framing with the shared settings.
@@ -76,7 +64,7 @@ namespace SharpDTLS.Protocol12.TLS12
         }
 
         public event EventHandler<Tls12ServerConnection> HandshakeFinished;
-        public event EventHandler<Tls12DataReceivedEventArgs> ApplicationDataReceived;
+        public event TlsDataHandler ApplicationDataReceived;
         public event EventHandler<Tls12ServerConnection> ConnectionClosed;
 
         public IReadOnlyCollection<Tls12ServerConnection> Connections => _connections.Keys.ToList();
@@ -120,7 +108,7 @@ namespace SharpDTLS.Protocol12.TLS12
                 record => TlsStreamPump.Write(stream, record), stream: true);
             _connections[connection] = stream;
             connection.HandshakeFinished += (_, _) => HandshakeFinished?.Invoke(this, connection);
-            connection.ApplicationDataReceived += (_, data) => ApplicationDataReceived?.Invoke(this, new Tls12DataReceivedEventArgs(connection, data));
+            connection.ApplicationDataReceived += (c, data) => ApplicationDataReceived?.Invoke(c, data);
             connection.Closed += (_, _) =>
             {
                 if (_connections.TryRemove(connection, out var s))

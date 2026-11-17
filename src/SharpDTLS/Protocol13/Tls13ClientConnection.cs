@@ -252,7 +252,7 @@ namespace SharpDTLS.Protocol13
         public override byte[] PeerRawPublicKey => ServerRawPublicKey;
 
         /// <param name="stream">TLS 1.3 over a reliable byte stream instead of DTLS 1.3 over datagrams.</param>
-        protected Tls13ClientConnection(Action<byte[]> send, bool stream)
+        protected Tls13ClientConnection(DatagramSink send, bool stream)
             : base(isClient: true, send, stream)
         {
         }

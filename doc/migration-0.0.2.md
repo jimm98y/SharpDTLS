@@ -5,8 +5,11 @@ Starting with the next release, SharpDTLS's public API uses only .NET types. Cer
 Everything else is `byte[]`. BouncyCastle still does the cryptography inside the library, but your
 code no longer needs a reference to it.
 
-Most applications only have to change how they pass their certificate and key, and the signature of
-their certificate validators. The sections below cover each change.
+Received application data and datagrams are now handed over as `ReadOnlySpan<byte>`, so that an
+established connection allocates nothing per record.
+
+Most applications only have to change how they pass their certificate and key, their certificate
+validators and their data handlers. The sections below cover each change.
 
 ## At a glance
 
@@ -31,6 +34,11 @@ their certificate validators. The sections below cover each change.
 | `server.PwdProtectionKey`: `ECPrivateKeyParameters` | `ECParameters?` with `D` |
 | `client.PwdProtectionKey`: `ECPublicKeyParameters` | `ECParameters?` with `Q` only |
 | (new) | `client.Crypto`, `server.Crypto`: `ITlsCrypto`, `BouncyCastleTlsCrypto` by default, or `NetTlsCrypto` |
+| `ApplicationDataReceived`: `EventHandler<byte[]>` (clients, connections) | `TlsDataHandler`: `(connection, ReadOnlySpan<byte> data)` |
+| `DtlsServer.ApplicationDataReceived`, `EarlyDataReceived`: `EventHandler<DtlsDataReceivedEventArgs>` | `TlsDataHandler`; `e.RemoteEndPoint` is `connection.RemoteEndPoint` |
+| `TlsServer.ApplicationDataReceived`, `EarlyDataReceived`: `EventHandler<TlsDataReceivedEventArgs>` | `TlsDataHandler` |
+| `SendApplicationData(byte[])` | `SendApplicationData(ReadOnlySpan<byte>)`: a `byte[]` still converts |
+| `IServerTransport`, `IClientTransport`: `event EventHandler<byte[]> OnDataReceived`, `Send(byte[])` | `event DatagramHandler OnDataReceived`, `Send(ReadOnlySpan<byte>)` |
 
 Some things work as before:
 - `new DtlsServer(transport)` and `new TlsServer()` without credentials still generate a self-signed certificate.
@@ -154,6 +162,48 @@ client.PwdProtectionKey = new ECParameters { Curve = key.Curve, Q = key.Q }; // 
 
 The key must be on a named curve. `null` turns protection off, as before.
 
+## Received data
+
+Data events hand over a span that is valid only during the call: the library reuses its buffer for
+the next record. Copy what you keep:
+
+```cs
+// 0.0.2
+server.ApplicationDataReceived += (sender, e) => queue.Enqueue(e.Data);
+client.ApplicationDataReceived += (sender, data) => queue.Enqueue(data);
+
+// now
+server.ApplicationDataReceived += (connection, data) => queue.Enqueue(data.ToArray());
+client.ApplicationDataReceived += (connection, data) => queue.Enqueue(data.ToArray());
+```
+
+- The first argument is the connection that received the data, not the client or server object. On a
+  server it is a `Tls12ServerConnection` or `Tls13ServerConnection`; its `RemoteEndPoint` replaces
+  `e.RemoteEndPoint`, and replying is `connection.SendApplicationData(...)`.
+- A handler that only reads the data, for example `Encoding.UTF8.GetString(data)` on .NET Core 2.1 and
+  later, needs no copy.
+- `SendApplicationData` copies the data before it returns, so the caller may reuse its buffer.
+
+## Transports
+
+A custom transport implements the span interfaces:
+
+```cs
+sealed class MyTransport : IServerTransport
+{
+    public event DatagramHandler OnDataReceived;
+
+    public void Send(EndPoint endpoint, ReadOnlySpan<byte> datagram) => /* send it; don't keep the span */;
+
+    // on each datagram received, from a buffer you may reuse once the call returns
+    void Received(EndPoint from, byte[] buffer, int length) => OnDataReceived?.Invoke(from, buffer.AsSpan(0, length));
+}
+```
+
+`IClientTransport` is the same without the endpoint on `Send`. The `ServerTransport` and
+`ClientTransport` classes receive into one buffer and send from spans; on .NET 8 and later the server
+also keeps one `IPEndPoint` per source address instead of creating one for every datagram.
+
 ## The crypto provider
 
 The private-key operations (signing, RSA key transport and static key agreement) go through the
@@ -174,6 +224,16 @@ server.Crypto = new NetTlsCrypto();
   - RSA key transport (the `TLS_RSA_*` suites) uses the platform's PKCS#1 v1.5 decryption, which
     may take longer on bad padding than on good padding. BouncyCastle's decryption doesn't have this
     problem. These suites are off by default; leave them off.
+
+`ITlsCrypto` also creates the record protection: `CreateAead`, `CreateBlockCipher`, `CreateHash`
+and `CreateHmac` are called once per key, and the object is used for every record of that key.
+- With **`NetTlsCrypto`** on .NET 8 and later, records are protected by .NET's `AesGcm`, `AesCcm` and
+  `ChaCha20Poly1305` (where the platform supports it), and no record allocates anything.
+- With **`BouncyCastleTlsCrypto`**, BouncyCastle's GCM, CCM and ChaCha20-Poly1305 still allocate as they
+  are set up for each record's nonce: with BouncyCastle 2.7 about 570 bytes per record for AES-GCM and
+  270 for ChaCha20-Poly1305. CBC suites, the record number mask and the HMACs allocate nothing. On .NET
+  Framework and .NET Standard both providers use BouncyCastle.
+- Over TCP, `TlsStream`'s `Task` methods allocate their tasks as any `Stream`'s do.
 
 To sign some other way, implement `ITlsCrypto`, for example to keep keys in a remote signing
 service. A good base class is `BouncyCastleTlsCrypto`: override what you handle and leave the rest

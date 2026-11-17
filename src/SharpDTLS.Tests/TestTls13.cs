@@ -36,7 +36,7 @@ namespace SharpDTLS.Tests
         private static (string Received, string Reply) PingPong(Tls13Server server, Tls13Client client)
         {
             var clientReceived = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-            client.ApplicationDataReceived += (_, d) => clientReceived.TrySetResult(Encoding.UTF8.GetString(d));
+            client.ApplicationDataReceived += (_, d) => clientReceived.TrySetResult(Encoding.UTF8.GetString(d.ToArray()));
             client.SendApplicationData(Encoding.UTF8.GetBytes("ping"));
             Assert.IsTrue(clientReceived.Task.Wait(Timeout), "no reply");
             return ("ping", clientReceived.Task.Result);
@@ -46,7 +46,7 @@ namespace SharpDTLS.Tests
         {
             var server = new Tls13Server();
             configure?.Invoke(server);
-            server.ApplicationDataReceived += (_, e) => e.Connection.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.Data)));
+            server.ApplicationDataReceived += (conn, e) => conn.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.ToArray())));
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
             return server;
         }
@@ -102,7 +102,7 @@ namespace SharpDTLS.Tests
             client.SendApplicationData(Encoding.UTF8.GetBytes("hello over tls 1.3\n"));
             Assert.IsTrue(server.WaitForOutput("hello over tls 1.3", Timeout), server.Output);
             var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-            client.ApplicationDataReceived += (_, d) => received.TrySetResult(Encoding.UTF8.GetString(d));
+            client.ApplicationDataReceived += (_, d) => received.TrySetResult(Encoding.UTF8.GetString(d.ToArray()));
             server.WriteLine("reply from openssl");
             Assert.IsTrue(received.Task.Wait(Timeout), server.Output);
             StringAssert.Contains(received.Task.Result, "reply from openssl");
@@ -119,7 +119,7 @@ namespace SharpDTLS.Tests
             string dir = OpenSsl.NewTempDirectory();
             using var server = new Tls13Server() { CipherSuites = new List<ushort> { suite } };
             var received = new TaskCompletionSource<(Tls13ServerConnection, string)>(TaskCreationOptions.RunContinuationsAsynchronously);
-            server.ApplicationDataReceived += (_, e) => received.TrySetResult((e.Connection, Encoding.UTF8.GetString(e.Data)));
+            server.ApplicationDataReceived += (conn, e) => received.TrySetResult(((Protocol13.Tls13ServerConnection)conn, Encoding.UTF8.GetString(e.ToArray())));
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
 
             using var client = new OpenSslProcess($"s_client -tls1_3 -connect 127.0.0.1:{server.LocalEndpoint.Port} -ciphersuites {OpenSslSuites[suite]}", dir);

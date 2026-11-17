@@ -213,7 +213,7 @@ namespace SharpDTLS.Tests
             var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
             client.Failed += (_, ex) => handshake.TrySetException(ex);
-            client.ApplicationDataReceived += (_, data) => received.TrySetResult(Encoding.UTF8.GetString(data));
+            client.ApplicationDataReceived += (_, data) => received.TrySetResult(Encoding.UTF8.GetString(data.ToArray()));
 
             client.BeginHandshake();
             Assert.IsTrue(handshake.Task.Wait(Timeout), "Handshake did not complete:\n" + server.Output);
@@ -246,7 +246,7 @@ namespace SharpDTLS.Tests
             var handshake = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var received = new TaskCompletionSource<(EndPoint, string)>(TaskCreationOptions.RunContinuationsAsynchronously);
             server.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
-            server.ApplicationDataReceived += (_, e) => received.TrySetResult((e.RemoteEndPoint, Encoding.UTF8.GetString(e.Data)));
+            server.ApplicationDataReceived += (conn, e) => received.TrySetResult((conn.RemoteEndPoint, Encoding.UTF8.GetString(e.ToArray())));
 
             using var client = new OpenSslProcess(
                 $"s_client -dtls1_2 -connect 127.0.0.1:{port} -cipher {cipher} -groups {groups} -quiet", dir);
@@ -299,7 +299,7 @@ namespace SharpDTLS.Tests
             using var serverTransport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
             var sharpServer = new Dtls12Server(serverTransport, kp, cert) { CipherSuites = AllButWeak() };
             var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-            sharpServer.ApplicationDataReceived += (_, e) => received.TrySetResult(Encoding.UTF8.GetString(e.Data));
+            sharpServer.ApplicationDataReceived += (_, e) => received.TrySetResult(Encoding.UTF8.GetString(e.ToArray()));
             using var openSslClient = new OpenSslProcess($"s_client -dtls1_2 -connect 127.0.0.1:{serverTransport.LocalEndpoint.Port} -cipher {cipher}{etm} -quiet", dir);
             openSslClient.WriteLine("cbc-from-openssl");
             Assert.IsTrue(received.Task.Wait(Timeout), "Server did not receive data:\n" + openSslClient.Output);
@@ -496,7 +496,7 @@ namespace SharpDTLS.Tests
             var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
             client.Failed += (_, ex) => handshake.TrySetException(ex);
-            client.ApplicationDataReceived += (_, data) => received.TrySetResult(Encoding.UTF8.GetString(data));
+            client.ApplicationDataReceived += (_, data) => received.TrySetResult(Encoding.UTF8.GetString(data.ToArray()));
 
             client.BeginHandshake();
             Assert.IsTrue(handshake.Task.Wait(Timeout), "Handshake did not complete:\n" + server.Output);
@@ -527,7 +527,7 @@ namespace SharpDTLS.Tests
             var handshake = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var received = new TaskCompletionSource<(EndPoint, string)>(TaskCreationOptions.RunContinuationsAsynchronously);
             server.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
-            server.ApplicationDataReceived += (_, e) => received.TrySetResult((e.RemoteEndPoint, Encoding.UTF8.GetString(e.Data)));
+            server.ApplicationDataReceived += (conn, e) => received.TrySetResult((conn.RemoteEndPoint, Encoding.UTF8.GetString(e.ToArray())));
 
             using var client = new OpenSslProcess(
                 $"s_client -dtls1 -connect 127.0.0.1:{port} -cipher {cipher}@SECLEVEL=0 -groups {groups} -quiet", dir);

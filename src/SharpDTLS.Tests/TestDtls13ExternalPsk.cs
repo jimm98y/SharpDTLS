@@ -38,7 +38,7 @@ namespace SharpDTLS.Tests
             r.Server.InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50);
             r.Server.ExternalPskResolver = Resolve;
             configureServer?.Invoke(r.Server);
-            r.Server.ApplicationDataReceived += (_, e) => { lock (r.ServerReceived) r.ServerReceived.Add(Encoding.UTF8.GetString(e.Data)); };
+            r.Server.ApplicationDataReceived += (_, e) => { lock (r.ServerReceived) r.ServerReceived.Add(Encoding.UTF8.GetString(e.ToArray())); };
             r.Client = new Dtls13Client(r.Pair.Client) { ExternalPsk = new TlsExternalPsk(Identity, Key), InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50) };
             configureClient?.Invoke(r.Client);
 

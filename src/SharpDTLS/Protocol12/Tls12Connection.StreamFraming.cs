@@ -20,6 +20,7 @@
 // SOFTWARE.
 
 using System;
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 
@@ -82,24 +83,49 @@ namespace SharpDTLS.Protocol12
                         throw new DtlsException(AlertDescription.RecordOverflow, $"Record of {length} bytes.");
                     if (_input.Count < 5 + length)
                         return;
-                    byte[] record = _input.GetRange(0, 5 + length);
+                    // not copied: RemoveRange leaves the bytes, and nothing is added to the input while it is read
+                    var record = _input.Slice(0, 5 + length);
                     _input.RemoveRange(0, 5 + length);
                     ProcessRecord(record);
                 }
             }
 
-            public override void ProcessRecord(byte[] record)
+            public override void ProcessRecord(ReadOnlySpan<byte> record)
+            {
+                // the plaintext of a buffer of the pool's: application data's goes on with the event, any other's back
+                byte[] buffer = ArrayPool<byte>.Shared.Rent(Math.Max(record.Length, 1));
+                bool handedOver = false;
+                try
+                {
+                    ProcessRecord(record, buffer, ref handedOver);
+                }
+                finally
+                {
+                    if (!handedOver)
+                        ArrayPool<byte>.Shared.Return(buffer);
+                }
+            }
+
+            private void ProcessRecord(ReadOnlySpan<byte> record, byte[] buffer, ref bool handedOver)
             {
                 byte contentType = record[0];
-                ushort version = BinaryPrimitives.ReadUInt16BigEndian(record.AsSpan(1));
+                ushort version = BinaryPrimitives.ReadUInt16BigEndian(record.Slice(1));
                 if (record[1] != 0x03)
                     throw new DtlsException(AlertDescription.ProtocolVersion, $"Not a TLS record (version 0x{version:X4}).");
-                byte[] fragment = record.AsSpan(5).ToArray();
+                var fragment = record.Slice(5);
 
                 ulong sequence = _readSequence++;
-                byte[] plaintext = _readCipher == null
-                    ? fragment
-                    : _readCipher.Decrypt(contentType, version, (ushort)(sequence >> 48), sequence & 0xFFFFFFFFFFFFUL, fragment);
+                int length;
+                if (_readCipher == null)
+                {
+                    fragment.CopyTo(buffer);
+                    length = fragment.Length;
+                }
+                else
+                {
+                    length = _readCipher.Decrypt(contentType, version, (ushort)(sequence >> 48), sequence & 0xFFFFFFFFFFFFUL, fragment, buffer, default);
+                }
+                var plaintext = new ReadOnlySpan<byte>(buffer, 0, length);
                 if (_readCipher != null)
                 {
                     C.InspectRecord(false, contentType, _readEpoch, sequence, plaintext);
@@ -142,7 +168,8 @@ namespace SharpDTLS.Protocol12
                     case 0x17:
                         if (_readCipher == null || !C.IsHandshakeComplete)
                             throw new DtlsException(AlertDescription.UnexpectedMessage, "Application data before the handshake completed.");
-                        C.RaiseApplicationData(plaintext);
+                        handedOver = true;
+                        C.RaiseApplicationData(buffer, length);
                         break;
 
                     default:
@@ -169,21 +196,38 @@ namespace SharpDTLS.Protocol12
 
             // ── Sending ──────────────────────────────────────────────────────────────────────
 
+            private int RecordLength(int payloadLength) => 5 + (_writeCipher == null ? payloadLength : _writeCipher.FragmentLength(payloadLength));
+
             private byte[] WriteRecord(byte contentType, byte[] payload)
+            {
+                byte[] record = new byte[RecordLength(payload.Length)];
+                WriteRecord(contentType, payload, record);
+                return record;
+            }
+
+            /// <summary>Writes the record into <paramref name="record"/>, of <see cref="RecordLength"/> bytes.</summary>
+            private void WriteRecord(byte contentType, ReadOnlySpan<byte> payload, Span<byte> record)
             {
                 ulong sequence = _writeSequence++;
                 ushort version = C.RecordVersion;
                 if (_writeCipher != null)
                     C.InspectRecord(true, contentType, 1, sequence, payload); // TLS has one ChangeCipherSpec per direction
-                byte[] fragment = _writeCipher == null
-                    ? payload
-                    : _writeCipher.Encrypt(contentType, version, (ushort)(sequence >> 48), sequence & 0xFFFFFFFFFFFFUL, payload);
-                byte[] record = new byte[5 + fragment.Length];
+                int fragmentLength = RecordLength(payload.Length) - 5;
+                if (_writeCipher == null)
+                    payload.CopyTo(record.Slice(5));
+                else
+                    _writeCipher.Encrypt(contentType, version, (ushort)(sequence >> 48), sequence & 0xFFFFFFFFFFFFUL, payload, record.Slice(5), default);
                 record[0] = contentType;
-                BinaryPrimitives.WriteUInt16BigEndian(record.AsSpan(1), version);
-                BinaryPrimitives.WriteUInt16BigEndian(record.AsSpan(3), (ushort)fragment.Length);
-                fragment.CopyTo(record, 5);
-                return record;
+                BinaryPrimitives.WriteUInt16BigEndian(record.Slice(1), version);
+                BinaryPrimitives.WriteUInt16BigEndian(record.Slice(3), (ushort)fragmentLength);
+            }
+
+            private void EnqueueRecord(byte contentType, ReadOnlySpan<byte> payload)
+            {
+                int length = RecordLength(payload.Length);
+                byte[] record = ArrayPool<byte>.Shared.Rent(length);
+                WriteRecord(contentType, payload, record);
+                C.EnqueueRented(record, length);
             }
 
             public override byte[] SendHandshake(byte type, byte[] body, bool addToTranscript)
@@ -219,16 +263,16 @@ namespace SharpDTLS.Protocol12
                 _writeSequence = 0;
             }
 
-            public override void WriteApplicationData(byte[] data)
+            public override void WriteApplicationData(ReadOnlySpan<byte> data)
             {
                 // TLS 1.0 CBC: a predictable IV (the last ciphertext block) enables BEAST, so the first byte goes in its
                 // own record and the rest gets an IV the attacker could not choose (the 1/n-1 split).
                 if (ProtocolVersions.Level(C.NegotiatedVersion) == 1 && C.CipherSuite.IsCbc && data.Length > 1)
                 {
-                    C.Enqueue(WriteRecord(0x17, data.AsSpan(0, 1).ToArray()));
-                    data = data.AsSpan(1).ToArray();
+                    EnqueueRecord(0x17, data.Slice(0, 1));
+                    data = data.Slice(1);
                 }
-                C.Enqueue(WriteRecord(0x17, data));
+                EnqueueRecord(0x17, data);
             }
 
             public override void SendAlert(byte level, AlertDescription description)

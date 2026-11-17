@@ -34,14 +34,14 @@ namespace SharpDTLS.Tests
         {
             var r = new Run();
             r.Server = new Dtls12Server(r.Pair.Server) { UseConnectionIds = serverCids, CipherSuites = new List<ushort> { suite }, TicketKeys = keys };
-            r.Server.ApplicationDataReceived += (_, e) => { lock (r.ServerReceived) r.ServerReceived.Add(Encoding.UTF8.GetString(e.Data)); };
+            r.Server.ApplicationDataReceived += (_, e) => { lock (r.ServerReceived) r.ServerReceived.Add(Encoding.UTF8.GetString(e.ToArray())); };
             r.Server.HandshakeFinished += (_, _) =>
                 r.Connection.PeerAddressChanged += (_, change) => { lock (r.AddressChanges) r.AddressChanges.Add(change); };
             r.Client = new Dtls12Client(r.Pair.Client)
             {
                 UseConnectionId = clientCid, ConnectionIdLength = clientCidLength, CipherSuites = new List<ushort> { suite }, ResumptionSession = resume,
             };
-            r.Client.ApplicationDataReceived += (_, d) => { lock (r.ClientReceived) r.ClientReceived.Add(Encoding.UTF8.GetString(d)); };
+            r.Client.ApplicationDataReceived += (_, d) => { lock (r.ClientReceived) r.ClientReceived.Add(Encoding.UTF8.GetString(d.ToArray())); };
 
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             r.Client.HandshakeFinished += (_, _) => done.TrySetResult(true);

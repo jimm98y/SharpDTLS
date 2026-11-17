@@ -51,11 +51,11 @@ namespace SharpDTLS.Tests
             using var server = new Tls13Server();
             var received = new System.Collections.Concurrent.ConcurrentQueue<string>();
             Tls13ServerConnection connection = null;
-            server.ApplicationDataReceived += (_, e) => { connection = e.Connection; received.Enqueue(Encoding.UTF8.GetString(e.Data)); };
+            server.ApplicationDataReceived += (conn, e) => { connection = (Protocol13.Tls13ServerConnection)conn; received.Enqueue(Encoding.UTF8.GetString(e.ToArray())); };
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
             var client = TestTls13.Connect(server.LocalEndpoint);
             var clientReceived = new System.Collections.Concurrent.ConcurrentQueue<string>();
-            client.ApplicationDataReceived += (_, d) => clientReceived.Enqueue(Encoding.UTF8.GetString(d));
+            client.ApplicationDataReceived += (_, d) => clientReceived.Enqueue(Encoding.UTF8.GetString(d.ToArray()));
 
             client.SendApplicationData(Encoding.UTF8.GetBytes("before"));
             Assert.IsTrue(SpinWait.SpinUntil(() => received.Contains("before"), Timeout));
@@ -77,7 +77,7 @@ namespace SharpDTLS.Tests
             var requests = new System.Collections.Concurrent.ConcurrentQueue<byte>();
             var received = new System.Collections.Concurrent.ConcurrentQueue<string>();
             server.KeyUpdateReceived += (_, k) => requests.Enqueue(k.UpdateRequest);
-            server.ApplicationDataReceived += (_, e) => received.Enqueue(Encoding.UTF8.GetString(e.Data));
+            server.ApplicationDataReceived += (_, e) => received.Enqueue(Encoding.UTF8.GetString(e.ToArray()));
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
             var client = TestTls13.Connect(server.LocalEndpoint);
 
@@ -204,7 +204,7 @@ namespace SharpDTLS.Tests
 
             // s_client's "keyup:req" sends a KeyUpdate asking for ours; data keeps flowing both ways under the new keys.
             var received = new System.Collections.Concurrent.ConcurrentQueue<(Tls13ServerConnection, string)>();
-            server.ApplicationDataReceived += (_, e) => received.Enqueue((e.Connection, Encoding.UTF8.GetString(e.Data)));
+            server.ApplicationDataReceived += (conn, e) => received.Enqueue(((Protocol13.Tls13ServerConnection)conn, Encoding.UTF8.GetString(e.ToArray())));
             second.WriteLine("keyup:req");
             Assert.IsTrue(second.WaitForOutput("KEYUPDATE", Timeout), second.Output);
             second.WriteLine("after key update");
@@ -235,7 +235,7 @@ namespace SharpDTLS.Tests
             // OpenSSL resuming with 0-RTT data: we decline early data and must skip its records.
             server.RequireClientCertificate = false;
             var received = new System.Collections.Concurrent.ConcurrentQueue<string>();
-            server.ApplicationDataReceived += (_, e) => received.Enqueue(Encoding.UTF8.GetString(e.Data));
+            server.ApplicationDataReceived += (_, e) => received.Enqueue(Encoding.UTF8.GetString(e.ToArray()));
             string session = Path.Combine(f.Dir, "session.pem");
             string early = Path.Combine(f.Dir, "early.txt");
             File.WriteAllText(early, "early data\n");

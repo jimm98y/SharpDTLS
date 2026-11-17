@@ -47,9 +47,11 @@ namespace SharpDTLS.Tests
         {
             private readonly ScriptedTransportPair _pair;
             public ServerSide(ScriptedTransportPair pair) => _pair = pair;
-            public event EventHandler<byte[]> OnDataReceived;
+            public event DatagramHandler OnDataReceived;
 
-            public void Send(EndPoint endpoint, byte[] buf)
+            public void Send(EndPoint endpoint, ReadOnlySpan<byte> datagram) => Send(endpoint, datagram.ToArray());
+
+            private void Send(EndPoint endpoint, byte[] buf)
             {
                 lock (_pair.ServerSent) { _pair.ServerSent.Add(buf); _pair.ServerSentTo.Add(endpoint); }
                 foreach (var d in _pair.ServerToClient(buf).ToList())
@@ -66,9 +68,11 @@ namespace SharpDTLS.Tests
         {
             private readonly ScriptedTransportPair _pair;
             public ClientSide(ScriptedTransportPair pair) => _pair = pair;
-            public event EventHandler<byte[]> OnDataReceived;
+            public event DatagramHandler OnDataReceived;
 
-            public void Send(byte[] buf)
+            public void Send(ReadOnlySpan<byte> datagram) => Send(datagram.ToArray());
+
+            private void Send(byte[] buf)
             {
                 lock (_pair.ClientSent) _pair.ClientSent.Add(buf);
                 foreach (var d in _pair.ClientToServer(buf).ToList())
@@ -109,9 +113,9 @@ namespace SharpDTLS.Tests
                     connection.Failed += (_, ex) => { lock (ServerErrors) ServerErrors.Add(ex); };
                     ServerDone.TrySetResult(true);
                 };
-                Server.ApplicationDataReceived += (_, e) => { lock (ServerReceived) ServerReceived.Add(Encoding.UTF8.GetString(e.Data)); };
+                Server.ApplicationDataReceived += (_, e) => { lock (ServerReceived) ServerReceived.Add(Encoding.UTF8.GetString(e.ToArray())); };
                 Client.HandshakeFinished += (_, _) => ClientDone.TrySetResult(true);
-                Client.ApplicationDataReceived += (_, data) => { lock (ClientReceived) ClientReceived.Add(Encoding.UTF8.GetString(data)); };
+                Client.ApplicationDataReceived += (_, data) => { lock (ClientReceived) ClientReceived.Add(Encoding.UTF8.GetString(data.ToArray())); };
                 Client.Failed += (_, ex) => { lock (ClientErrors) ClientErrors.Add(ex); ClientDone.TrySetException(ex); };
             }
 

@@ -46,7 +46,7 @@ namespace SharpDTLS.Tests
         {
             var server = new Tls13Server();
             configure?.Invoke(server);
-            server.ApplicationDataReceived += (_, e) => e.Connection.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.Data)));
+            server.ApplicationDataReceived += (conn, e) => conn.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.ToArray())));
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
             return server;
         }
@@ -184,7 +184,7 @@ namespace SharpDTLS.Tests
                 try { client = TestTls13.Connect((IPEndPoint)listener.LocalEndpoint, c => c.CipherSuites = new List<ushort> { suite }); }
                 catch (Exception) { try { bcServer.Wait(2000); } catch (AggregateException ex) { throw new Exception("BC:" + ex.GetBaseException()); } throw; }
                 var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-                client.ApplicationDataReceived += (_, d) => received.TrySetResult(Encoding.UTF8.GetString(d));
+                client.ApplicationDataReceived += (_, d) => received.TrySetResult(Encoding.UTF8.GetString(d.ToArray()));
                 client.SendApplicationData(Encoding.UTF8.GetBytes("ping"));
                 Assert.IsTrue(received.Task.Wait(Timeout), bcServer.IsFaulted ? bcServer.Exception.GetBaseException().ToString() : "no reply");
                 Assert.AreEqual("pong:ping", received.Task.Result);
@@ -198,7 +198,7 @@ namespace SharpDTLS.Tests
             // BouncyCastle client, our server.
             var (serverKey, serverCert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
             using var ours = new Tls13Server(serverKey, serverCert) { CipherSuites = new List<ushort> { suite } };
-            ours.ApplicationDataReceived += (_, e) => e.Connection.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.Data)));
+            ours.ApplicationDataReceived += (conn, e) => conn.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.ToArray())));
             ours.Start(new IPEndPoint(IPAddress.Loopback, 0));
             var bcClient = RunBlocking(() =>
             {

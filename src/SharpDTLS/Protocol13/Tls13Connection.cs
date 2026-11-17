@@ -98,8 +98,8 @@ namespace SharpDTLS.Protocol13
         /// <summary>A CID we issued for receiving (the server registers it for routing).</summary>
         protected virtual void OnConnectionIdIssued(byte[] connectionId) { }
 
-        private bool IsOurConnectionId(byte[] cid)
-            => cid != null && (cid.AsSpan().SequenceEqual(ReadConnectionId) || _issuedReadConnectionIds.Contains(Convert.ToHexString(cid)));
+        private bool IsOurConnectionId(ReadOnlySpan<byte> cid)
+            => cid.SequenceEqual(ReadConnectionId) || _issuedReadConnectionIds.Contains(Convert.ToHexString(cid));
 
         /// <summary>
         /// Asks the peer for <paramref name="count"/> spare CIDs to send with (RFC 9147 §9). Needs a negotiated
@@ -176,13 +176,13 @@ namespace SharpDTLS.Protocol13
         /// <summary>A protected record authenticated and passed the replay window (for peer address updates).</summary>
         protected virtual void OnRecordAuthenticated(ulong epoch, ulong sequenceNumber, bool withConnectionId) { }
 
-        protected Tls13Connection(bool isClient, Action<byte[]> send)
+        protected Tls13Connection(bool isClient, DatagramSink send)
             : this(isClient, send, stream: false)
         {
         }
 
         /// <param name="stream">TLS 1.3 over a reliable byte stream (RFC 8446) instead of DTLS 1.3 over datagrams.</param>
-        protected Tls13Connection(bool isClient, Action<byte[]> send, bool stream)
+        protected Tls13Connection(bool isClient, DatagramSink send, bool stream)
             : base(isClient, send, stream ? "TLS13" : "DTLS13")
         {
             IsDatagram = !stream;
@@ -220,14 +220,26 @@ namespace SharpDTLS.Protocol13
         // Another KeyUpdate (sent or still awaiting its ACK) must not move the write epoch past MaxEpoch.
         private bool CanUpdateWriteKeys => Session.WriteKeys.Epoch + (_pendingKeyUpdateRecords != null ? 1UL : 0UL) < MaxEpoch;
 
-        protected override void WriteApplicationData(byte[] data)
+        protected override void WriteApplicationData(ReadOnlySpan<byte> data)
         {
             // Rekey well before the AEAD's limit on records per key (RFC 9846 §5.5); Protect closes the connection at the limit.
             var keys = Session.WriteKeys;
             ulong used = IsClient ? keys.ClientKeyUseCounter : keys.ServerKeyUseCounter;
             if (used >= keys.Suite.RekeyThreshold && _pendingKeyUpdateRecords == null && _queuedKeyUpdateRequest == null && CanUpdateWriteKeys)
                 StartKeyUpdate(requestUpdate: false);
-            SendProtected(Session.WriteKeys, new ApplicationDataDatagram(data).ToBytes());
+
+            // the record of a buffer of the pool's, returned once sent
+            keys = Session.WriteKeys;
+            ulong seq = NextSequenceNumber(keys);
+            TlsInspector.Current?.OnProtectedRecord(this, IsClient, true, 0x17, keys.Epoch, seq, data);
+            byte[] cid = WriteCid(keys);
+            int length = IsDatagram ? Dtls13RecordProtection.ProtectedLength(keys, data.Length, cid?.Length ?? 0) : Dtls13RecordProtection.TlsProtectedLength(keys, data.Length);
+            byte[] record = System.Buffers.ArrayPool<byte>.Shared.Rent(length);
+            if (IsDatagram)
+                Dtls13RecordProtection.Protect(keys, IsClient, (int)keys.Epoch, seq, data, 0x17, cid, record, Crypto);
+            else
+                Dtls13RecordProtection.ProtectTls(keys, IsClient, seq, data, 0x17, record, Crypto);
+            EnqueueRented(record, length);
         }
 
         protected override byte[] ExportKeyingMaterialCore(string label, byte[] context, int length)
@@ -316,7 +328,9 @@ namespace SharpDTLS.Protocol13
         }
 
         /// <summary>Processes bytes received from a TLS stream (any amount: partial or several records).</summary>
-        public void ProcessStreamData(byte[] data, int offset, int count) => Run(() =>
+        public void ProcessStreamData(byte[] data, int offset, int count) => Run((this, data, offset, count), static s => s.Item1.ProcessStreamInput(s.data, s.offset, s.count));
+
+        private void ProcessStreamInput(byte[] data, int offset, int count)
         {
             if (IsClosed)
                 return;
@@ -328,11 +342,12 @@ namespace SharpDTLS.Protocol13
                     throw new DtlsException(AlertDescription.RecordOverflow, $"Record of {length} bytes.");
                 if (_tlsInput.Count < 5 + length)
                     return;
-                byte[] record = _tlsInput.GetRange(0, 5 + length);
+                // not copied: RemoveRange leaves the bytes, and nothing is added to the input while it is read
+                var record = _tlsInput.Slice(0, 5 + length);
                 _tlsInput.RemoveRange(0, 5 + length);
                 ProcessTlsRecord(record);
             }
-        });
+        }
 
         /// <summary>The TLS stream ended: after the handshake that closes the connection; during it the handshake fails.</summary>
         internal void OnTransportClosed() => Run(() =>
@@ -344,12 +359,12 @@ namespace SharpDTLS.Protocol13
             CloseInternal();
         });
 
-        private void ProcessTlsRecord(byte[] record)
+        private void ProcessTlsRecord(ReadOnlySpan<byte> record)
         {
             if (record[1] != 0x03)
                 throw new DtlsException(AlertDescription.DecodeError, "Not a TLS record.");
             byte contentType = record[0];
-            byte[] fragment = record.AsSpan(5).ToArray();
+            var fragment = record.Slice(5);
 
             // RFC 8446 §5: nothing may come between the parts of a handshake message.
             if (contentType != 0x16 && contentType != 0x17 && _tlsHandshake.Count > 0)
@@ -405,13 +420,30 @@ namespace SharpDTLS.Protocol13
             }
         }
 
-        private void ProcessTlsProtectedRecord(Dtls13CryptoContext keys, byte[] record)
+        private void ProcessTlsProtectedRecord(Dtls13CryptoContext keys, ReadOnlySpan<byte> record)
         {
             if (keys == null)
                 throw new DtlsException(AlertDescription.UnexpectedMessage, "Protected record before the keys are known.");
+            // the plaintext of a buffer of the pool's: application data's goes on with the event, any other's back
+            byte[] buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(record.Length);
+            bool handedOver = false;
+            try
+            {
+                ProcessTlsProtectedRecord(keys, record, buffer, ref handedOver);
+            }
+            finally
+            {
+                if (!handedOver)
+                    System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
+            }
+        }
+
+        private void ProcessTlsProtectedRecord(Dtls13CryptoContext keys, ReadOnlySpan<byte> record, byte[] buffer, ref bool handedOver)
+        {
             _tlsReadSequence.TryGetValue(keys, out ulong sequence);
-            byte[] inner = Dtls13RecordProtection.UnprotectTls(keys, fromClient: !IsClient, sequence, record, Crypto);
-            if (inner == null)
+            int innerLength = Dtls13RecordProtection.UnprotectTls(keys, fromClient: !IsClient, sequence, record, buffer, Crypto);
+            var inner = new ReadOnlySpan<byte>(buffer, 0, Math.Max(innerLength, 0));
+            if (innerLength < 0)
             {
                 if (SkipUndecryptableBytes >= record.Length)
                 {
@@ -423,8 +455,8 @@ namespace SharpDTLS.Protocol13
             SkipUndecryptableBytes = 0;
             _tlsReadSequence[keys] = sequence + 1;
 
-            byte contentType = inner[^1];
-            TlsInspector.Current?.OnProtectedRecord(this, IsClient, false, contentType, keys.Epoch, sequence, inner.AsSpan(0, inner.Length - 1));
+            byte contentType = inner[inner.Length - 1];
+            TlsInspector.Current?.OnProtectedRecord(this, IsClient, false, contentType, keys.Epoch, sequence, inner.Slice(0, inner.Length - 1));
             CheckReceivedRecordSize(inner.Length - 1);
             if (contentType != 0x16 && _tlsHandshake.Count > 0)
                 throw new DtlsException(AlertDescription.UnexpectedMessage, "Record interleaved with a fragmented handshake message.");
@@ -432,7 +464,7 @@ namespace SharpDTLS.Protocol13
             // Early traffic keys carry 0-RTT application data and then EndOfEarlyData.
             if (keys.Epoch == 1 && contentType == 0x17)
             {
-                OnEarlyData(inner.AsSpan(0, inner.Length - 1).ToArray());
+                OnEarlyData(inner.Slice(0, inner.Length - 1).ToArray());
                 return;
             }
             if (keys.Epoch == 1 && contentType != 0x16)
@@ -443,7 +475,7 @@ namespace SharpDTLS.Protocol13
                 case 0x16:
                     if (inner.Length == 1)
                         throw new DtlsException(AlertDescription.UnexpectedMessage, "Empty handshake record.");
-                    _tlsHandshake.AddRange(inner.AsSpan(0, inner.Length - 1).ToArray());
+                    _tlsHandshake.AddRange(inner.Slice(0, inner.Length - 1));
                     while (TakeTlsHandshakeMessage() is { } message && !IsClosed)
                     {
                         // The message classes read the DTLS form: 12-byte header, then the content type.
@@ -465,7 +497,8 @@ namespace SharpDTLS.Protocol13
                 case 0x17:
                     if (!IsHandshakeComplete)
                         throw new DtlsException(AlertDescription.UnexpectedMessage, "Application data before the handshake completed.");
-                    RaiseApplicationData(inner.AsSpan(0, inner.Length - 1).ToArray());
+                    handedOver = true;
+                    RaiseApplicationData(buffer, inner.Length - 1);
                     break;
 
                 case 0x15:
@@ -505,13 +538,29 @@ namespace SharpDTLS.Protocol13
 
         // ── Record layer ─────────────────────────────────────────────────────────────────────
 
-        protected override void ProcessRecord(byte[] record)
+        protected override void ProcessRecord(ReadOnlySpan<byte> record)
         {
-            if ((record[0] & 0xE0) == 0x20)
+            if ((record[0] & 0xE0) != 0x20)
             {
-                ProcessProtectedRecord(record);
+                ProcessPlaintextRecord(record.ToArray());
                 return;
             }
+            // the plaintext of a buffer of the pool's: application data's goes on with the event, any other's back
+            byte[] buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(record.Length);
+            bool handedOver = false;
+            try
+            {
+                ProcessProtectedRecord(record, buffer, ref handedOver);
+            }
+            finally
+            {
+                if (!handedOver)
+                    System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
+            }
+        }
+
+        private void ProcessPlaintextRecord(byte[] record)
+        {
 
             byte contentType = record[0];
             int epoch = (record[3] << 8) | record[4];
@@ -578,7 +627,7 @@ namespace SharpDTLS.Protocol13
                 QueueKeyUpdate(requestUpdate: true);
         }
 
-        private void ProcessProtectedRecord(byte[] record)
+        private void ProcessProtectedRecord(ReadOnlySpan<byte> record, byte[] buffer, ref bool handedOver)
         {
             int epochBits = record[0] & 0x03;
 
@@ -596,10 +645,11 @@ namespace SharpDTLS.Protocol13
             if (keys == null)
                 throw new DtlsRecordDiscardedException($"No keys for epoch bits {epochBits}");
 
-            Dtls13RecordProtection.UnprotectedRecord unprotected;
+            int innerLength;
+            ulong sequenceNumber;
             try
             {
-                unprotected = Dtls13RecordProtection.Unprotect(keys, fromClient: !IsClient, record, ReceiveConnectionIdLength, Crypto);
+                innerLength = Dtls13RecordProtection.Unprotect(keys, fromClient: !IsClient, record, buffer, ReceiveConnectionIdLength, Crypto, out sequenceNumber);
             }
             catch (DtlsRecordAuthenticationException)
             {
@@ -608,12 +658,13 @@ namespace SharpDTLS.Protocol13
             }
 
             // With a CID negotiated it is in every record from the handshake epoch on, and must be ours (RFC 9147 §9).
-            if (ReadConnectionId is { Length: > 0 } && keys.Epoch >= 2 && !IsOurConnectionId(unprotected.ConnectionId))
+            bool hasCid = (record[0] & 0x10) != 0;
+            if (ReadConnectionId is { Length: > 0 } && keys.Epoch >= 2 && (!hasCid || !IsOurConnectionId(record.Slice(1, ReceiveConnectionIdLength))))
                 throw new DtlsRecordDiscardedException("Record without our connection ID");
-            OnRecordAuthenticated(keys.Epoch, unprotected.SequenceNumber, unprotected.ConnectionId != null);
-            byte[] inner = unprotected.InnerPlaintext;
+            OnRecordAuthenticated(keys.Epoch, sequenceNumber, hasCid);
+            var inner = new ReadOnlySpan<byte>(buffer, 0, innerLength);
             byte contentType = inner[inner.Length - 1];
-            TlsInspector.Current?.OnProtectedRecord(this, IsClient, false, contentType, keys.Epoch, unprotected.SequenceNumber, inner.AsSpan(0, inner.Length - 1));
+            TlsInspector.Current?.OnProtectedRecord(this, IsClient, false, contentType, keys.Epoch, sequenceNumber, inner.Slice(0, inner.Length - 1));
             if (keys.Epoch >= 2)
                 CheckReceivedRecordSize(inner.Length - 1);
 
@@ -622,7 +673,7 @@ namespace SharpDTLS.Protocol13
             {
                 if (IsClient || contentType != 0x17)
                     throw new DtlsException(AlertDescription.UnexpectedMessage, $"Content type 0x{contentType:X2} in the early data epoch.");
-                OnEarlyData(inner.AsSpan(0, inner.Length - 1).ToArray());
+                OnEarlyData(inner.Slice(0, inner.Length - 1).ToArray());
                 return;
             }
 
@@ -630,9 +681,9 @@ namespace SharpDTLS.Protocol13
             {
                 case 0x16:
                     // Bounded: an ACK lists what it fits, and a peer repeating records must not grow it without end.
-                    if (_receivedHandshakeRecords.Count < MaxAcknowledgedRecords && !_receivedHandshakeRecords.Contains((keys.Epoch, unprotected.SequenceNumber)))
-                        _receivedHandshakeRecords.Add((keys.Epoch, unprotected.SequenceNumber));
-                    ProcessHandshakeRecord(inner);
+                    if (_receivedHandshakeRecords.Count < MaxAcknowledgedRecords && !_receivedHandshakeRecords.Contains((keys.Epoch, sequenceNumber)))
+                        _receivedHandshakeRecords.Add((keys.Epoch, sequenceNumber));
+                    ProcessHandshakeRecord(inner.ToArray());
                     break;
 
                 case 0x17:
@@ -640,7 +691,8 @@ namespace SharpDTLS.Protocol13
                         throw new DtlsException(AlertDescription.UnexpectedMessage, "Application data in handshake epoch");
                     if (!IsHandshakeComplete)
                         throw new DtlsRecordDiscardedException("Application data before handshake completion");
-                    RaiseApplicationData(inner.AsSpan(0, inner.Length - 1).ToArray());
+                    handedOver = true;
+                    RaiseApplicationData(buffer, inner.Length - 1);
                     break;
 
                 case 0x15:
@@ -651,7 +703,7 @@ namespace SharpDTLS.Protocol13
 
                 case 0x1a:
                     var ack = new AcknowledgementDatagram();
-                    ack.FromBytes(inner);
+                    ack.FromBytes(inner.ToArray());
                     OnAck(ack);
                     break;
 
@@ -1033,17 +1085,24 @@ namespace SharpDTLS.Protocol13
             return plaintext;
         }
 
-        private (byte[] Record, (ulong Epoch, ulong SequenceNumber) Number) Protect(Dtls13CryptoContext keys, byte[] innerPlaintext)
+        private ulong NextSequenceNumber(Dtls13CryptoContext keys)
         {
             ulong seq = IsClient ? keys.ClientKeyUseCounter++ : keys.ServerKeyUseCounter++;
             if (seq >= keys.Suite.RecordLimit)
                 throw new DtlsException(AlertDescription.InternalError, "The key has protected as many records as its AEAD allows; a KeyUpdate is required");
+            return seq;
+        }
+
+        private byte[] WriteCid(Dtls13CryptoContext keys) => keys.Epoch >= 2 && WriteConnectionId is { Length: > 0 } ? WriteConnectionId : null;
+
+        private (byte[] Record, (ulong Epoch, ulong SequenceNumber) Number) Protect(Dtls13CryptoContext keys, byte[] innerPlaintext)
+        {
+            ulong seq = NextSequenceNumber(keys);
             TlsInspector.Current?.OnProtectedRecord(this, IsClient, true, innerPlaintext[^1], keys.Epoch, seq, innerPlaintext.AsSpan(0, innerPlaintext.Length - 1));
 
             if (!IsDatagram)
                 return (Dtls13RecordProtection.ProtectTls(keys, IsClient, seq, innerPlaintext, Crypto), (keys.Epoch, seq));
-            byte[] cid = keys.Epoch >= 2 && WriteConnectionId is { Length: > 0 } ? WriteConnectionId : null;
-            return (Dtls13RecordProtection.Protect(keys, IsClient, (int)keys.Epoch, seq, innerPlaintext, cid, Crypto), (keys.Epoch, seq));
+            return (Dtls13RecordProtection.Protect(keys, IsClient, (int)keys.Epoch, seq, innerPlaintext, WriteCid(keys), Crypto), (keys.Epoch, seq));
         }
 
         /// <summary>Protects and queues one record outside any flight. Returns its record number.</summary>

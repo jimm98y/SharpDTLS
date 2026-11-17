@@ -62,7 +62,7 @@ namespace SharpDTLS.Tests
             var intermediates = Enumerable.Range(0, 40).Select(_ => Pki.Intermediate.Cert).ToList();
             using var server = new Tls12Server(key, cert) { IntermediateCertificates = intermediates };
             var received = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
-            server.ApplicationDataReceived += (_, e) => { received.TrySetResult(e.Data); e.Connection.SendApplicationData(new byte[16384]); };
+            server.ApplicationDataReceived += (conn, e) => { received.TrySetResult(e.ToArray()); conn.SendApplicationData(new byte[16384]); };
             var (_, listener) = TrickleServer(server, chunk);
             try
             {
@@ -70,7 +70,7 @@ namespace SharpDTLS.Tests
                 var client = TestTls12.Connect((IPEndPoint)listener.LocalEndpoint, c => c.ServerCertificateValidator = (_, chain) => { certificateLength = chain.Sum(x => x.Length); return true; });
                 Assert.IsGreaterThan(16384, certificateLength, "the Certificate message should span records");
                 var reply = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
-                client.ApplicationDataReceived += (_, d) => reply.TrySetResult(d);
+                client.ApplicationDataReceived += (_, d) => reply.TrySetResult(d.ToArray());
                 client.SendApplicationData(new byte[16384]);
                 Assert.IsTrue(received.Task.Wait(Timeout));
                 Assert.HasCount(16384, received.Task.Result);

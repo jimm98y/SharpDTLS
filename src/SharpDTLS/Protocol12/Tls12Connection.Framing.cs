@@ -41,13 +41,13 @@ namespace SharpDTLS.Protocol12
             public virtual void ProcessInput(byte[] data, int offset, int count) => throw new NotSupportedException();
 
             /// <summary>Processes one received record.</summary>
-            public abstract void ProcessRecord(byte[] record);
+            public abstract void ProcessRecord(ReadOnlySpan<byte> record);
 
             /// <summary>Frames, records and sends a handshake message; returns the framed message.</summary>
             public abstract byte[] SendHandshake(byte type, byte[] body, bool addToTranscript);
 
             public abstract void SendChangeCipherSpec();
-            public abstract void WriteApplicationData(byte[] data);
+            public abstract void WriteApplicationData(ReadOnlySpan<byte> data);
             public abstract void SendAlert(byte level, AlertDescription description);
 
             /// <summary>The ciphers that take effect at the next ChangeCipherSpec in each direction.</summary>

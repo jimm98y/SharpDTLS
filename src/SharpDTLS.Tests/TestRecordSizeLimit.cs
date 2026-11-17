@@ -43,7 +43,7 @@ namespace SharpDTLS.Tests
             if (version == 12)
             {
                 var server = new Dtls12Server(result.Pair.Server) { RecordSizeLimit = serverLimit };
-                server.ApplicationDataReceived += (_, e) => { lock (result.ServerReceived) result.ServerReceived.Add(e.Data); };
+                server.ApplicationDataReceived += (_, e) => { lock (result.ServerReceived) result.ServerReceived.Add(e.ToArray()); };
                 var client = new Dtls12Client(result.Pair.Client) { RecordSizeLimit = clientLimit, MaxFragmentLength = clientMfl };
                 client.HandshakeFinished += (_, _) => done.TrySetResult(true);
                 client.Failed += (_, ex) => done.TrySetException(ex);
@@ -53,14 +53,14 @@ namespace SharpDTLS.Tests
             else
             {
                 var server = new Dtls13Server(result.Pair.Server) { RecordSizeLimit = serverLimit };
-                server.ApplicationDataReceived += (_, e) => { lock (result.ServerReceived) result.ServerReceived.Add(e.Data); };
+                server.ApplicationDataReceived += (_, e) => { lock (result.ServerReceived) result.ServerReceived.Add(e.ToArray()); };
                 var client = new Dtls13Client(result.Pair.Client) { RecordSizeLimit = clientLimit, MaxFragmentLength = clientMfl };
                 client.HandshakeFinished += (_, _) => done.TrySetResult(true);
                 client.Failed += (_, ex) => done.TrySetException(ex);
                 result.Client = client;
                 serverConnection = () => server.Connections.Single();
             }
-            result.Client.ApplicationDataReceived += (_, d) => { lock (result.ClientReceived) result.ClientReceived.Add(d); };
+            result.Client.ApplicationDataReceived += (_, d) => { lock (result.ClientReceived) result.ClientReceived.Add(d.ToArray()); };
             ((dynamic)result.Client).BeginHandshake();
             Assert.IsTrue(done.Task.Wait(Timeout), "handshake did not complete");
             result.Server = serverConnection();
@@ -281,7 +281,7 @@ namespace SharpDTLS.Tests
             using (var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0)))
             {
                 var server = new Dtls12Server(transport, keyPair, certificate) { RecordSizeLimit = 1000 };
-                server.ApplicationDataReceived += (_, e) => server.SendApplicationData(e.RemoteEndPoint, new byte[256]);
+                server.ApplicationDataReceived += (conn, e) => server.SendApplicationData(conn.RemoteEndPoint, new byte[256]);
                 using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
                 socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
                 socket.Connect(new IPEndPoint(IPAddress.Loopback, transport.LocalEndpoint.Port));

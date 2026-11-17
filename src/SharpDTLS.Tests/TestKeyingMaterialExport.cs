@@ -99,13 +99,13 @@ namespace SharpDTLS.Tests
             if (version == "-dtls1")
             {
                 var server = new Dtls12Server(transport) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10 };
-                server.ApplicationDataReceived += (_, e) => received.TrySetResult(e.RemoteEndPoint);
+                server.ApplicationDataReceived += (conn, e) => received.TrySetResult(conn.RemoteEndPoint);
                 getKeys = server.GetSrtpKeys;
             }
             else
             {
                 var server = new Dtls12Server(transport);
-                server.ApplicationDataReceived += (_, e) => received.TrySetResult(e.RemoteEndPoint);
+                server.ApplicationDataReceived += (conn, e) => received.TrySetResult(conn.RemoteEndPoint);
                 getKeys = server.GetSrtpKeys;
             }
 

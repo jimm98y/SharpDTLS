@@ -76,7 +76,7 @@ namespace SharpDTLS.Tests
             });
             Assert.AreEqual(id, client.CipherSuite.Id);
             var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-            client.ApplicationDataReceived += (_, data) => received.TrySetResult(Encoding.UTF8.GetString(data));
+            client.ApplicationDataReceived += (_, data) => received.TrySetResult(Encoding.UTF8.GetString(data.ToArray()));
             client.SendApplicationData(Encoding.UTF8.GetBytes("from-sharptls\n"));
             Assert.IsTrue(server.WaitForOutput("from-sharptls", Timeout), $"{name}: s_server did not receive data:\n" + server.Output);
             server.WriteLine("from-openssl");
@@ -106,7 +106,7 @@ namespace SharpDTLS.Tests
                 psk = $" -psk {Convert.ToHexString(TestCredentials.PskKey)} -psk_identity {Encoding.ASCII.GetString(TestCredentials.PskIdentity)}";
             }
             var received = new TaskCompletionSource<(SharpDTLS.Protocol12.Tls12ServerConnection, string)>(TaskCreationOptions.RunContinuationsAsynchronously);
-            server.ApplicationDataReceived += (_, e) => received.TrySetResult((e.Connection, Encoding.UTF8.GetString(e.Data)));
+            server.ApplicationDataReceived += (conn, e) => received.TrySetResult(((Protocol12.Tls12ServerConnection)conn, Encoding.UTF8.GetString(e.ToArray())));
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
 
             using var client = new OpenSslProcess(

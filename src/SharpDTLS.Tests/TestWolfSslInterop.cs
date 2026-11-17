@@ -133,7 +133,7 @@ namespace SharpDTLS.Tests
             var received = new List<string>();
             client.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
             client.Failed += (_, ex) => handshake.TrySetException(ex);
-            client.ApplicationDataReceived += (_, data) => { lock (received) received.Add(Encoding.UTF8.GetString(data)); };
+            client.ApplicationDataReceived += (_, data) => { lock (received) received.Add(Encoding.UTF8.GetString(data.ToArray())); };
 
             client.BeginHandshake();
             Assert.IsTrue(handshake.Task.Wait(Timeout), "Handshake did not complete:\n" + server.Output);
@@ -182,7 +182,7 @@ namespace SharpDTLS.Tests
             var handshake = new TaskCompletionSource<Tls13ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
             var received = new List<string>();
             server.HandshakeFinished += (_, e) => handshake.TrySetResult(((Dtls13ConnectionEventArgs)e).Connection);
-            server.ApplicationDataReceived += (_, e) => { lock (received) received.Add(Encoding.UTF8.GetString(e.Data)); };
+            server.ApplicationDataReceived += (_, e) => { lock (received) received.Add(Encoding.UTF8.GetString(e.ToArray())); };
 
             using var client = new OpenSslProcess($"client {transport.LocalEndpoint.Port} -cipher {cipher} -group {group}", dir, WolfSsl.Harness);
 
@@ -225,7 +225,7 @@ namespace SharpDTLS.Tests
 
             // Subscribe before sending: the data can arrive before the next statement runs.
             var received = new List<string>();
-            server.ApplicationDataReceived += (_, e) => { lock (received) received.Add(Encoding.UTF8.GetString(e.Data)); };
+            server.ApplicationDataReceived += (_, e) => { lock (received) received.Add(Encoding.UTF8.GetString(e.ToArray())); };
             client.WriteLine("after-resumption");
             Assert.IsTrue(WaitFor(() => Contains(received, "after-resumption")), client.Output);
         }
@@ -288,7 +288,7 @@ namespace SharpDTLS.Tests
                     ? new TlsExternalPsk(id, Convert.FromHexString(PskHex), suite) : null,
             };
             var received = new List<string>();
-            server.ApplicationDataReceived += (_, e) => { lock (received) received.Add(Encoding.UTF8.GetString(e.Data)); };
+            server.ApplicationDataReceived += (_, e) => { lock (received) received.Add(Encoding.UTF8.GetString(e.ToArray())); };
 
             using var client = new OpenSslProcess(
                 $"client {transport.LocalEndpoint.Port} -cipher {cipher} -psk {PskHex} -psk_identity {PskIdentity}{(pskOnly ? " -psk_only" : "")}",
@@ -346,7 +346,7 @@ namespace SharpDTLS.Tests
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
             var server = new Dtls13Server(transport) { UseConnectionIds = true };
             var received = new List<string>();
-            server.ApplicationDataReceived += (_, e) => { lock (received) received.Add(Encoding.UTF8.GetString(e.Data)); };
+            server.ApplicationDataReceived += (_, e) => { lock (received) received.Add(Encoding.UTF8.GetString(e.ToArray())); };
 
             using var client = new OpenSslProcess($"client {transport.LocalEndpoint.Port} -cid {clientCid}", dir, WolfSsl.Harness);
             Assert.IsTrue(client.WaitForOutput("CONNECTED", Timeout), client.Output);
@@ -383,7 +383,7 @@ namespace SharpDTLS.Tests
             Assert.AreEqual(clientCidLength, client.ConnectionId?.Length ?? 0);
 
             var received = new List<string>();
-            client.ApplicationDataReceived += (_, d) => { lock (received) received.Add(Encoding.UTF8.GetString(d)); };
+            client.ApplicationDataReceived += (_, d) => { lock (received) received.Add(Encoding.UTF8.GetString(d.ToArray())); };
             client.SendApplicationData(Encoding.UTF8.GetBytes("over-cid\n"));
             Assert.IsTrue(server.WaitForOutput("RECV:over-cid", Timeout), server.Output);
             server.WriteLine("back");

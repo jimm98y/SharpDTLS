@@ -53,6 +53,14 @@ namespace SharpDTLS.Protocol13
             public byte[] InnerPlaintext { get; }
         }
 
+        /// <summary>The length of the protected record of <paramref name="contentLength"/> bytes of content.</summary>
+        public static int ProtectedLength(Dtls13CryptoContext ctx, int contentLength, int connectionIdLength)
+            => 5 + connectionIdLength + InnerLength(ctx, contentLength) + ctx.Suite.TagLength;
+
+        // RFC 9147 §4.2.3: the record number mask needs 16 bytes of ciphertext, so short records
+        // (possible with CCM_8's 8-byte tag) are zero-padded as TLSInnerPlaintext padding.
+        private static int InnerLength(Dtls13CryptoContext ctx, int contentLength) => Math.Max(contentLength + 1, SampleLength - ctx.Suite.TagLength);
+
         /// <summary>
         /// Builds a protected record with a full unified header (16-bit sequence number, length present), carrying
         /// <paramref name="connectionId"/> when one is given (RFC 9147 §4: C bit, CID right after the first byte).
@@ -60,35 +68,46 @@ namespace SharpDTLS.Protocol13
         public static byte[] Protect(Dtls13CryptoContext ctx, bool fromClient, int epoch, ulong sequenceNumber, byte[] innerPlaintext,
             byte[] connectionId = null, ITlsCrypto crypto = null)
         {
-            connectionId ??= Array.Empty<byte>();
+            int cid = connectionId?.Length ?? 0;
+            byte[] record = new byte[ProtectedLength(ctx, innerPlaintext.Length - 1, cid)];
+            Protect(ctx, fromClient, epoch, sequenceNumber, innerPlaintext.AsSpan(0, innerPlaintext.Length - 1), innerPlaintext[innerPlaintext.Length - 1],
+                connectionId, record, crypto);
+            return record;
+        }
+
+        /// <summary>
+        /// Writes the protected record of <paramref name="content"/> and its <paramref name="contentType"/> into
+        /// <paramref name="record"/>, of <see cref="ProtectedLength"/> bytes.
+        /// </summary>
+        public static void Protect(Dtls13CryptoContext ctx, bool fromClient, int epoch, ulong sequenceNumber, ReadOnlySpan<byte> content, byte contentType,
+            ReadOnlySpan<byte> connectionId, Span<byte> record, ITlsCrypto crypto)
+        {
             var suite = ctx.Suite;
             var protection = ctx.Protection(fromClient, crypto);
 
             int cid = connectionId.Length;
             int headerLength = 5 + cid;
-
-            // RFC 9147 §4.2.3: the record number mask needs 16 bytes of ciphertext, so short records
-            // (possible with CCM_8's 8-byte tag) are zero-padded as TLSInnerPlaintext padding.
-            int innerLength = Math.Max(innerPlaintext.Length, SampleLength - suite.TagLength);
+            int innerLength = InnerLength(ctx, content.Length);
             int ciphertextLength = innerLength + suite.TagLength;
             if (ciphertextLength > 0xFFFF)
                 throw new DtlsException(AlertDescription.RecordOverflow, "Record too large");
 
-            byte[] record = new byte[headerLength + ciphertextLength];
             record[0] = (byte)(0x20 | (cid > 0 ? 0x10 : 0) | 0x08 | 0x04 | (epoch & 0x03)); // fixed bits, C, S=1 (16-bit seq), L=1
-            connectionId.CopyTo(record, 1);
+            connectionId.CopyTo(record.Slice(1));
             record[1 + cid] = (byte)(sequenceNumber >> 8);
             record[2 + cid] = (byte)sequenceNumber;
             record[3 + cid] = (byte)(ciphertextLength >> 8);
             record[4 + cid] = (byte)ciphertextLength;
 
-            // the padding is the record's own zeroes; the plaintext is sealed in place
-            var body = record.AsSpan(headerLength);
-            innerPlaintext.CopyTo(body);
+            // TLSInnerPlaintext (content || type || zeros), sealed in place
+            var body = record.Slice(headerLength, ciphertextLength);
+            content.CopyTo(body);
+            body[content.Length] = contentType;
+            body.Slice(content.Length + 1, innerLength - content.Length - 1).Clear();
             byte[] iv = fromClient ? ctx.ClientIv : ctx.ServerIv;
             Span<byte> nonce = stackalloc byte[iv.Length];
             BuildNonce(iv, sequenceNumber, nonce);
-            protection.Seal(nonce, record.AsSpan(0, headerLength), body.Slice(0, innerLength), body);
+            protection.Seal(nonce, record.Slice(0, headerLength), body.Slice(0, innerLength), body);
 
             Span<byte> mask = stackalloc byte[2];
             if (protection.Mask(body, mask))
@@ -96,8 +115,6 @@ namespace SharpDTLS.Protocol13
                 record[1 + cid] ^= mask[0];
                 record[2 + cid] ^= mask[1];
             }
-
-            return record;
         }
 
         /// <summary>
@@ -107,16 +124,30 @@ namespace SharpDTLS.Protocol13
         /// <param name="connectionIdLength">Length of the CIDs the receiver expects (0 when it expects none).</param>
         public static UnprotectedRecord Unprotect(Dtls13CryptoContext ctx, bool fromClient, byte[] record, int connectionIdLength = 0, ITlsCrypto crypto = null)
         {
-            if (!TryReadHeader(ctx, fromClient, record, out int headerLength, out int seqLength, out ulong sequenceNumber, connectionIdLength, crypto))
+            byte[] plaintext = new byte[record.Length];
+            int length = Unprotect(ctx, fromClient, record, plaintext, connectionIdLength, crypto, out ulong sequenceNumber);
+            byte[] connectionId = (record[0] & 0x10) != 0 ? record.AsSpan(1, connectionIdLength).ToArray() : null;
+            return new UnprotectedRecord(record[0] & 0x03, sequenceNumber, plaintext.AsSpan(0, length).ToArray(), connectionId);
+        }
+
+        /// <summary>
+        /// As <see cref="Unprotect(Dtls13CryptoContext, bool, byte[], int, ITlsCrypto)"/>, into <paramref name="plaintext"/>
+        /// (of the record's length at least): returns the length of the TLSInnerPlaintext without its padding, the content
+        /// type last.
+        /// </summary>
+        public static int Unprotect(Dtls13CryptoContext ctx, bool fromClient, ReadOnlySpan<byte> record, Span<byte> plaintext, int connectionIdLength,
+            ITlsCrypto crypto, out ulong sequenceNumber)
+        {
+            if (!TryReadHeader(ctx, fromClient, record, out int headerLength, out int seqLength, out sequenceNumber, connectionIdLength, crypto))
                 throw new DtlsRecordDiscardedException("Malformed DTLS 1.3 record header");
 
             var window = fromClient ? ctx.ClientRecords : ctx.ServerRecords;
             if (window.IsDuplicate(sequenceNumber))
-                throw new DtlsRecordDiscardedException($"Replayed record {sequenceNumber}");
+                throw new DtlsRecordDiscardedException("Replayed record");
 
             // AAD is the header as sent, but before record number encryption (RFC 9147 §4).
             Span<byte> aad = stackalloc byte[headerLength];
-            record.AsSpan(0, headerLength).CopyTo(aad);
+            record.Slice(0, headerLength).CopyTo(aad);
             int seqOffset = headerLength - seqLength - (((record[0] & 0x04) != 0) ? 2 : 0);
             if (seqLength == 2)
             {
@@ -128,10 +159,9 @@ namespace SharpDTLS.Protocol13
                 aad[seqOffset] = (byte)sequenceNumber;
             }
 
-            var ciphertext = record.AsSpan(headerLength);
+            var ciphertext = record.Slice(headerLength);
             if (ciphertext.Length < ctx.Suite.TagLength)
                 throw new DtlsRecordAuthenticationException("Record failed authentication");
-            byte[] plaintext = new byte[ciphertext.Length - ctx.Suite.TagLength];
             byte[] iv = fromClient ? ctx.ClientIv : ctx.ServerIv;
             Span<byte> nonce = stackalloc byte[iv.Length];
             BuildNonce(iv, sequenceNumber, nonce);
@@ -141,17 +171,12 @@ namespace SharpDTLS.Protocol13
             window.Mark(sequenceNumber);
 
             // strip TLSInnerPlaintext zero padding; the last non-zero byte is the content type
-            int end = plaintext.Length;
+            int end = ciphertext.Length - ctx.Suite.TagLength;
             while (end > 0 && plaintext[end - 1] == 0)
                 end--;
             if (end == 0)
                 throw new DtlsException(AlertDescription.UnexpectedMessage, "Record has no content type");
-
-            if (end != plaintext.Length)
-                Array.Resize(ref plaintext, end);
-
-            byte[] connectionId = (record[0] & 0x10) != 0 ? record.AsSpan(1, connectionIdLength).ToArray() : null;
-            return new UnprotectedRecord(record[0] & 0x03, sequenceNumber, plaintext, connectionId);
+            return end;
         }
 
         /// <summary>
@@ -163,8 +188,8 @@ namespace SharpDTLS.Protocol13
             return TryReadHeader(ctx, fromClient, record, out _, out _, out sequenceNumber, connectionIdLength, null);
         }
 
-        private static bool TryReadHeader(Dtls13CryptoContext ctx, bool fromClient, byte[] record, out int headerLength, out int seqLength, out ulong sequenceNumber,
-            int connectionIdLength, ITlsCrypto crypto)
+        private static bool TryReadHeader(Dtls13CryptoContext ctx, bool fromClient, ReadOnlySpan<byte> record, out int headerLength, out int seqLength,
+            out ulong sequenceNumber, int connectionIdLength, ITlsCrypto crypto)
         {
             headerLength = 0;
             seqLength = 0;
@@ -196,7 +221,7 @@ namespace SharpDTLS.Protocol13
             }
 
             Span<byte> mask = stackalloc byte[2];
-            if (!ctx.Protection(fromClient, crypto).Mask(record.AsSpan(headerLength), mask))
+            if (!ctx.Protection(fromClient, crypto).Mask(record.Slice(headerLength), mask))
                 mask.Clear();
 
             ulong truncated = seq16
@@ -208,51 +233,70 @@ namespace SharpDTLS.Protocol13
             return true;
         }
 
+        /// <summary>The length of the TLS 1.3 record of <paramref name="contentLength"/> bytes of content.</summary>
+        internal static int TlsProtectedLength(Dtls13CryptoContext ctx, int contentLength) => 5 + contentLength + 1 + ctx.Suite.TagLength;
+
         /// <summary>
         /// A TLS 1.3 record (RFC 8446 §5.2): header opaque_type 23, legacy version 0x0303 and length, which is also the
         /// AAD; the nonce is the IV XOR the implicit 64-bit sequence number.
         /// </summary>
         internal static byte[] ProtectTls(Dtls13CryptoContext ctx, bool fromClient, ulong sequenceNumber, byte[] innerPlaintext, ITlsCrypto crypto = null)
         {
-            var suite = ctx.Suite;
-            int length = innerPlaintext.Length + suite.TagLength;
+            byte[] record = new byte[TlsProtectedLength(ctx, innerPlaintext.Length - 1)];
+            ProtectTls(ctx, fromClient, sequenceNumber, innerPlaintext.AsSpan(0, innerPlaintext.Length - 1), innerPlaintext[innerPlaintext.Length - 1], record, crypto);
+            return record;
+        }
+
+        /// <summary>Writes the TLS 1.3 record into <paramref name="record"/>, of <see cref="TlsProtectedLength"/> bytes.</summary>
+        internal static void ProtectTls(Dtls13CryptoContext ctx, bool fromClient, ulong sequenceNumber, ReadOnlySpan<byte> content, byte contentType,
+            Span<byte> record, ITlsCrypto crypto)
+        {
+            int length = content.Length + 1 + ctx.Suite.TagLength;
             if (length > 16384 + 256)
                 throw new DtlsException(AlertDescription.RecordOverflow, "Record too large");
-            byte[] record = new byte[5 + length];
             record[0] = 0x17;
             record[1] = 0x03;
             record[2] = 0x03;
             record[3] = (byte)(length >> 8);
             record[4] = (byte)length;
-            var body = record.AsSpan(5);
-            innerPlaintext.CopyTo(body);
+            var body = record.Slice(5, length);
+            content.CopyTo(body);
+            body[content.Length] = contentType;
             byte[] iv = fromClient ? ctx.ClientIv : ctx.ServerIv;
             Span<byte> nonce = stackalloc byte[iv.Length];
             BuildNonce(iv, sequenceNumber, nonce);
-            ctx.Protection(fromClient, crypto).Seal(nonce, record.AsSpan(0, 5), body.Slice(0, innerPlaintext.Length), body);
-            return record;
+            ctx.Protection(fromClient, crypto).Seal(nonce, record.Slice(0, 5), body.Slice(0, content.Length + 1), body);
         }
 
         /// <summary>Opens a TLS 1.3 record; returns TLSInnerPlaintext without its zero padding, or null when authentication fails.</summary>
         internal static byte[] UnprotectTls(Dtls13CryptoContext ctx, bool fromClient, ulong sequenceNumber, byte[] record, ITlsCrypto crypto = null)
         {
-            var ciphertext = record.AsSpan(5);
+            byte[] plaintext = new byte[record.Length];
+            int length = UnprotectTls(ctx, fromClient, sequenceNumber, record, plaintext, crypto);
+            return length < 0 ? null : plaintext.AsSpan(0, length).ToArray();
+        }
+
+        /// <summary>
+        /// Opens a TLS 1.3 record into <paramref name="plaintext"/> (of the record's length at least): the length of the
+        /// TLSInnerPlaintext without its zero padding, or -1 when authentication fails.
+        /// </summary>
+        internal static int UnprotectTls(Dtls13CryptoContext ctx, bool fromClient, ulong sequenceNumber, ReadOnlySpan<byte> record, Span<byte> plaintext,
+            ITlsCrypto crypto)
+        {
+            var ciphertext = record.Slice(5);
             if (ciphertext.Length < ctx.Suite.TagLength)
-                return null;
-            byte[] plaintext = new byte[ciphertext.Length - ctx.Suite.TagLength];
+                return -1;
             byte[] iv = fromClient ? ctx.ClientIv : ctx.ServerIv;
             Span<byte> nonce = stackalloc byte[iv.Length];
             BuildNonce(iv, sequenceNumber, nonce);
-            if (!ctx.Protection(fromClient, crypto).Open(nonce, record.AsSpan(0, 5), ciphertext, plaintext))
-                return null;
-            int end = plaintext.Length;
+            if (!ctx.Protection(fromClient, crypto).Open(nonce, record.Slice(0, 5), ciphertext, plaintext))
+                return -1;
+            int end = ciphertext.Length - ctx.Suite.TagLength;
             while (end > 0 && plaintext[end - 1] == 0)
                 end--;
             if (end == 0)
                 throw new DtlsException(AlertDescription.UnexpectedMessage, "Record without a content type.");
-            if (end != plaintext.Length)
-                Array.Resize(ref plaintext, end);
-            return plaintext;
+            return end;
         }
 
         // RFC 8446 §5.3: nonce = iv XOR (64-bit sequence number, left-padded to iv length).

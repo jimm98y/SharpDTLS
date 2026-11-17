@@ -40,7 +40,7 @@ namespace SharpDTLS.Tests
                 var server = new Dtls12Server(e.Pair.Server) { InitialRetransmitTimeout = timeout };
                 var client = new Dtls12Client(e.Pair.Client) { InitialRetransmitTimeout = timeout };
                 server.HandshakeFinished += (_, _) => e.ServerDone.TrySetResult(true);
-                server.ApplicationDataReceived += (_, a) => { lock (e.ServerReceived) e.ServerReceived.Add(Encoding.UTF8.GetString(a.Data)); };
+                server.ApplicationDataReceived += (_, a) => { lock (e.ServerReceived) e.ServerReceived.Add(Encoding.UTF8.GetString(a.ToArray())); };
                 client.HandshakeFinished += (_, _) => e.ClientDone.TrySetResult(true);
                 client.Failed += (_, ex) => e.ClientDone.TrySetException(ex);
                 e.Begin = client.BeginHandshake;
@@ -51,7 +51,7 @@ namespace SharpDTLS.Tests
                 var server = new Dtls12Server(e.Pair.Server) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10, InitialRetransmitTimeout = timeout };
                 var client = new Dtls12Client(e.Pair.Client) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10, InitialRetransmitTimeout = timeout };
                 server.HandshakeFinished += (_, _) => e.ServerDone.TrySetResult(true);
-                server.ApplicationDataReceived += (_, a) => { lock (e.ServerReceived) e.ServerReceived.Add(Encoding.UTF8.GetString(a.Data)); };
+                server.ApplicationDataReceived += (_, a) => { lock (e.ServerReceived) e.ServerReceived.Add(Encoding.UTF8.GetString(a.ToArray())); };
                 client.HandshakeFinished += (_, _) => e.ClientDone.TrySetResult(true);
                 client.Failed += (_, ex) => e.ClientDone.TrySetException(ex);
                 e.Begin = client.BeginHandshake;

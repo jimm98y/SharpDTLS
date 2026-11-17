@@ -34,22 +34,6 @@ using System.Net;
 
 namespace SharpDTLS
 {
-    public class DtlsDataReceivedEventArgs : EventArgs
-    {
-        public DtlsDataReceivedEventArgs(EndPoint remoteEndPoint, TlsConnectionBase connection, byte[] data)
-        {
-            RemoteEndPoint = remoteEndPoint;
-            Connection = connection;
-            Data = data;
-        }
-
-        public EndPoint RemoteEndPoint { get; }
-
-        /// <summary>A <see cref="Tls12ServerConnection"/> (DTLS 1.0-1.2) or <see cref="Tls13ServerConnection"/> (DTLS 1.3).</summary>
-        public TlsConnectionBase Connection { get; }
-        public byte[] Data { get; }
-    }
-
     /// <summary>
     /// A DTLS server for every version on one transport: each client's ClientHello decides between DTLS 1.3 and DTLS
     /// 1.0-1.2, and its later datagrams stay with that version. A DTLS 1.2 handshake carries the RFC 9147 §5.3
@@ -89,11 +73,11 @@ namespace SharpDTLS
 
             Dtls12.ConnectionEstablished += c => HandshakeFinished?.Invoke(this, c);
             Dtls13.HandshakeFinished += (_, e) => HandshakeFinished?.Invoke(this, ((Dtls13ConnectionEventArgs)e).Connection);
-            Dtls12.ConnectionDataReceived += (c, data) => ApplicationDataReceived?.Invoke(this, new DtlsDataReceivedEventArgs(c.RemoteEndPoint, c, data));
-            Dtls13.ApplicationDataReceived += (_, e) => ApplicationDataReceived?.Invoke(this, new DtlsDataReceivedEventArgs(e.RemoteEndPoint, e.Connection, e.Data));
+            Dtls12.ConnectionDataReceived += (c, data) => ApplicationDataReceived?.Invoke(c, data);
+            Dtls13.ApplicationDataReceived += (c, data) => ApplicationDataReceived?.Invoke(c, data);
             Dtls12.ConnectionEnded += c => ConnectionClosed?.Invoke(this, c);
             Dtls13.ConnectionClosed += (_, e) => ConnectionClosed?.Invoke(this, e.Connection);
-            Dtls13.EarlyDataReceived += (_, e) => EarlyDataReceived?.Invoke(this, new DtlsDataReceivedEventArgs(e.RemoteEndPoint, e.Connection, e.Data));
+            Dtls13.EarlyDataReceived += (c, data) => EarlyDataReceived?.Invoke(c, data);
             Dtls12.ConnectionCreated += OnConnectionCreated;
             Dtls13.ConnectionCreated += OnConnectionCreated;
             Dtls12.AcceptsConnection = Dtls13.AcceptsConnection = AcceptsConnection;
@@ -200,10 +184,15 @@ namespace SharpDTLS
         }
 
         public event EventHandler<TlsConnectionBase> HandshakeFinished;
-        public event EventHandler<DtlsDataReceivedEventArgs> ApplicationDataReceived;
+        /// <summary>
+        /// Application data of a client: the connection is a <see cref="Tls12ServerConnection"/> (DTLS 1.0-1.2) or a
+        /// <see cref="Tls13ServerConnection"/> (DTLS 1.3), its <see cref="TlsConnectionBase.RemoteEndPoint"/> the client's;
+        /// the data is valid only during the call.
+        /// </summary>
+        public event TlsDataHandler ApplicationDataReceived;
 
         /// <summary>0-RTT data a DTLS 1.3 client sent with its ClientHello (see <see cref="TlsServerBase.MaxEarlyDataSize"/>).</summary>
-        public event EventHandler<DtlsDataReceivedEventArgs> EarlyDataReceived;
+        public event TlsDataHandler EarlyDataReceived;
 
         public event EventHandler<TlsConnectionBase> ConnectionClosed;
         public event EventHandler<TlsAlertEventArgs> AlertReceived;
@@ -224,7 +213,7 @@ namespace SharpDTLS
         public TlsConnectionBase GetConnection(EndPoint endpoint)
             => (TlsConnectionBase)Dtls13.GetConnection(endpoint) ?? Dtls12.GetConnection(endpoint);
 
-        public void SendApplicationData(EndPoint endpoint, byte[] data)
+        public void SendApplicationData(EndPoint endpoint, ReadOnlySpan<byte> data)
             => (GetConnection(endpoint) ?? throw new InvalidOperationException($"No DTLS connection for {endpoint}.")).SendApplicationData(data);
 
         public void Close(EndPoint endpoint) => GetConnection(endpoint)?.Close();
@@ -265,9 +254,8 @@ namespace SharpDTLS
 
         // ── Routing ──────────────────────────────────────────────────────────────────────────
 
-        private void OnDataReceived(object sender, byte[] datagram)
+        private void OnDataReceived(EndPoint endpoint, ReadOnlySpan<byte> datagram)
         {
-            var endpoint = (EndPoint)sender;
             if (datagram.Length == 0)
                 return;
 
@@ -285,7 +273,7 @@ namespace SharpDTLS
 
             try
             {
-                foreach (var record in DtlsRecordSplitter.Split(datagram))
+                foreach (var record in DtlsRecordSplitter.Split(datagram.ToArray()))
                 {
                     if (record.Length < 25 || record[0] != 0x16 || record[3] != 0 || record[4] != 0 || record[13] != HandshakeType.ClientHello)
                         continue; // only a ClientHello can start an association
@@ -322,11 +310,11 @@ namespace SharpDTLS
 
             public EnginePort(IServerTransport transport) => _transport = transport;
 
-            public event EventHandler<byte[]> OnDataReceived;
+            public event DatagramHandler OnDataReceived;
 
-            public void Send(EndPoint endpoint, byte[] buf) => _transport.Send(endpoint, buf);
+            public void Send(EndPoint endpoint, ReadOnlySpan<byte> datagram) => _transport.Send(endpoint, datagram);
 
-            public void Deliver(EndPoint from, byte[] datagram) => OnDataReceived?.Invoke(from, datagram);
+            public void Deliver(EndPoint from, ReadOnlySpan<byte> datagram) => OnDataReceived?.Invoke(from, datagram);
         }
     }
 }

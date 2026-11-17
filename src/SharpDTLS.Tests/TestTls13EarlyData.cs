@@ -31,8 +31,8 @@ namespace SharpDTLS.Tests
             using var server = new Tls13Server { MaxEarlyDataSize = 1024 };
             var early = new System.Collections.Concurrent.ConcurrentQueue<string>();
             var data = new System.Collections.Concurrent.ConcurrentQueue<string>();
-            server.EarlyDataReceived += (_, e) => early.Enqueue(Encoding.UTF8.GetString(e.Data));
-            server.ApplicationDataReceived += (_, e) => data.Enqueue(Encoding.UTF8.GetString(e.Data));
+            server.EarlyDataReceived += (_, e) => early.Enqueue(Encoding.UTF8.GetString(e.ToArray()));
+            server.ApplicationDataReceived += (_, e) => data.Enqueue(Encoding.UTF8.GetString(e.ToArray()));
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
 
             var ticket = Ticket(server.LocalEndpoint);
@@ -50,8 +50,8 @@ namespace SharpDTLS.Tests
             using var server = new Tls13Server { MaxEarlyDataSize = 1024 };
             var early = new System.Collections.Concurrent.ConcurrentQueue<string>();
             var data = new System.Collections.Concurrent.ConcurrentQueue<string>();
-            server.EarlyDataReceived += (_, e) => early.Enqueue(Encoding.UTF8.GetString(e.Data));
-            server.ApplicationDataReceived += (_, e) => data.Enqueue(Encoding.UTF8.GetString(e.Data));
+            server.EarlyDataReceived += (_, e) => early.Enqueue(Encoding.UTF8.GetString(e.ToArray()));
+            server.ApplicationDataReceived += (_, e) => data.Enqueue(Encoding.UTF8.GetString(e.ToArray()));
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
 
             var ticket = Ticket(server.LocalEndpoint);
@@ -94,7 +94,7 @@ namespace SharpDTLS.Tests
             string dir = OpenSsl.NewTempDirectory();
             using var server = new Tls13Server { MaxEarlyDataSize = 16384 };
             var early = new System.Collections.Concurrent.ConcurrentQueue<string>();
-            server.EarlyDataReceived += (_, e) => early.Enqueue(Encoding.UTF8.GetString(e.Data));
+            server.EarlyDataReceived += (_, e) => early.Enqueue(Encoding.UTF8.GetString(e.ToArray()));
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
 
             string session = Path.Combine(dir, "session.pem");
