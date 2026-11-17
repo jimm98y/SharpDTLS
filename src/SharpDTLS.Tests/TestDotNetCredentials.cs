@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading.Tasks;
@@ -97,8 +98,11 @@ namespace SharpDTLS.Tests
         [TestMethod]
         public async Task AKeyNotExportableIsOfNetTlsCryptoAlone()
         {
-            if (Environment.OSVersion.Platform != PlatformID.Win32NT)
+            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
                 Assert.Inconclusive("CNG keys are Windows'.");
+                return; // for the platform analyzer, which does not know Inconclusive throws
+            }
             // a named key, of the user's store: the certificate refers to it rather than copying it, as it could not
             var parameters = new CngKeyCreationParameters { ExportPolicy = CngExportPolicies.None };
             parameters.Parameters.Add(new CngProperty("Length", BitConverter.GetBytes(2048), CngPropertyOptions.None));
@@ -124,6 +128,8 @@ namespace SharpDTLS.Tests
         // smart card holds them; the key is deleted with the returned one.
         private static (X509Certificate2 Certificate, CngKey Key) NotExportable(bool ecdsa, string subject)
         {
+            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                throw new PlatformNotSupportedException(); // the callers are Windows' alone
             var parameters = new CngKeyCreationParameters { ExportPolicy = CngExportPolicies.None };
             if (!ecdsa)
                 parameters.Parameters.Add(new CngProperty("Length", BitConverter.GetBytes(2048), CngPropertyOptions.None));
