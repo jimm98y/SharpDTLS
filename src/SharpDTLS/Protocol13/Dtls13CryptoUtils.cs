@@ -142,13 +142,6 @@ namespace SharpDTLS.Protocol13
             return certGenerator.Generate(new Asn1SignatureFactory(signatureAlgorithm, keyPair.Private, new SecureRandom()));
         }
 
-        public static (X25519PrivateKeyParameters privateX25519, X25519PublicKeyParameters publicX25519) CreateX25519KeyPair()
-        {
-            X25519KeyPairGenerator x25519KeyPairGenerator = new X25519KeyPairGenerator();
-            x25519KeyPairGenerator.Init(new X25519KeyGenerationParameters(new SecureRandom()));
-            AsymmetricCipherKeyPair keyPair = x25519KeyPairGenerator.GenerateKeyPair();
-            return (keyPair.Private as X25519PrivateKeyParameters, keyPair.Public as X25519PublicKeyParameters);
-        }
 
         public static byte[] GenerateRandom(int length)
         {
@@ -157,26 +150,6 @@ namespace SharpDTLS.Protocol13
             return bytes;
         }
 
-        public static byte[] DeriveSharedSecretX25519(byte[] privateKey, byte[] publicKey)
-        {
-            if (privateKey == null) throw new ArgumentNullException(nameof(privateKey));
-            if (publicKey == null) throw new ArgumentNullException(nameof(publicKey));
-            if (privateKey.Length != 32) throw new ArgumentException("Private key must be 32 bytes.", nameof(privateKey));
-            if (publicKey.Length != 32) throw new DtlsException(AlertDescription.IllegalParameter, "X25519 public key must be 32 bytes.");
-
-            var priv = new X25519PrivateKeyParameters(privateKey, 0);
-            var pub = new X25519PublicKeyParameters(publicKey, 0);
-
-            var shared = new byte[32];
-            priv.GenerateSecret(pub, shared, 0);
-
-            // RFC 8446 §7.4.2: abort if the shared secret is all zeros (small-order point)
-            int acc = 0;
-            foreach (byte b in shared) acc |= b;
-            if (acc == 0) throw new DtlsException(AlertDescription.IllegalParameter, "X25519 shared secret is zero.");
-
-            return shared;
-        }
 
         // ── Key schedule (RFC 8446 §7.1 with the "dtls13" label prefix of RFC 9147 §5.9) ─────────
 

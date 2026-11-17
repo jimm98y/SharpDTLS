@@ -31,7 +31,6 @@ namespace SharpDTLS.Protocol12
         // Handshake messages included in the transcript hash (starting from ClientHello after cookie exchange)
         public List<IDatagram> HandshakeMessages { get; } = new List<IDatagram>();
 
-        public Dtls12CryptoContext CryptoContext { get; internal set; }
 
         // DTLS record-layer sequence numbers (reset per epoch)
         public ushort RecordSequenceNumber { get; set; } = 0;

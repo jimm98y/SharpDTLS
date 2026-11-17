@@ -543,8 +543,8 @@ namespace SharpDTLS.Tests
         [TestMethod]
         public void ClientHello_WithUnknownExtensionsAndMultipleKeyShares_IsAccepted()
         {
-            var (_, pub) = Dtls13CryptoUtils.CreateX25519KeyPair();
-            var clientHello = new ClientHelloDatagram(pub.GetEncoded()) { ClientRandom = Dtls13CryptoUtils.GenerateRandom(32) };
+            var share = Dtls13Groups.Generate(Dtls13Groups.X25519).Share;
+            var clientHello = new ClientHelloDatagram(share) { ClientRandom = Dtls13CryptoUtils.GenerateRandom(32) };
             clientHello.Extensions.Add(new UnknownExtension(0xFE0D, new byte[] { 1, 2, 3 }));
 
             byte[] bytes = clientHello.ToBytes();
