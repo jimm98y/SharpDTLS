@@ -1,6 +1,6 @@
 # Migrating from SharpDTLS 0.0.2
 
-Starting with the next release, SharpDTLS's public API uses only .NET types. Certificates are
+Starting with SharpDTLS 0.1.0, the public API uses only .NET types. Certificates are
 `X509Certificate2`, distinguished names are `X500DistinguishedName`, and EC keys are `ECParameters`.
 Everything else is `byte[]`. BouncyCastle still does the cryptography inside the library, but your
 code no longer needs a reference to it.
@@ -12,7 +12,7 @@ Most applications only have to change how they pass their certificate and key, t
 validators and their data handlers. The sections below cover each change.
 
 Code that compiles unchanged still has to be rebuilt: `SendApplicationData` and the transports' `Send`
-take spans now, so assemblies built against 0.0.2 don't bind to this release.
+take spans now, so assemblies built against 0.0.2 don't bind to 0.1.0.
 
 ## At a glance
 
