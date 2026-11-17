@@ -185,7 +185,14 @@ namespace SharpDTLS.Protocol12
         /// The server's username-protection public key (RFC 8492 §4.3). When set the username is sent
         /// encrypted in pwd_protect instead of in the clear.
         /// </summary>
-        public System.Security.Cryptography.ECParameters? PwdProtectionKey { get; set; }
+        public System.Security.Cryptography.ECParameters? PwdProtectionKey
+        {
+            get => _pwdProtectionKey;
+            // the server's private key must not reach the clients
+            set => _pwdProtectionKey = value?.D == null ? value : throw new ArgumentException("A client takes the public key alone (Q), without D.", nameof(value));
+        }
+
+        private System.Security.Cryptography.ECParameters? _pwdProtectionKey;
 
         private bool HavePwd => PwdUsername != null && PwdPassword != null;
 

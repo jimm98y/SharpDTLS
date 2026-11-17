@@ -189,8 +189,16 @@ namespace SharpDTLS.Tests
         {
             var (client, server) = Pair(0xC0B0, TestCredentials.PwdUsername, TestCredentials.PwdPassword);
             server.PwdProtectionKey = PwdCredential.GenerateProtectionKeyPair();
-            client.PwdProtectionKey = PwdCredential.GenerateProtectionKeyPair();
+            var other = PwdCredential.GenerateProtectionKeyPair();
+            client.PwdProtectionKey = new System.Security.Cryptography.ECParameters { Curve = other.Curve, Q = other.Q };
             Assert.IsInstanceOfType<TimeoutException>(Run(client));
+        }
+
+        [TestMethod]
+        public void ProtectedUsername_ClientRefusesThePrivateKey()
+        {
+            var (client, _) = Pair(0xC0B0, TestCredentials.PwdUsername, TestCredentials.PwdPassword);
+            Assert.ThrowsExactly<ArgumentException>(() => client.PwdProtectionKey = PwdCredential.GenerateProtectionKeyPair());
         }
 
         [TestMethod]
