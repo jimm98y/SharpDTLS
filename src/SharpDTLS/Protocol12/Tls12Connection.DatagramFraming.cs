@@ -201,9 +201,7 @@ namespace SharpDTLS.Protocol12
                 if (withCid)
                 {
                     // DTLSInnerPlaintext: content || real_type || zeros
-                    int end = length;
-                    while (end > 0 && buffer[end - 1] == 0)
-                        end--;
+                    int end = ByteSpans.WithoutTrailingZeros(buffer.AsSpan(0, length));
                     if (end == 0)
                         throw new DtlsException(AlertDescription.UnexpectedMessage, "tls12_cid record without a content type.");
                     contentType = buffer[end - 1];

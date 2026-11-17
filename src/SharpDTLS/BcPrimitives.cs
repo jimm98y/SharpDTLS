@@ -204,8 +204,7 @@ namespace SharpDTLS
             ReadOnlySpan<byte> chain = iv;
             for (int i = 0; i < input.Length; i += BlockSize)
             {
-                for (int j = 0; j < BlockSize; j++)
-                    block[j] = (byte)(input[i + j] ^ chain[j]);
+                ByteSpans.Xor(input.Slice(i, BlockSize), chain, block);
                 Process(engine, block, output.Slice(i, BlockSize));
                 chain = output.Slice(i, BlockSize);
             }
@@ -222,8 +221,7 @@ namespace SharpDTLS
             {
                 input.Slice(i, BlockSize).CopyTo(next); // the ciphertext, before an in-place output overwrites it
                 Process(engine, next, block);
-                for (int j = 0; j < BlockSize; j++)
-                    output[i + j] = (byte)(block[j] ^ chain[j]);
+                ByteSpans.Xor(block, chain, output.Slice(i, BlockSize));
                 next.CopyTo(chain);
             }
         }

@@ -201,7 +201,7 @@ namespace SharpDTLS
         private static byte[] NonZero(byte[] secret)
         {
             // RFC 8446 §7.4.2: an all-zero X25519/X448 result means a small-order peer key.
-            if (secret.All(b => b == 0))
+            if (ByteSpans.IsAllZero(secret))
                 throw new DtlsException(AlertDescription.IllegalParameter, "All-zero key exchange result.");
             return secret;
         }

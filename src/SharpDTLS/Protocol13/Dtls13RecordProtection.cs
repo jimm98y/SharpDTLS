@@ -170,9 +170,7 @@ namespace SharpDTLS.Protocol13
             window.Mark(sequenceNumber);
 
             // strip TLSInnerPlaintext zero padding; the last non-zero byte is the content type
-            int end = ciphertext.Length - ctx.Suite.TagLength;
-            while (end > 0 && plaintext[end - 1] == 0)
-                end--;
+            int end = ByteSpans.WithoutTrailingZeros(plaintext.Slice(0, ciphertext.Length - ctx.Suite.TagLength));
             if (end == 0)
                 throw new DtlsException(AlertDescription.UnexpectedMessage, "Record has no content type");
             return end;
@@ -290,9 +288,7 @@ namespace SharpDTLS.Protocol13
             BuildNonce(iv, sequenceNumber, nonce);
             if (!ctx.Protection(fromClient, crypto).Open(nonce, record.Slice(0, 5), ciphertext, plaintext))
                 return -1;
-            int end = ciphertext.Length - ctx.Suite.TagLength;
-            while (end > 0 && plaintext[end - 1] == 0)
-                end--;
+            int end = ByteSpans.WithoutTrailingZeros(plaintext.Slice(0, ciphertext.Length - ctx.Suite.TagLength));
             if (end == 0)
                 throw new DtlsException(AlertDescription.UnexpectedMessage, "Record without a content type.");
             return end;
@@ -309,9 +305,7 @@ namespace SharpDTLS.Protocol13
 
         internal static void BuildNonce(byte[] iv, ulong sequenceNumber, Span<byte> nonce)
         {
-            iv.CopyTo(nonce);
-            for (int i = 0; i < 8; i++)
-                nonce[nonce.Length - 1 - i] ^= (byte)(sequenceNumber >> (8 * i));
+            ByteSpans.XorNonce(iv, sequenceNumber, nonce);
         }
     }
 

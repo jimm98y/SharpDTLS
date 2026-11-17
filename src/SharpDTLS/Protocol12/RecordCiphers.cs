@@ -321,10 +321,7 @@ namespace SharpDTLS.Protocol12
 
         private void Nonce(ushort epoch, ulong sequenceNumber, Span<byte> nonce)
         {
-            _iv.CopyTo(nonce);
-            ulong seq = ((ulong)epoch << 48) | sequenceNumber;
-            for (int i = 0; i < 8; i++)
-                nonce[11 - i] ^= (byte)(seq >> (8 * i));
+            ByteSpans.XorNonce(_iv, ((ulong)epoch << 48) | sequenceNumber, nonce);
         }
 
         public void Dispose() => RecordCiphers.Dispose(_aead);

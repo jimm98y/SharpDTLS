@@ -46,8 +46,7 @@ namespace SharpDTLS.Protocol10
             byte[] pSha1 = TlsKdf.PHash(crypto, TlsHashAlgorithm.Sha1, s2, fullSeed, length);
 
             byte[] result = new byte[length];
-            for (int i = 0; i < length; i++)
-                result[i] = (byte)(pMd5[i] ^ pSha1[i]);
+            ByteSpans.Xor(pMd5, pSha1, result);
             return result;
         }
 
