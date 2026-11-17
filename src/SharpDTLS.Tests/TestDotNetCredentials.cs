@@ -219,7 +219,7 @@ namespace SharpDTLS.Tests
             }
         }
 
-        private static async Task<ushort> Connect(TlsServer server, Action<TlsClient> configure)
+        internal static async Task<ushort> Connect(TlsServer server, Action<TlsClient> configure)
         {
             var listener = new TcpListener(IPAddress.Loopback, 0);
             listener.Start();

@@ -88,6 +88,16 @@ new ServerCredentials(null, pkcs8PrivateKey)
 
 A PSK-only server passes `null` credentials.
 
+**Self-signed certificates.** For tests, demos and peers that pin the certificate, the library makes
+one for you, as a server's credentials or a client's:
+
+```cs
+var rsa = CertificateBuilder.CreateSelfSigned("example.test");                            // RSA-2048
+var ec = CertificateBuilder.CreateSelfSigned("example.test", ECCurve.NamedCurves.nistP384); // any named curve
+```
+
+It works on every framework, and `NetTlsCrypto` signs with it too (through BouncyCastle).
+
 **Lists are copied when set.** `server.IntermediateCertificates`, `server.ClientCertificateAuthorities`
 and `client.CertificateAuthorities` are converted when you assign them. To change them, assign a new
 list; adding to the old one has no effect.
