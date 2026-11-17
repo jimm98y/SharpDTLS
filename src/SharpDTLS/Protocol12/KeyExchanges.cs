@@ -59,7 +59,7 @@ namespace SharpDTLS.Protocol12
     internal interface IFixedDhServerKeyExchange : IServerKeyExchange
     {
         /// <summary>The ClientKeyExchange was empty and the client's certificate key is its key agreement key.</summary>
-        byte[] ProcessFixedClientKeyExchange(AsymmetricKeyParameter clientPublicKey);
+        byte[] ProcessFixedClientKeyExchange(TlsPublicKey clientPublicKey);
     }
 
     internal enum ServerKeyExchangeRequirement
@@ -89,7 +89,7 @@ namespace SharpDTLS.Protocol12
     internal interface IFixedDhClientKeyExchange : IClientKeyExchange
     {
         /// <summary>Whether <paramref name="clientKey"/> can be used for fixed (EC)DH client authentication.</summary>
-        bool SupportsFixedClientKey(AsymmetricKeyParameter clientKey);
+        bool SupportsFixedClientKey(TlsPublicKey clientKey);
 
         /// <summary>Fixed (EC)DH: the premaster secret from the client's static key; the ClientKeyExchange is empty.</summary>
         /// <paramref name="agree"/> is the client key's static (EC)DH with the server's public value.
@@ -101,7 +101,7 @@ namespace SharpDTLS.Protocol12
         public ITlsCrypto Crypto { get; set; } = BouncyCastleTlsCrypto.Default;
         public ClientHelloMessage ClientHello { get; set; }
         /// <summary>The public key of the server's certificate (or raw public key); its private key's operations are below.</summary>
-        public AsymmetricKeyParameter ServerPublicKey { get; set; }
+        public TlsPublicKey ServerPublicKey { get; set; }
         public Func<byte[], byte[]> DecryptPreMasterSecret { get; set; }
         public Func<byte[], byte[]> Agree { get; set; }
         public byte[] PskIdentityHint { get; set; }
@@ -118,7 +118,7 @@ namespace SharpDTLS.Protocol12
     {
         public ITlsCrypto Crypto { get; set; } = BouncyCastleTlsCrypto.Default;
         public ushort ClientHelloVersion { get; set; }
-        public AsymmetricKeyParameter ServerPublicKey { get; set; }
+        public TlsPublicKey ServerPublicKey { get; set; }
         public int MinimumDhPrimeBits { get; set; }
 
         /// <summary>Maps the server's identity hint (possibly empty) to the PSK identity and key.</summary>
@@ -390,7 +390,7 @@ namespace SharpDTLS.Protocol12
         public RsaServerKeyExchange(ServerKeyExchangeContext context)
         {
             _context = context;
-            if (context.ServerPublicKey is not RsaKeyParameters)
+            if (context.ServerPublicKey?.Kind != TlsKeyKind.Rsa)
                 throw new DtlsException(AlertDescription.InternalError, "RSA key exchange needs an RSA certificate.");
         }
 
@@ -455,7 +455,7 @@ namespace SharpDTLS.Protocol12
         // PreMasterSecret = client_version (from ClientHello) || random[46], RSA PKCS #1 v1.5 encrypted.
         public byte[] CreateClientKeyExchange(out byte[] preMasterSecret)
         {
-            if (_context.ServerPublicKey is not RsaKeyParameters key)
+            if (_context.ServerPublicKey is not { Kind: TlsKeyKind.Rsa } key)
                 throw new DtlsException(AlertDescription.UnsupportedCertificate, "RSA key exchange needs an RSA server certificate.");
 
             preMasterSecret = new byte[48];
@@ -463,7 +463,7 @@ namespace SharpDTLS.Protocol12
             preMasterSecret[0] = (byte)(_context.ClientHelloVersion >> 8);
             preMasterSecret[1] = (byte)_context.ClientHelloVersion;
 
-            return new TlsWriter().WriteOpaque16(_context.Crypto.EncryptPreMasterSecret(Certificates.Spki(key), preMasterSecret)).ToArray();
+            return new TlsWriter().WriteOpaque16(_context.Crypto.EncryptPreMasterSecret(key.Spki, preMasterSecret)).ToArray();
         }
     }
 
@@ -590,7 +590,7 @@ namespace SharpDTLS.Protocol12
 
         public StaticDhServerKeyExchange(ServerKeyExchangeContext context)
         {
-            _key = context.ServerPublicKey as DHPublicKeyParameters
+            _key = context.ServerPublicKey?.Bc as DHPublicKeyParameters
                 ?? throw new DtlsException(AlertDescription.InternalError, "Static DH needs a DH certificate.");
             _agree = context.Agree;
         }
@@ -607,9 +607,9 @@ namespace SharpDTLS.Protocol12
             return _agree(clientY);
         }
 
-        public byte[] ProcessFixedClientKeyExchange(AsymmetricKeyParameter clientPublicKey)
+        public byte[] ProcessFixedClientKeyExchange(TlsPublicKey clientPublicKey)
         {
-            if (clientPublicKey is not DHPublicKeyParameters client || !client.Parameters.P.Equals(_key.Parameters.P) || !client.Parameters.G.Equals(_key.Parameters.G))
+            if (clientPublicKey?.Bc is not DHPublicKeyParameters client || !client.Parameters.P.Equals(_key.Parameters.P) || !client.Parameters.G.Equals(_key.Parameters.G))
                 throw new DtlsException(AlertDescription.IllegalParameter, "Client DH certificate does not use the server's DH parameters.");
             return _agree(client.Y.ToByteArrayUnsigned());
         }
@@ -621,7 +621,7 @@ namespace SharpDTLS.Protocol12
 
         public StaticDhClientKeyExchange(ClientKeyExchangeContext context)
         {
-            _serverKey = context.ServerPublicKey as DHPublicKeyParameters
+            _serverKey = context.ServerPublicKey?.Bc as DHPublicKeyParameters
                 ?? throw new DtlsException(AlertDescription.UnsupportedCertificate, "Static DH needs a DH server certificate.");
             if (_serverKey.Parameters.P.BitLength < context.MinimumDhPrimeBits)
                 throw new DtlsException(AlertDescription.InsufficientSecurity, "Server DH prime is too small.");
@@ -642,8 +642,8 @@ namespace SharpDTLS.Protocol12
             return new TlsWriter().WriteOpaque16(y.ToByteArrayUnsigned()).ToArray();
         }
 
-        public bool SupportsFixedClientKey(AsymmetricKeyParameter clientKey)
-            => clientKey is DHKeyParameters dh && dh.Parameters.P.Equals(_serverKey.Parameters.P) && dh.Parameters.G.Equals(_serverKey.Parameters.G);
+        public bool SupportsFixedClientKey(TlsPublicKey clientKey)
+            => clientKey?.Bc is DHKeyParameters dh && dh.Parameters.P.Equals(_serverKey.Parameters.P) && dh.Parameters.G.Equals(_serverKey.Parameters.G);
 
         // ClientDiffieHellmanPublic, implicit: empty (the client's DH key is in its certificate)
         public byte[] CreateFixedClientKeyExchange(Func<byte[], byte[]> agree, out byte[] preMasterSecret)
@@ -688,7 +688,7 @@ namespace SharpDTLS.Protocol12
 
         public StaticEcdhServerKeyExchange(ServerKeyExchangeContext context)
         {
-            _key = context.ServerPublicKey as ECPublicKeyParameters
+            _key = context.ServerPublicKey?.Bc as ECPublicKeyParameters
                 ?? throw new DtlsException(AlertDescription.InternalError, "Static ECDH needs an EC certificate.");
             _agree = context.Agree;
         }
@@ -705,9 +705,9 @@ namespace SharpDTLS.Protocol12
             return _agree(point);
         }
 
-        public byte[] ProcessFixedClientKeyExchange(AsymmetricKeyParameter clientPublicKey)
+        public byte[] ProcessFixedClientKeyExchange(TlsPublicKey clientPublicKey)
         {
-            if (clientPublicKey is not ECPublicKeyParameters client || !client.Parameters.Equals(_key.Parameters))
+            if (clientPublicKey?.Bc is not ECPublicKeyParameters client || !client.Parameters.Equals(_key.Parameters))
                 throw new DtlsException(AlertDescription.IllegalParameter, "Client EC certificate is not on the server's curve.");
             return _agree(client.Q.GetEncoded(false));
         }
@@ -719,7 +719,7 @@ namespace SharpDTLS.Protocol12
 
         public StaticEcdhClientKeyExchange(ClientKeyExchangeContext context)
         {
-            _serverKey = context.ServerPublicKey as ECPublicKeyParameters
+            _serverKey = context.ServerPublicKey?.Bc as ECPublicKeyParameters
                 ?? throw new DtlsException(AlertDescription.UnsupportedCertificate, "Static ECDH needs an EC server certificate.");
         }
 
@@ -730,8 +730,8 @@ namespace SharpDTLS.Protocol12
         public void ReadServerParams(TlsReader reader)
             => throw new DtlsException(AlertDescription.UnexpectedMessage, "Static ECDH has no ServerKeyExchange.");
 
-        public bool SupportsFixedClientKey(AsymmetricKeyParameter clientKey)
-            => clientKey is ECKeyParameters ec && ec.Parameters.Equals(_serverKey.Parameters);
+        public bool SupportsFixedClientKey(TlsPublicKey clientKey)
+            => clientKey?.Bc is ECKeyParameters ec && ec.Parameters.Equals(_serverKey.Parameters);
 
         // ClientECDiffieHellmanPublic, implicit: empty (the client's EC key is in its certificate)
         public byte[] CreateFixedClientKeyExchange(Func<byte[], byte[]> agree, out byte[] preMasterSecret)

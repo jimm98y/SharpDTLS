@@ -11,6 +11,9 @@ namespace SharpDTLS.Tests
     {
         public static X509Certificate2 Net(this BcX509Certificate certificate) => Certificates.ToNet(certificate);
 
+        /// <summary>An engine's certificate as BouncyCastle's, to compare with the tests' (equal of the same DER).</summary>
+        public static BcX509Certificate Bc(this X509Certificate2 certificate) => Certificates.ToBc(certificate);
+
         public static X509Certificate2[] Net(this IEnumerable<BcX509Certificate> certificates) => certificates.Select(Net).ToArray();
 
         public static bool Equivalent(this X500DistinguishedName name, X509Name other) => X509Name.GetInstance(name.RawData).Equivalent(other);

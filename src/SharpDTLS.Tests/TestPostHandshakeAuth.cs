@@ -83,7 +83,7 @@ namespace SharpDTLS.Tests
             Assert.IsTrue(s.Connection.AllowsPostHandshakeAuthentication);
             Assert.IsNull(s.Connection.ClientCertificate);
             Assert.IsTrue(Authenticate(s), s.ServerFailed.Task.IsCompleted ? s.ServerFailed.Task.Result.ToString() : "no answer");
-            Assert.AreEqual(s.Client.ClientCertificate, s.Connection.ClientCertificate);
+            Assert.AreEqual(s.Client.ClientCertificate, s.Connection.ClientCertificate.Bc());
             AssertDataFlows(s, "after authentication");
         }
 
@@ -191,7 +191,7 @@ namespace SharpDTLS.Tests
             connection.PostHandshakeAuthenticationCompleted += (_, _) => completed.TrySetResult(true);
             connection.RequestClientCertificate();
             Assert.IsTrue(completed.Task.Wait(Timeout), client.Output);
-            Assert.AreEqual(cert, connection.ClientCertificate);
+            Assert.AreEqual(cert, connection.ClientCertificate.Bc());
         }
 
         [TestCategory("Interop")]

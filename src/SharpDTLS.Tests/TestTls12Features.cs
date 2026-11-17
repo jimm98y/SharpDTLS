@@ -231,7 +231,7 @@ namespace SharpDTLS.Tests
                 $"s_client -tls1_2 -connect 127.0.0.1:{tlsServer.LocalEndpoint.Port} -cert {clientCertPath} -key {clientKeyPath} -cert_chain {Path.Combine(dir, "int.pem")} -alpn h2 -servername server.test -CAfile {chain} -verify_return_error",
                 dir);
             Assert.IsTrue(established.Task.Wait(Timeout), openSslClient.Output);
-            Assert.AreEqual(clientCert, established.Task.Result.ClientCertificate);
+            Assert.AreEqual(clientCert, established.Task.Result.ClientCertificate.Bc());
             Assert.AreEqual("server.test", established.Task.Result.ServerName);
             Assert.IsTrue(openSslClient.WaitForOutput("ALPN protocol: h2", Timeout), openSslClient.Output);
             Assert.IsTrue(openSslClient.WaitForOutput("Verify return code: 0 (ok)", Timeout), openSslClient.Output);

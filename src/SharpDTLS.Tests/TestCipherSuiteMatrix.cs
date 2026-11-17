@@ -188,7 +188,7 @@ namespace SharpDTLS.Tests
             if (suite.RequiresPsk)
                 CollectionAssert.AreEqual(TestCredentials.PskHint, seenHint, "the server's identity hint reaches the client");
             if (suite.IsStaticKeyAgreement)
-                Assert.AreEqual(client.ClientCertificate, server.Connections.Single().ClientCertificate, "fixed (EC)DH client authentication");
+                Assert.AreEqual(client.ClientCertificate, server.Connections.Single().ClientCertificate.Bc(), "fixed (EC)DH client authentication");
 
             for (int i = 0; i < 20; i++)
                 client.SendApplicationData(Encoding.UTF8.GetBytes($"{name}-{i}"));

@@ -290,10 +290,7 @@ namespace SharpDTLS.Protocol12
             if (!IsDtls12)
             {
                 scheme = null;
-                ushort fixedScheme = key is RsaKeyParameters ? SignatureSchemes.RsaPkcs1Md5Sha1
-                    : key is ECKeyParameters ? SignatureSchemes.EcdsaSha1
-                    : key is DsaKeyParameters ? SignatureSchemes.DsaSha1
-                    : throw new DtlsException(AlertDescription.UnsupportedCertificate, "Unsupported key type for DTLS 1.0 signatures.");
+                ushort fixedScheme = Tls10Signatures.FixedScheme(key);
                 return crypto.Sign(credentials, fixedScheme, content);
             }
 
@@ -302,7 +299,7 @@ namespace SharpDTLS.Protocol12
             return crypto.Sign(credentials, scheme.Value, content);
         }
 
-        protected bool Verify(AsymmetricKeyParameter publicKey, byte[] content, ushort? scheme, byte[] signature, IEnumerable<ushort> acceptedSchemes)
+        protected bool Verify(TlsPublicKey publicKey, byte[] content, ushort? scheme, byte[] signature, IEnumerable<ushort> acceptedSchemes)
         {
             if (!IsDtls12)
                 return Tls10Signatures.Verify(publicKey, content, signature, Crypto);

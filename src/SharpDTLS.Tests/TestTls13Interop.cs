@@ -145,7 +145,7 @@ namespace SharpDTLS.Tests
             connection.PostHandshakeAuthenticationCompleted += (_, _) => done.TrySetResult(true);
             connection.RequestClientCertificate();
             Assert.IsTrue(done.Task.Wait(Timeout), wolfClient.Output);
-            Assert.AreEqual(clientCert, connection.ClientCertificate);
+            Assert.AreEqual(clientCert, connection.ClientCertificate.Bc());
         }
 
         // ── BouncyCastle ─────────────────────────────────────────────────────────────────────

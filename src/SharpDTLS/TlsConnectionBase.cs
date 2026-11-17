@@ -121,23 +121,10 @@ namespace SharpDTLS
         /// The X.509 certificate the peer authenticated with (or the one of a resumed session), or null.
         /// It belongs to the connection: do not dispose of it.
         /// </summary>
-        public X509Certificate2 PeerCertificate
-        {
-            get
-            {
-                var peer = BcPeerCertificate;
-                var cached = _peerCertificate;
-                if (peer == null)
-                    return null;
-                if (cached.Bc != peer)
-                    _peerCertificate = cached = (peer, Certificates.ToNet(peer));
-                return cached.Net;
-            }
-        }
+        public X509Certificate2 PeerCertificate => PeerX509Certificate;
 
-        private (BcX509Certificate Bc, X509Certificate2 Net) _peerCertificate;
-
-        internal abstract BcX509Certificate BcPeerCertificate { get; }
+        /// <summary>The engine's peer certificate, parsed once as it arrived.</summary>
+        internal abstract X509Certificate2 PeerX509Certificate { get; }
 
         /// <summary>The application protocol negotiated with ALPN (RFC 7301), or null.</summary>
         public string ApplicationProtocol { get; protected set; }

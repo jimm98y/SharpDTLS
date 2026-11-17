@@ -68,7 +68,7 @@ namespace SharpDTLS.Tests
                 };
                 var error = Handshake(client, s => client.HandshakeFinished += (_, _) => s(), client.BeginHandshake);
                 Assert.IsNull(error, error?.ToString());
-                Assert.AreEqual(expected.BcCertificate, client.ServerCertificate);
+                Assert.AreEqual(expected.BcCertificate, client.ServerCertificate.Bc());
                 Assert.HasCount(1, seen.CertificateAuthorities);
                 Assert.IsTrue(seen.CertificateAuthorities[0].Equivalent(trusted.Root.Cert.SubjectDN));
                 CollectionAssert.AreEqual(new ushort[] { 0x0403 }, seen.SignatureAlgorithmsCert.ToArray());
@@ -86,7 +86,7 @@ namespace SharpDTLS.Tests
             var client = new Dtls12Client(pair.Client) { SignatureAlgorithmsCert = new ushort[] { 0x0403, 0x0804 }, ServerName = "server.test" };
             var error = Handshake(client, s => client.HandshakeFinished += (_, _) => s(), client.BeginHandshake);
             Assert.IsNull(error, error?.ToString());
-            Assert.AreEqual(cert, client.ServerCertificate, "null falls back to the default certificate");
+            Assert.AreEqual(cert, client.ServerCertificate.Bc(), "null falls back to the default certificate");
             Assert.AreEqual("server.test", seen.ServerName);
             CollectionAssert.AreEqual(new ushort[] { 0x0403, 0x0804 }, seen.SignatureAlgorithmsCert.ToArray());
             Assert.IsEmpty(seen.CertificateAuthorities);
@@ -113,7 +113,7 @@ namespace SharpDTLS.Tests
                 };
                 var c = new Dtls12Client(pair.Client) { ClientCredentialsSelector = selector };
                 error = Handshake(c, s => c.HandshakeFinished += (_, _) => s(), c.BeginHandshake);
-                received = () => server.Connections.Single().ClientCertificate;
+                received = () => server.Connections.Single().ClientCertificate.Bc();
             }
             else
             {
@@ -123,7 +123,7 @@ namespace SharpDTLS.Tests
                 };
                 var c = new Dtls13Client(pair.Client) { ClientCredentialsSelector = selector };
                 error = Handshake(c, s => c.HandshakeFinished += (_, _) => s(), c.BeginHandshake);
-                received = () => server.Connections.Single().ClientCertificate;
+                received = () => server.Connections.Single().ClientCertificate.Bc();
             }
             Assert.IsNull(error, error?.ToString());
             Assert.IsTrue(SpinWait.SpinUntil(() => received() != null, Timeout));

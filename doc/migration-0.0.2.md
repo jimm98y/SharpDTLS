@@ -216,8 +216,11 @@ server.Crypto = new NetTlsCrypto();
 - **`BouncyCastleTlsCrypto`** (the default) exports the key and uses BouncyCastle. Every key type and
   protocol version works.
 - **`NetTlsCrypto`** signs and decrypts RSA and ECDSA keys with the certificate's own `RSA` / `ECDsa`,
-  so keys that can't be exported work too.
-  - It falls back to BouncyCastle for PKCS#8 keys, Ed25519, Ed448, DSA, DH and static ECDH.
+  and on .NET 8 and later DSA keys and static ECDH with its own `DSA` / `ECDiffieHellman`, so keys that
+  can't be exported work too: a certificate of the Windows store, a TPM or a smart card, over DTLS and TLS,
+  as the server's or the client's.
+  - It falls back to BouncyCastle for PKCS#8 keys, Ed25519, Ed448, DH, and DSA and static ECDH before
+    .NET 8.
   - It also falls back for the MD5+SHA-1 RSA signature of TLS 1.0/1.1 and DTLS 1.0, which needs an
     exportable key.
   - It doesn't own the keys and isn't disposable.

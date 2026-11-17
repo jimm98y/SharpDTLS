@@ -30,6 +30,7 @@ using System.Linq;
 using System.Net;
 using System.Security.Cryptography;
 
+using X509Certificate2 = System.Security.Cryptography.X509Certificates.X509Certificate2;
 namespace SharpDTLS.Protocol12
 {
     /// <summary>Configuration shared by all connections of a (D)TLS 1.0-1.2 server.</summary>
@@ -166,15 +167,15 @@ namespace SharpDTLS.Protocol12
         private ClientHelloMessage _clientHello;
         private CertificateRequestMessage _certificateRequest;
         private IServerKeyExchange _keyExchange;
-        private X509Certificate _clientCertificate;
-        private AsymmetricKeyParameter _clientPublicKey;
+        private X509Certificate2 _clientCertificate;
+        private TlsPublicKey _clientPublicKey;
         private CertificateType? _serverCertificateType;
         private CertificateType? _clientCertificateType;
         private Dtls12SessionState _resumedSession;
         private byte[] _sessionId = Array.Empty<byte>();
         private bool _issueTicket;
         private CertificateCredentials _credentials;
-        private X509Certificate _certificate;
+        private X509Certificate2 _certificate;
         private IEnumerable<byte[]> _intermediates;
         private byte[] _ocspResponse;
         private bool _serverNameUsed;
@@ -234,9 +235,9 @@ namespace SharpDTLS.Protocol12
         }
 
         /// <summary>The client's certificate, when one was sent.</summary>
-        public X509Certificate ClientCertificate => _clientCertificate;
+        public X509Certificate2 ClientCertificate => _clientCertificate;
 
-        internal override X509Certificate BcPeerCertificate => _clientCertificate;
+        internal override X509Certificate2 PeerX509Certificate => _clientCertificate;
 
         /// <summary>The client's raw public key (DER SubjectPublicKeyInfo, RFC 7250), when it authenticated with one.</summary>
         public byte[] ClientRawPublicKey { get; private set; }
@@ -332,7 +333,7 @@ namespace SharpDTLS.Protocol12
                 ? (selected, selected.IntermediateChain, selected.OcspResponse)
                 : (_settings.Credentials, _settings.IntermediateCertificates?.Select(c => c.GetEncoded()) ?? _settings.Credentials?.IntermediateChain,
                    _settings.OcspResponse ?? (_settings.Credentials as ServerCredentials)?.OcspResponse);
-            _certificate = _credentials?.BcCertificate;
+            _certificate = _credentials?.Certificate;
             if (ch.Extension<StatusRequestExtension>()?.StatusType != StatusRequestExtension.Ocsp)
                 _ocspResponse = null;
 
@@ -552,7 +553,7 @@ namespace SharpDTLS.Protocol12
                 else
                 {
                     var certificate = new CertificateMessage();
-                    certificate.Chain.Add(_certificate.GetEncoded());
+                    certificate.Chain.Add(_certificate.RawData);
                     LocalCertificate = _credentials.Certificate;
                     foreach (var intermediate in _intermediates ?? Array.Empty<byte[]>())
                         certificate.Chain.Add(intermediate);
@@ -627,7 +628,7 @@ namespace SharpDTLS.Protocol12
                     // authentication: no CertificateVerify follows (RFC 5246 §7.4.8, RFC 8422 §3).
                     bool fixedKeyAgreement = body.Length == 0 && _clientCertificate != null && _keyExchange is IFixedDhServerKeyExchange;
                     DeriveKeys(fixedKeyAgreement
-                        ? ((IFixedDhServerKeyExchange)_keyExchange).ProcessFixedClientKeyExchange(_clientCertificate.GetPublicKey())
+                        ? ((IFixedDhServerKeyExchange)_keyExchange).ProcessFixedClientKeyExchange(Tls12ClientConnection.PeerKey(_clientCertificate))
                         : _keyExchange.ProcessClientKeyExchange(body));
                     _state = _clientPublicKey != null && !fixedKeyAgreement ? State.WaitCertificateVerify : State.WaitFinished;
                     break;
@@ -666,12 +667,12 @@ namespace SharpDTLS.Protocol12
             else
             {
                 _clientCertificate = Tls12ClientConnection.ParseCertificate(certificate.Chain[0]);
-                if (!Tls12ClientConnection.CertificateTypeAccepted(_certificateRequest, _clientCertificate.GetPublicKey())
+                if (!Tls12ClientConnection.CertificateTypeAccepted(_certificateRequest, Tls12ClientConnection.PeerKey(_clientCertificate))
                     && !(CipherSuite.IsStaticKeyAgreement && Tls12ClientConnection.FixedTypeAccepted(_certificateRequest, _clientCertificate)))
                     throw new DtlsException(AlertDescription.UnsupportedCertificate, "Client certificate type was not requested.");
                 if (!(_settings.ClientCertificateValidator ?? CertificateValidatorDefaults.Client)(Certificates.Load(certificate.Chain[0]), certificate.Chain))
                     throw new DtlsException(AlertDescription.BadCertificate, "Client certificate was rejected.");
-                _clientPublicKey = _clientCertificate.GetPublicKey();
+                _clientPublicKey = Tls12ClientConnection.PeerKey(_clientCertificate);
             }
 
             AddToTranscript(message);
@@ -719,13 +720,13 @@ namespace SharpDTLS.Protocol12
                 BeginFlight();
                 if (_issueTicket)
                     SendNewSessionTicket(new Dtls12SessionState(Array.Empty<byte>(), NegotiatedVersion, CipherSuite.Id, MasterSecret,
-                        UseEncryptThenMac, _clientCertificate?.GetEncoded(), serverName: ServerName));
+                        UseEncryptThenMac, _clientCertificate?.RawData, serverName: ServerName));
                 SendChangeCipherSpec();
                 SendHandshake(HandshakeType.Finished, ComputeVerifyData(fromClient: false));
 
                 if (_sessionId.Length != 0)
                     _settings.SessionCache.Store(_sessionId, new Dtls12SessionState(_sessionId, NegotiatedVersion, CipherSuite.Id, MasterSecret,
-                        UseEncryptThenMac, _clientCertificate?.GetEncoded(), serverName: ServerName));
+                        UseEncryptThenMac, _clientCertificate?.RawData, serverName: ServerName));
             }
 
             _state = State.Connected;

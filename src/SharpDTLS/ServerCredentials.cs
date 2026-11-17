@@ -33,12 +33,11 @@ namespace SharpDTLS
         {
             Certificate = certificate;
             IntermediateCertificates = intermediateCertificates ?? Array.Empty<X509Certificate2>();
-            BcCertificate = Certificates.ToBc(certificate);
             if (keyPair != null)
             {
                 KeyPair = keyPair;
                 BcPrivateKey = keyPair.Private;
-                PublicKey = keyPair.Public;
+                PublicKey = TlsPublicKey.Of(keyPair.Public);
                 return;
             }
             if (pkcs8PrivateKey != null)
@@ -53,7 +52,7 @@ namespace SharpDTLS
                 }
                 HasPkcs8PrivateKey = true;
             }
-            PublicKey = BcCertificate?.GetPublicKey() ?? PublicKeyOf(BcPrivateKey);
+            PublicKey = certificate != null ? TlsPublicKey.Of(certificate) : TlsPublicKey.Of(PublicKeyOf(BcPrivateKey));
         }
 
         /// <summary>Credentials of BouncyCastle's key pair and certificate (null for a raw public key), as the engines and tests take them.</summary>
@@ -72,13 +71,14 @@ namespace SharpDTLS
         public X509Certificate2 Certificate { get; }
         public IList<X509Certificate2> IntermediateCertificates { get; }
 
-        internal BcX509Certificate BcCertificate { get; }
+        /// <summary>The certificate as BouncyCastle's, for the tests.</summary>
+        internal BcX509Certificate BcCertificate => Certificates.ToBc(Certificate);
 
         /// <summary>BouncyCastle's key pair the credentials were made of, or null.</summary>
         internal AsymmetricCipherKeyPair KeyPair { get; }
 
         /// <summary>The public key of the private key: the certificate's, or the raw public key's.</summary>
-        internal AsymmetricKeyParameter PublicKey { get; }
+        internal TlsPublicKey PublicKey { get; }
 
         /// <summary>The private key as BouncyCastle's: of PKCS#8, or exported of the certificate when first needed.</summary>
         internal AsymmetricKeyParameter BcPrivateKey;

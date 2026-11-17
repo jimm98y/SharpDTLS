@@ -444,7 +444,7 @@ namespace SharpDTLS.Tests
             using var client = new OpenSslProcess($"client {transport.LocalEndpoint.Port} -cert {certPath} -key {keyPath}", dir, WolfSsl.Harness);
 
             Assert.IsTrue(handshake.Task.Wait(Timeout), "Handshake did not complete:\n" + client.Output);
-            Assert.AreEqual(clientCert, handshake.Task.Result.ClientCertificate);
+            Assert.AreEqual(clientCert, handshake.Task.Result.ClientCertificate.Bc());
         }
 
         private static bool Contains(List<string> list, string text)

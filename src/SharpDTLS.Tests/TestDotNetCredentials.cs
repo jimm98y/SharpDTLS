@@ -82,6 +82,18 @@ namespace SharpDTLS.Tests
             Assert.AreEqual(TlsVersion.Tls12, await Connect(server, c => { c.MaximumVersion = TlsVersion.Tls12; c.CipherSuites = suites; c.Crypto = netCrypto ? new NetTlsCrypto() : null; }));
         }
 
+        /// <summary>Static ECDH (ECDH_ECDSA) of the certificate's own EC key: .NET's ECDiffieHellman with NetTlsCrypto.</summary>
+        [TestMethod]
+        [DataRow(false)]
+        [DataRow(true)]
+        public async Task StaticEcdh(bool netCrypto)
+        {
+            using var certificate = SelfSigned(ecdsa: true);
+            var suites = new ushort[] { 0xC02D }; // TLS_ECDH_ECDSA_WITH_AES_128_GCM_SHA256
+            using var server = new TlsServer(new ServerCredentials(certificate)) { CipherSuites = suites, Crypto = netCrypto ? new NetTlsCrypto() : null };
+            Assert.AreEqual(TlsVersion.Tls12, await Connect(server, c => { c.MaximumVersion = TlsVersion.Tls12; c.CipherSuites = suites; }));
+        }
+
         [TestMethod]
         public async Task AKeyNotExportableIsOfNetTlsCryptoAlone()
         {
@@ -105,6 +117,105 @@ namespace SharpDTLS.Tests
             finally
             {
                 key.Delete();
+            }
+        }
+
+        // A certificate of a named key of the user's store that cannot be exported, as the Windows store, a TPM or a
+        // smart card holds them; the key is deleted with the returned one.
+        private static (X509Certificate2 Certificate, CngKey Key) NotExportable(bool ecdsa, string subject)
+        {
+            var parameters = new CngKeyCreationParameters { ExportPolicy = CngExportPolicies.None };
+            if (!ecdsa)
+                parameters.Parameters.Add(new CngProperty("Length", BitConverter.GetBytes(2048), CngPropertyOptions.None));
+            var key = CngKey.Create(ecdsa ? CngAlgorithm.ECDsaP256 : CngAlgorithm.Rsa, "SharpDTLS.Tests." + Guid.NewGuid(), parameters);
+            var request = ecdsa
+                ? new CertificateRequest(subject, new ECDsaCng(key), HashAlgorithmName.SHA256)
+                : new CertificateRequest(subject, new RSACng(key), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            return (request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1)), key);
+        }
+
+        /// <summary>Server and client certificates of keys that cannot be exported, of NetTlsCrypto, over TLS.</summary>
+        [TestMethod]
+        [DataRow(false, TlsVersion.Tls12)]
+        [DataRow(false, TlsVersion.Tls13)]
+        [DataRow(true, TlsVersion.Tls12)]
+        [DataRow(true, TlsVersion.Tls13)]
+        public async Task KeysNotExportableOverTls(bool ecdsa, ushort version)
+        {
+            if (Environment.OSVersion.Platform != PlatformID.Win32NT)
+                Assert.Inconclusive("CNG keys are Windows'.");
+            var (serverCertificate, serverKey) = NotExportable(ecdsa, "CN=server.cng.test");
+            var (clientCertificate, clientKey) = NotExportable(ecdsa, "CN=client.cng.test");
+            try
+            {
+                X509Certificate2 seenByServer = null;
+                using var server = new TlsServer(new ServerCredentials(serverCertificate))
+                {
+                    Crypto = new NetTlsCrypto(),
+                    RequireClientCertificate = true,
+                    ClientCertificateValidator = (certificate, chain) => (seenByServer = certificate) != null,
+                };
+                Assert.AreEqual(version, await Connect(server, c =>
+                {
+                    c.MaximumVersion = version;
+                    c.ClientCredentials = new CertificateCredentials(clientCertificate);
+                    c.Crypto = new NetTlsCrypto();
+                }));
+                // in TLS 1.3 the client is done before the server has read its certificate
+                Assert.IsTrue(System.Threading.SpinWait.SpinUntil(() => seenByServer != null, Timeout));
+                Assert.AreEqual(clientCertificate.Thumbprint, seenByServer.Thumbprint);
+            }
+            finally
+            {
+                serverKey.Delete();
+                clientKey.Delete();
+            }
+        }
+
+        /// <summary>The same over DTLS 1.2 and 1.3, as WebRTC has it.</summary>
+        [TestMethod]
+        [DataRow(false, DtlsVersion.Dtls12)]
+        [DataRow(false, DtlsVersion.Dtls13)]
+        [DataRow(true, DtlsVersion.Dtls12)]
+        [DataRow(true, DtlsVersion.Dtls13)]
+        public void KeysNotExportableOverDtls(bool ecdsa, ushort version)
+        {
+            if (Environment.OSVersion.Platform != PlatformID.Win32NT)
+                Assert.Inconclusive("CNG keys are Windows'.");
+            var (serverCertificate, serverKey) = NotExportable(ecdsa, "CN=server.cng.test");
+            var (clientCertificate, clientKey) = NotExportable(ecdsa, "CN=client.cng.test");
+            try
+            {
+                var (serverTransport, clientTransport) = MockTransportPair.Create();
+                X509Certificate2 seenByServer = null, seenByClient = null;
+                var server = new DtlsServer(serverTransport, new ServerCredentials(serverCertificate))
+                {
+                    Crypto = new NetTlsCrypto(),
+                    RequireClientCertificate = true,
+                    ClientCertificateValidator = (certificate, chain) => (seenByServer = certificate) != null,
+                };
+                var client = new DtlsClient(clientTransport)
+                {
+                    MaximumVersion = version,
+                    ClientCredentials = new CertificateCredentials(clientCertificate),
+                    Crypto = new NetTlsCrypto(),
+                    ServerCertificateValidator = (certificate, chain) => (seenByClient = certificate) != null,
+                };
+                string received = null;
+                server.ApplicationDataReceived += (connection, data) => received = System.Text.Encoding.ASCII.GetString(data.ToArray());
+                client.HandshakeFinished += (_, _) => client.SendApplicationData(System.Text.Encoding.ASCII.GetBytes("ping"));
+                client.BeginHandshake();
+                Assert.IsTrue(System.Threading.SpinWait.SpinUntil(() => received != null, Timeout));
+                Assert.AreEqual("ping", received);
+                Assert.AreEqual(version, client.NegotiatedVersion);
+                Assert.AreEqual(serverCertificate.Thumbprint, seenByClient.Thumbprint);
+                Assert.AreEqual(clientCertificate.Thumbprint, seenByServer.Thumbprint);
+                client.Close();
+            }
+            finally
+            {
+                serverKey.Delete();
+                clientKey.Delete();
             }
         }
 

@@ -110,7 +110,7 @@ namespace SharpDTLS.Tests
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
             TestTls13.Connect(server.LocalEndpoint, c => { (c.ClientCertificateKeyPair, c.ClientCertificate) = (key, cert); c.ClientIntermediateCertificates = new[] { Pki.Intermediate.Cert }; });
             Assert.IsTrue(established.Task.Wait(Timeout));
-            Assert.AreEqual(cert, established.Task.Result.ClientCertificate);
+            Assert.AreEqual(cert, established.Task.Result.ClientCertificate.Bc());
 
             server.RequireClientCertificate = false;
             var later = new TaskCompletionSource<Tls13ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -127,7 +127,7 @@ namespace SharpDTLS.Tests
             connection.PostHandshakeAuthenticationCompleted += (_, _) => done.TrySetResult(true);
             connection.RequestClientCertificate();
             Assert.IsTrue(done.Task.Wait(Timeout));
-            Assert.AreEqual(cert, connection.ClientCertificate);
+            Assert.AreEqual(cert, connection.ClientCertificate.Bc());
         }
 
         // ── OpenSSL ──────────────────────────────────────────────────────────────────────────
@@ -229,7 +229,7 @@ namespace SharpDTLS.Tests
             using (var client = new OpenSslProcess($"s_client -tls1_3 -connect 127.0.0.1:{server.LocalEndpoint.Port} -cert {clientCertPath} -key {clientKeyPath} -cert_chain {Path.Combine(f.Dir, "int.pem")}", f.Dir))
             {
                 Assert.IsTrue(established.Task.Wait(Timeout), client.Output);
-                Assert.AreEqual(clientCert, established.Task.Result.ClientCertificate);
+                Assert.AreEqual(clientCert, established.Task.Result.ClientCertificate.Bc());
             }
 
             // OpenSSL resuming with 0-RTT data: we decline early data and must skip its records.

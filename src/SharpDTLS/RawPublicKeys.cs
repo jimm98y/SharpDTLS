@@ -143,14 +143,15 @@ namespace SharpDTLS
         }
 
         /// <summary>The DER SubjectPublicKeyInfo of <paramref name="publicKey"/>.</summary>
-        public static byte[] Encode(AsymmetricKeyParameter publicKey)
-            => SubjectPublicKeyInfoFactory.CreateSubjectPublicKeyInfo(publicKey).GetEncoded();
+        public static byte[] Encode(TlsPublicKey publicKey) => publicKey.Spki;
 
-        public static AsymmetricKeyParameter Decode(byte[] subjectPublicKeyInfo)
+        public static TlsPublicKey Decode(byte[] subjectPublicKeyInfo)
         {
             try
             {
-                return PublicKeyFactory.CreateKey(subjectPublicKeyInfo);
+                var key = TlsPublicKey.FromSpki(subjectPublicKeyInfo);
+                _ = key.Bc; // a key of a known algorithm, whole
+                return key;
             }
             catch (Exception ex)
             {

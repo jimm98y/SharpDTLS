@@ -445,7 +445,7 @@ namespace SharpDTLS.Tests
             h.Handshake();
 
             Assert.IsNotNull(h.ServerConnection.ClientCertificate);
-            Assert.AreEqual(cert, h.ServerConnection.ClientCertificate);
+            Assert.AreEqual(cert, h.ServerConnection.ClientCertificate.Bc());
         }
 
         [TestMethod]

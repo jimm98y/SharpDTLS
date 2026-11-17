@@ -180,7 +180,7 @@ namespace SharpDTLS.Tests
             Assert.AreEqual("pong:ping", bcClient.Result);
             Assert.AreEqual(id, connection.CipherSuite.Id);
             if (suite.IsStaticKeyAgreement)
-                Assert.AreEqual(fixedCertificate, connection.ClientCertificate, "fixed (EC)DH client authentication");
+                Assert.AreEqual(fixedCertificate, connection.ClientCertificate.Bc(), "fixed (EC)DH client authentication");
         }
     }
 }

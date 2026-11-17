@@ -215,9 +215,9 @@ namespace SharpDTLS
 
     /// <summary>
     /// An <see cref="ITlsCrypto"/> that signs and decrypts with the certificate's own <see cref="RSA"/> or <see cref="ECDsa"/>,
-    /// so its key need not be exportable (the Windows certificate store, smart cards, HSMs). What .NET has no key for
-    /// (PKCS#8 keys, Ed25519, Ed448, DSA, DH, static ECDH) and the MD5 || SHA-1 RSA signature of TLS 1.0/1.1 are left to
-    /// <see cref="BouncyCastleTlsCrypto"/>. RSA key transport is the platform's PKCS#1 v1.5 decryption, whose failures may
+    /// and on .NET 8+ its own <see cref="DSA"/> and <see cref="ECDiffieHellman"/> (static ECDH), so its key need not be
+    /// exportable (the Windows certificate store, a TPM, smart cards, HSMs). What .NET has no key for (PKCS#8 keys, Ed25519,
+    /// Ed448, DH) and the MD5 || SHA-1 RSA signature of TLS 1.0/1.1 are left to <see cref="BouncyCastleTlsCrypto"/>. RSA key transport is the platform's PKCS#1 v1.5 decryption, whose failures may
     /// take longer than successes; prefer the ECDHE and DHE cipher suites, as the defaults do.
     /// On .NET 8 and later, records are protected by .NET's AES-GCM, AES-CCM and ChaCha20-Poly1305 where the platform has
     /// them, which allocate nothing per record, and hashed by .NET's hashes and HMACs.
@@ -256,7 +256,46 @@ namespace SharpDTLS
                         new Org.BouncyCastle.Asn1.DerInteger(new BigInteger(1, rs, half, half))).GetEncoded();
                 }
             }
+#if NETCOREAPP
+            else if (hash.Name != null && (scheme & 0xFF) == 2)
+            {
+                using var dsa = credentials.Certificate.GetDSAPrivateKey();
+                if (dsa != null)
+                    return dsa.SignData(content, hash, DSASignatureFormat.Rfc3279DerSequence);
+            }
+#endif
             return base.Sign(credentials, scheme, content);
+        }
+
+        // Static ECDH (the ECDH_ECDSA and ECDH_RSA suites) of the certificate's own key, on .NET 8+
+        public override byte[] Agree(CertificateCredentials credentials, byte[] peerPublicKey)
+        {
+#if NETCOREAPP
+            using var ecdh = OwnKey(credentials) ? credentials.Certificate.GetECDiffieHellmanPrivateKey() : null;
+            if (ecdh != null)
+            {
+                var curve = ecdh.ExportParameters(false).Curve;
+                int fieldLength = (peerPublicKey.Length - 1) / 2;
+                if (peerPublicKey.Length < 3 || peerPublicKey[0] != 0x04 || peerPublicKey.Length != 1 + 2 * fieldLength)
+                    throw new DtlsException(AlertDescription.IllegalParameter, "Invalid EC point encoding.");
+                var peer = new ECParameters
+                {
+                    Curve = curve,
+                    Q = new ECPoint { X = peerPublicKey.AsSpan(1, fieldLength).ToArray(), Y = peerPublicKey.AsSpan(1 + fieldLength).ToArray() },
+                };
+                try
+                {
+                    // the import refuses a point off the curve
+                    using var peerKey = ECDiffieHellman.Create(peer);
+                    return ecdh.DeriveRawSecretAgreement(peerKey.PublicKey);
+                }
+                catch (CryptographicException ex)
+                {
+                    throw new DtlsException(AlertDescription.IllegalParameter, "EC point is not on the curve.", ex);
+                }
+            }
+#endif
+            return base.Agree(credentials, peerPublicKey);
         }
 
         public override byte[] DecryptPreMasterSecret(CertificateCredentials credentials, byte[] encrypted)

@@ -30,6 +30,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Net;
 
+using X509Certificate2 = System.Security.Cryptography.X509Certificates.X509Certificate2;
 namespace SharpDTLS.Protocol13
 {
     /// <summary>
@@ -56,8 +57,8 @@ namespace SharpDTLS.Protocol13
         private State _state = State.Start;
         private ClientHelloDatagram _clientHello;
         private CertificateRequestDatagram _certificateRequest;
-        private X509Certificate _clientCertificate;
-        private AsymmetricKeyParameter _clientPublicKey;
+        private X509Certificate2 _clientCertificate;
+        private TlsPublicKey _clientPublicKey;
         private CertificateType? _serverCertificateType;
         private CertificateType? _clientCertificateType;
         private byte[] _psk;
@@ -69,7 +70,7 @@ namespace SharpDTLS.Protocol13
         private Dtls13TicketState _ticketState;
         private Dtls13CryptoContext _earlyKeys;
         private CertificateCredentials _credentials;
-        private X509Certificate _certificate;
+        private X509Certificate2 _certificate;
         private IEnumerable<byte[]> _intermediates;
         private bool _serverNameUsed;
         private ITlsExtension _recordSizeResponse;
@@ -124,9 +125,9 @@ namespace SharpDTLS.Protocol13
         public override bool EarlyDataAccepted => _earlyDataAccepted;
 
         /// <summary>The client's certificate, when one was sent.</summary>
-        public X509Certificate ClientCertificate => _clientCertificate;
+        public X509Certificate2 ClientCertificate => _clientCertificate;
 
-        internal override X509Certificate BcPeerCertificate => _clientCertificate;
+        internal override X509Certificate2 PeerX509Certificate => _clientCertificate;
 
         /// <summary>The client's raw public key (DER SubjectPublicKeyInfo, RFC 7250), when it authenticated with one.</summary>
         public byte[] ClientRawPublicKey { get; private set; }
@@ -204,7 +205,7 @@ namespace SharpDTLS.Protocol13
                     ? (selected, selected.IntermediateChain, selected.OcspResponse)
                     : (_server.Credentials, _server.IntermediateCertificates?.Select(c => c.GetEncoded()) ?? _server.Credentials?.IntermediateChain,
                        _server.OcspResponse ?? (_server.Credentials as ServerCredentials)?.OcspResponse);
-                _certificate = _credentials?.BcCertificate;
+                _certificate = _credentials?.Certificate;
                 if (_clientHello.Extensions.OfType<StatusRequestExtension>().FirstOrDefault()?.StatusType != StatusRequestExtension.Ocsp)
                     _ocspResponse = null;
 
@@ -321,7 +322,7 @@ namespace SharpDTLS.Protocol13
                     ExternalPskIdentity = identity;
                 if (clientCertificate != null)
                 {
-                    _clientCertificate = new X509CertificateParser().ReadCertificate(clientCertificate);
+                    _clientCertificate = Certificates.Load(clientCertificate);
                     Session.ClientCertificateBytes = clientCertificate;
                     Session.PeerCertificate = clientCertificate;
                 }
@@ -441,7 +442,7 @@ namespace SharpDTLS.Protocol13
                 }
                 else
                 {
-                    chain.Add(_certificate.GetEncoded());
+                    chain.Add(_certificate.RawData);
                     LocalCertificate = _credentials.Certificate;
                     chain.AddRange(_intermediates ?? Array.Empty<byte[]>());
                 }
@@ -619,19 +620,10 @@ namespace SharpDTLS.Protocol13
                         break;
                     }
 
-                    try
-                    {
-                        _clientCertificate = new X509CertificateParser().ReadCertificate(certificate.Certificate);
-                    }
-                    catch (Exception ex)
-                    {
-                        throw new DtlsException(AlertDescription.BadCertificate, "Client certificate could not be parsed.", ex);
-                    }
-                    if (_clientCertificate == null)
-                        throw new DtlsException(AlertDescription.BadCertificate, "Client certificate could not be parsed.");
+                    _clientCertificate = Certificates.Load(certificate.Certificate);
                     if (!(_server.ClientCertificateValidator ?? CertificateValidatorDefaults.Client)(Certificates.Load(certificate.Certificate), certificate.CertificateChain))
                         throw new DtlsException(AlertDescription.BadCertificate, "Client certificate was rejected.");
-                    _clientPublicKey = _clientCertificate.GetPublicKey();
+                    _clientPublicKey = SharpDTLS.Protocol12.Tls12ClientConnection.PeerKey(_clientCertificate);
 
                     Session.ClientCertificateBytes = certificate.Certificate;
                     Session.PeerCertificate = certificate.Certificate;
@@ -756,9 +748,9 @@ namespace SharpDTLS.Protocol13
             public Dtls13Transcript Transcript;
             public bool Required;
             public int Stage; // 0 Certificate, 1 CertificateVerify, 2 Finished
-            public X509Certificate Certificate;
+            public X509Certificate2 Certificate;
             public byte[] RawPublicKey;
-            public AsymmetricKeyParameter PublicKey;
+            public TlsPublicKey PublicKey;
         }
 
         private PostHandshakeAuthentication _postHandshakeAuthentication;
@@ -832,7 +824,7 @@ namespace SharpDTLS.Protocol13
                         auth.Certificate = SharpDTLS.Protocol12.Tls12ClientConnection.ParseCertificate(certificate.Certificate);
                         if (!(_server.ClientCertificateValidator ?? CertificateValidatorDefaults.Client)(Certificates.Load(certificate.Certificate), certificate.CertificateChain))
                             throw new DtlsException(AlertDescription.BadCertificate, "Client certificate was rejected.");
-                        auth.PublicKey = auth.Certificate.GetPublicKey();
+                        auth.PublicKey = SharpDTLS.Protocol12.Tls12ClientConnection.PeerKey(auth.Certificate);
                         auth.Stage = 1;
                     }
                     auth.Transcript.AddHandshake(message);

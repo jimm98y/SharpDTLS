@@ -29,6 +29,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Security.Cryptography;
 
+using X509Certificate2 = System.Security.Cryptography.X509Certificates.X509Certificate2;
 namespace SharpDTLS.Protocol13
 {
     /// <summary>
@@ -57,8 +58,8 @@ namespace SharpDTLS.Protocol13
         private bool _receivedHelloRetryRequest;
         private ushort _hrrCipherSuite;
         private CertificateRequestDatagram _certificateRequest;
-        private X509Certificate _serverCertificate;
-        private AsymmetricKeyParameter _serverPublicKey;
+        private X509Certificate2 _serverCertificate;
+        private TlsPublicKey _serverPublicKey;
         private CertificateType _clientCertificateType;
         private readonly List<OfferedPsk> _offeredPsks = new();
         private OfferedPsk _selectedPsk;
@@ -211,9 +212,9 @@ namespace SharpDTLS.Protocol13
         private byte[] _srtpMki;
 
         /// <summary>The server's end-entity certificate once the handshake has progressed past Certificate.</summary>
-        public X509Certificate ServerCertificate => _serverCertificate;
+        public X509Certificate2 ServerCertificate => _serverCertificate;
 
-        internal override X509Certificate BcPeerCertificate => _serverCertificate;
+        internal override X509Certificate2 PeerX509Certificate => _serverCertificate;
 
         /// <summary>
         /// Optional server certificate validation. Return false to abort with bad_certificate.
@@ -715,7 +716,7 @@ namespace SharpDTLS.Protocol13
                 IsExternalPsk = _selectedPsk.Ticket == null;
                 if (_selectedPsk.Ticket?.ServerCertificate != null)
                 {
-                    _serverCertificate = new X509CertificateParser().ReadCertificate(_selectedPsk.Ticket.ServerCertificate);
+                    _serverCertificate = Certificates.Load(_selectedPsk.Ticket.ServerCertificate);
                     Session.PeerCertificate = _selectedPsk.Ticket.ServerCertificate;
                 }
             }
@@ -867,18 +868,8 @@ namespace SharpDTLS.Protocol13
             if (ServerCertificateTypes != null && !ServerCertificateTypes.Contains(CertificateType.X509))
                 throw new DtlsException(AlertDescription.UnsupportedCertificate, "The server did not agree to a raw public key.");
 
-            try
-            {
-                _serverCertificate = new X509CertificateParser().ReadCertificate(certificate.Certificate);
-            }
-            catch (Exception ex)
-            {
-                throw new DtlsException(AlertDescription.BadCertificate, "Server certificate could not be parsed.", ex);
-            }
-
-            if (_serverCertificate == null)
-                throw new DtlsException(AlertDescription.BadCertificate, "Server certificate could not be parsed.");
-            _serverPublicKey = _serverCertificate.GetPublicKey();
+            _serverCertificate = Certificates.Load(certificate.Certificate);
+            _serverPublicKey = SharpDTLS.Protocol12.Tls12ClientConnection.PeerKey(_serverCertificate);
 
             Session.PeerCertificate = certificate.Certificate;
             if (!(ServerCertificateValidator ?? DefaultServerCertificateValidator())(Certificates.Load(certificate.Certificate), certificate.CertificateChain))
@@ -965,7 +956,7 @@ namespace SharpDTLS.Protocol13
             var chosen = ClientCredentialsSelector?.Invoke(new CertificateSelectionContext(null,
                 CertificateSelectionContext.ParseNames(request.CertificateAuthorities), request.SignatureAlgorithms, request.SignatureAlgorithmsCert));
             var credentials = chosen ?? ClientCredentials ?? CertificateCredentials.Of(ClientCertificateKeyPair, ClientCertificate, ClientIntermediateCertificates);
-            var clientCertificate = credentials?.BcCertificate;
+            var clientCertificate = credentials?.Certificate;
 
             // Send our certificate only if we can sign with a scheme the server accepts.
             bool rawPublicKey = _clientCertificateType == CertificateType.RawPublicKey;
@@ -975,7 +966,7 @@ namespace SharpDTLS.Protocol13
 
             var chain = !scheme.HasValue ? Array.Empty<byte[]>()
                 : rawPublicKey ? new[] { RawPublicKeys.Encode(credentials.PublicKey) }
-                : new[] { clientCertificate.GetEncoded() }.Concat(credentials.IntermediateChain).ToArray();
+                : new[] { clientCertificate.RawData }.Concat(credentials.IntermediateChain).ToArray();
             if (scheme.HasValue && !rawPublicKey)
                 LocalCertificate = credentials.Certificate;
             var certificate = new CertificateDatagram(chain, request.RequestContext);

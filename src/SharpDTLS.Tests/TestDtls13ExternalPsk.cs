@@ -156,7 +156,7 @@ namespace SharpDTLS.Tests
             var (key, cert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
             var r = Connect(s => s.RequireClientCertificate = true, c => { c.ClientCertificate = cert; c.ClientCertificateKeyPair = key; });
             Assert.IsFalse(r.Client.IsExternalPsk);
-            Assert.AreEqual(cert, r.ServerConnection.ClientCertificate);
+            Assert.AreEqual(cert, r.ServerConnection.ClientCertificate.Bc());
         }
 
         // Extensions of a plaintext hello record (13-byte record header, 12-byte handshake header).

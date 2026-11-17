@@ -78,7 +78,7 @@ namespace SharpDTLS.Protocol12
         /// signature_algorithms extension, RFC 5246 §7.4.1.4.1 defaults apply (SHA-1); SHA-256 is used instead
         /// since all DTLS 1.2 peers in practice accept it.
         /// </summary>
-        public static ushort? SelectScheme(AsymmetricKeyParameter privateKey, IEnumerable<ushort> peerSchemes)
+        public static ushort? SelectScheme(TlsPublicKey privateKey, IEnumerable<ushort> peerSchemes)
         {
             var offered = peerSchemes?.ToHashSet();
             foreach (ushort scheme in Supported)
@@ -89,16 +89,16 @@ namespace SharpDTLS.Protocol12
             return null;
         }
 
-        public static bool IsCompatible(ushort scheme, AsymmetricKeyParameter key)
+        public static bool IsCompatible(ushort scheme, TlsPublicKey key)
         {
             byte signature = (byte)scheme;
             if (scheme >= 0x0804 && scheme <= 0x0806)
-                return key is RsaKeyParameters;
+                return key.Kind == TlsKeyKind.Rsa;
             return signature switch
             {
-                0x01 => key is RsaKeyParameters,
-                0x02 => key is DsaKeyParameters,
-                0x03 => key is ECKeyParameters,
+                0x01 => key.Kind == TlsKeyKind.Rsa,
+                0x02 => key.Kind == TlsKeyKind.Dsa,
+                0x03 => key.Kind == TlsKeyKind.Ec,
                 _ => false,
             };
         }
@@ -111,9 +111,9 @@ namespace SharpDTLS.Protocol12
             return signer.GenerateSignature();
         }
 
-        public static bool Verify(ushort scheme, AsymmetricKeyParameter publicKey, byte[] content, byte[] signature, ITlsCrypto crypto = null)
+        public static bool Verify(ushort scheme, TlsPublicKey publicKey, byte[] content, byte[] signature, ITlsCrypto crypto = null)
             => Supported.Contains(scheme) && IsCompatible(scheme, publicKey)
-               && (crypto ?? BouncyCastleTlsCrypto.Default).Verify(scheme, Certificates.Spki(publicKey), content, signature);
+               && (crypto ?? BouncyCastleTlsCrypto.Default).Verify(scheme, publicKey.Spki, content, signature);
 
         /// <summary>The signature alone, of BouncyCastle: <see cref="BouncyCastleTlsCrypto.Verify"/>.</summary>
         internal static bool VerifySignature(ushort scheme, AsymmetricKeyParameter publicKey, byte[] content, byte[] signature)

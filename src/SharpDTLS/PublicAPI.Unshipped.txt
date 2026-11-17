@@ -1,4 +1,5 @@
 const SharpDTLS.SignatureSchemes.RsaPkcs1Md5Sha1 = 65281 -> ushort
+override SharpDTLS.NetTlsCrypto.Agree(SharpDTLS.CertificateCredentials credentials, byte[] peerPublicKey) -> byte[]
 override SharpDTLS.NetTlsCrypto.CreateAead(SharpDTLS.TlsAeadAlgorithm algorithm, System.ReadOnlySpan<byte> key) -> SharpDTLS.ITlsAead
 override SharpDTLS.NetTlsCrypto.CreateHash(SharpDTLS.TlsHashAlgorithm hash) -> SharpDTLS.ITlsHash
 override SharpDTLS.NetTlsCrypto.CreateHmac(SharpDTLS.TlsHashAlgorithm hash, System.ReadOnlySpan<byte> key) -> SharpDTLS.ITlsHash

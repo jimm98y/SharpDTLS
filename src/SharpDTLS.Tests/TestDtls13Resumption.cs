@@ -136,7 +136,7 @@ namespace SharpDTLS.Tests
             var ticket = WaitForTicket(Connect(keys, null, configureServer: requireCert, configureClient: withCert));
             var r = Connect(keys, ticket, configureServer: requireCert);
             Assert.IsTrue(r.Client.IsResumed);
-            Assert.AreEqual(clientCert, r.ServerConnection.ClientCertificate);
+            Assert.AreEqual(clientCert, r.ServerConnection.ClientCertificate.Bc());
         }
 
         [TestMethod]
