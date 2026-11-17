@@ -22,7 +22,6 @@
 using System;
 using System.Buffers;
 using System.Security.Cryptography.X509Certificates;
-using BcX509Certificate = Org.BouncyCastle.X509.X509Certificate;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Diagnostics;

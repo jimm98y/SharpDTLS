@@ -20,7 +20,6 @@
 // SOFTWARE.
 
 using System;
-using System.IO;
 using System.Linq;
 
 namespace SharpDTLS.Protocol12.Messages

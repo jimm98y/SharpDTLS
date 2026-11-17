@@ -24,7 +24,6 @@ using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Security;
-using System;
 using X509Certificate2 = System.Security.Cryptography.X509Certificates.X509Certificate2;
 
 namespace SharpDTLS

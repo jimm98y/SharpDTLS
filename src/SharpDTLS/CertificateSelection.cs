@@ -25,7 +25,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography.X509Certificates;
-using BcX509Certificate = Org.BouncyCastle.X509.X509Certificate;
 
 namespace SharpDTLS
 {

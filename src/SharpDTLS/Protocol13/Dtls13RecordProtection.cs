@@ -19,7 +19,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-using SharpDTLS.Protocol13.DTLS13;
 using System;
 using System.Buffers.Binary;
 

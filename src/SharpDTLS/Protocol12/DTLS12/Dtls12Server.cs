@@ -25,7 +25,6 @@ using SharpDTLS.Protocol12.Messages;
 using SharpDTLS.UDP;
 using System;
 using System.Linq;
-using System.Net;
 
 namespace SharpDTLS.Protocol12.DTLS12
 {

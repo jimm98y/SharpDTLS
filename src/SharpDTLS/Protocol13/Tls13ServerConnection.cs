@@ -19,12 +19,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 // SOFTWARE.
 
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.X509;
 using SharpDTLS.Protocol13.DTLS13;
 using SharpDTLS.Protocol13.Messages;
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;

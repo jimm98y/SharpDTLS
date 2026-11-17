@@ -24,7 +24,6 @@ using SharpDTLS.Protocol12.TLS12;
 using SharpDTLS.Protocol13;
 using SharpDTLS.Protocol13.TLS13;
 using System;
-using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
 
