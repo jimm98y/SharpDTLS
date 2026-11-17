@@ -19,8 +19,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 // SOFTWARE.
 
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.X509;
 using SharpDTLS.Protocol12.Messages;
 using SharpDTLS.UDP;
 using System;
@@ -43,7 +41,7 @@ namespace SharpDTLS.Protocol12.DTLS12
         public event TlsDataHandler ApplicationDataReceived;
 
         public Dtls12Server(IServerTransport serverTransport)
-            : this(serverTransport, Dtls12CryptoUtils.GenerateSelfSignedCertificate())
+            : this(serverTransport, SelfSigned.Credentials())
         {
         }
 
@@ -54,10 +52,6 @@ namespace SharpDTLS.Protocol12.DTLS12
         {
         }
 
-        private Dtls12Server(IServerTransport serverTransport, (AsymmetricCipherKeyPair keyPair, X509Certificate certificate) credentials)
-            : this(serverTransport, new ServerCredentials(credentials.keyPair, credentials.certificate))
-        {
-        }
 
         protected override void OnConnectionEstablished(Tls12ServerConnection connection)
             => HandshakeFinished?.Invoke(this, EventArgs.Empty);

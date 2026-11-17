@@ -19,14 +19,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 // SOFTWARE.
 
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Crypto.Digests;
-using Org.BouncyCastle.Crypto.Encodings;
-using Org.BouncyCastle.Crypto.Engines;
-using Org.BouncyCastle.Crypto.Parameters;
-using Org.BouncyCastle.Crypto.Signers;
-using Org.BouncyCastle.Security;
-
 namespace SharpDTLS.Protocol10
 {
     /// <summary>
@@ -36,13 +28,6 @@ namespace SharpDTLS.Protocol10
     /// </summary>
     internal static class Tls10Signatures
     {
-        public static byte[] Sign(AsymmetricKeyParameter privateKey, byte[] content)
-        {
-            ISigner signer = CreateSigner(privateKey);
-            signer.Init(true, privateKey);
-            signer.BlockUpdate(content, 0, content.Length);
-            return signer.GenerateSignature();
-        }
 
         public static bool Verify(TlsPublicKey publicKey, byte[] content, byte[] signature, ITlsCrypto crypto = null)
             => (crypto ?? BouncyCastleTlsCrypto.Default).Verify(FixedScheme(publicKey), publicKey.Spki, content, signature);
@@ -56,56 +41,7 @@ namespace SharpDTLS.Protocol10
             _ => throw new DtlsException(AlertDescription.UnsupportedCertificate, "Unsupported key type for TLS 1.0 signatures."),
         };
 
-        /// <summary>The MD5 || SHA-1 RSA signature, or SHA-1 ECDSA / DSA, of BouncyCastle.</summary>
-        internal static bool VerifySignature(AsymmetricKeyParameter publicKey, byte[] content, byte[] signature)
-        {
-            ISigner signer = CreateSigner(publicKey);
-            signer.Init(false, publicKey);
-            signer.BlockUpdate(content, 0, content.Length);
-            return signer.VerifySignature(signature);
-        }
 
-        private static ISigner CreateSigner(AsymmetricKeyParameter key) => key switch
-        {
-            RsaKeyParameters => new GenericSigner(new Pkcs1Encoding(new RsaBlindedEngine()), new CombinedHash()),
-            ECKeyParameters => SignerUtilities.GetSigner("SHA1WITHECDSA"),
-            DsaKeyParameters => SignerUtilities.GetSigner("SHA1WITHDSA"),
-            _ => throw new DtlsException(AlertDescription.UnsupportedCertificate, "Unsupported key type for DTLS 1.0 signatures."),
-        };
 
-        /// <summary>MD5 || SHA1 as a single 36-byte digest.</summary>
-        private sealed class CombinedHash : IDigest
-        {
-            private readonly MD5Digest _md5 = new();
-            private readonly Sha1Digest _sha1 = new();
-
-            public string AlgorithmName => "MD5andSHA1";
-            public int GetDigestSize() => 36;
-            public int GetByteLength() => 64;
-
-            public void Update(byte input) { _md5.Update(input); _sha1.Update(input); }
-            public void BlockUpdate(byte[] input, int inOff, int inLen) { _md5.BlockUpdate(input, inOff, inLen); _sha1.BlockUpdate(input, inOff, inLen); }
-#if NETCOREAPP
-            public void BlockUpdate(System.ReadOnlySpan<byte> input) { _md5.BlockUpdate(input); _sha1.BlockUpdate(input); }
-#endif
-
-            public int DoFinal(byte[] output, int outOff)
-            {
-                _md5.DoFinal(output, outOff);
-                _sha1.DoFinal(output, outOff + 16);
-                return 36;
-            }
-
-#if NETCOREAPP
-            public int DoFinal(System.Span<byte> output)
-            {
-                _md5.DoFinal(output);
-                _sha1.DoFinal(output.Slice(16));
-                return 36;
-            }
-#endif
-
-            public void Reset() { _md5.Reset(); _sha1.Reset(); }
-        }
     }
 }

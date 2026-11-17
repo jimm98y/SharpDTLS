@@ -112,8 +112,8 @@ namespace SharpDTLS.Tests
             // RFC 5480 §2.1.1: explicit curve parameters are not allowed, and platform validators reject them.
             foreach (var certificate in new[]
             {
-                Dtls12CryptoUtils.GenerateSelfSignedEcCertificate().certificate,
-                Dtls13CryptoUtils.GenerateSelfSignedEcCertificate().certificate,
+                SelfSigned.Ec().certificate,
+                SelfSigned.Ec().certificate,
             })
                 Assert.IsTrue(Org.BouncyCastle.Asn1.X9.X962Parameters.GetInstance(certificate.CertificateStructure.SubjectPublicKeyInfo.Algorithm.Parameters).IsNamedCurve);
 

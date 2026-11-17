@@ -19,8 +19,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 // SOFTWARE.
 
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.X509;
 using SharpDTLS.Protocol13.Messages;
 using SharpDTLS.UDP;
 using System;
@@ -103,7 +101,7 @@ namespace SharpDTLS.Protocol13.DTLS13
         public event EventHandler<Dtls13ConnectionEventArgs> ConnectionClosed;
 
         public Dtls13Server(IServerTransport serverTransport)
-            : this(serverTransport, Dtls13CryptoUtils.GenerateSelfSignedCertificate())
+            : this(serverTransport, SelfSigned.Credentials())
         {
         }
 
@@ -116,10 +114,6 @@ namespace SharpDTLS.Protocol13.DTLS13
             ServerTransport.OnDataReceived += ServerTransport_OnDataReceived;
         }
 
-        private Dtls13Server(IServerTransport serverTransport, (AsymmetricCipherKeyPair keyPair, X509Certificate certificate) credentials)
-            : this(serverTransport, new ServerCredentials(credentials.keyPair, credentials.certificate))
-        {
-        }
 
         public IReadOnlyCollection<Tls13ServerConnection> Connections => _connections.Values.ToList();
 

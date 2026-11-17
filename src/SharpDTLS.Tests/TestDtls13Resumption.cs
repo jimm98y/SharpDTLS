@@ -129,7 +129,7 @@ namespace SharpDTLS.Tests
         public void ClientCertificate_CarriesOverToTheResumedSession()
         {
             var keys = new SessionTicketKeys();
-            var (clientKey, clientCert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
+            var (clientKey, clientCert) = SelfSigned.Ec();
             Action<Dtls13Server> requireCert = s => s.RequireClientCertificate = true;
             Action<Dtls13Client> withCert = c => { c.ClientCredentials = TestCertificates.Credentials(clientKey, clientCert); };
 

@@ -18,7 +18,7 @@ namespace SharpDTLS.Tests
     file static class CertHelper
     {
         public static (AsymmetricCipherKeyPair kp, X509Certificate cert) GenerateEc()
-            => SharpDTLS.Protocol12.Dtls12CryptoUtils.GenerateSelfSignedCertificate();
+            => SelfSigned.Rsa();
     }
 
     // ── DTLS 1.2 message round-trip ────────────────────────────────────────

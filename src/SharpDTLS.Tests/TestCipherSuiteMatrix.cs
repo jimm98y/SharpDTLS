@@ -41,8 +41,8 @@ namespace SharpDTLS.Tests
 
         public static PwdCredential ResolvePwd(string username) => username == PwdUsername ? _pwdCredential.Value : null;
 
-        private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _rsa = new(() => Dtls12CryptoUtils.GenerateSelfSignedCertificate());
-        private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _ecdsa = new(() => SharpDTLS.Protocol13.Dtls13CryptoUtils.GenerateSelfSignedEcCertificate());
+        private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _rsa = new(() => SelfSigned.Rsa());
+        private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _ecdsa = new(() => SelfSigned.Ec());
         private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _dsa = new(GenerateDsa);
         private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _dhRsa = new(() => GenerateDh(_rsa.Value.Item1.Private, "SHA256WITHRSA"));
         private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _dhDss = new(() => GenerateDh(_dsa.Value.Item1.Private, "SHA256WITHDSA"));

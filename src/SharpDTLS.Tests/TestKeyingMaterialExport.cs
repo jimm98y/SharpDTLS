@@ -42,7 +42,7 @@ namespace SharpDTLS.Tests
         {
             OpenSsl.RequireOpenSsl();
             string dir = OpenSsl.NewTempDirectory();
-            var (kp, cert) = Dtls12CryptoUtils.GenerateSelfSignedCertificate();
+            var (kp, cert) = SelfSigned.Rsa();
             string certPath = OpenSsl.WritePem(dir, "cert.pem", cert);
             string keyPath = OpenSsl.WritePem(dir, "key.pem", kp.Private);
             int length = DtlsSrtp.KeyingMaterialLength(profile);
@@ -129,7 +129,7 @@ namespace SharpDTLS.Tests
         {
             WolfSsl.RequireWolfSsl();
             string dir = OpenSsl.NewTempDirectory();
-            var (kp, cert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
+            var (kp, cert) = SelfSigned.Ec();
             string certPath = OpenSsl.WritePem(dir, "cert.pem", cert);
             string keyPath = OpenSsl.WritePem(dir, "key.pem", kp.Private);
             using var server = OpenSslProcess.StartServer(p => $"server {p} {certPath} {keyPath} -cipher {cipher} -srtp {profileName} -export EXPORTER-sharpdtls-test 48", dir, Timeout, out int port, WolfSsl.Harness);

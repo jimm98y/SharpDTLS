@@ -38,7 +38,7 @@ namespace SharpDTLS.Tests
         private static (string Cert, string Key, string Dir) EcFiles()
         {
             string dir = OpenSsl.NewTempDirectory();
-            var (key, cert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
+            var (key, cert) = SelfSigned.Ec();
             return (OpenSsl.WritePem(dir, "cert.pem", cert), OpenSsl.WritePem(dir, "key.pem", key.Private), dir);
         }
 
@@ -124,7 +124,7 @@ namespace SharpDTLS.Tests
         {
             WolfSsl.RequireWolfSsl();
             var f = EcFiles();
-            var (clientKey, clientCert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
+            var (clientKey, clientCert) = SelfSigned.Ec();
             string clientCertPath = OpenSsl.WritePem(f.Dir, "client.pem", clientCert);
             string clientKeyPath = OpenSsl.WritePem(f.Dir, "client-key.pem", clientKey.Private);
 
@@ -160,7 +160,7 @@ namespace SharpDTLS.Tests
             var crypto = new BcTlsCrypto(new SecureRandom());
             if (!TlsUtilities.IsSupportedCipherSuite(crypto, suite))
                 Assert.Inconclusive($"BouncyCastle does not support 0x{suite:X4}");
-            var (key, cert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
+            var (key, cert) = SelfSigned.Ec();
 
             // BouncyCastle server, our client.
             var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -196,7 +196,7 @@ namespace SharpDTLS.Tests
             }
 
             // BouncyCastle client, our server.
-            var (serverKey, serverCert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
+            var (serverKey, serverCert) = SelfSigned.Ec();
             using var ours = new Tls13Server(TestCertificates.Server(serverKey, serverCert)) { CipherSuites = new List<ushort> { suite } };
             ours.ApplicationDataReceived += (conn, e) => conn.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.ToArray())));
             ours.Start(new IPEndPoint(IPAddress.Loopback, 0));

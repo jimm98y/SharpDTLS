@@ -19,8 +19,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 // SOFTWARE.
 
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.X509;
 using SharpDTLS.Protocol12;
 using SharpDTLS.Protocol12.DTLS12;
 using SharpDTLS.Protocol13;
@@ -46,14 +44,10 @@ namespace SharpDTLS
         private readonly ClientHelloReassembler _clientHelloReassembler = new();
 
         public DtlsServer(IServerTransport serverTransport)
-            : this(serverTransport, Dtls13CryptoUtils.GenerateSelfSignedCertificate())
+            : this(serverTransport, SelfSigned.Credentials())
         {
         }
 
-        private DtlsServer(IServerTransport serverTransport, (AsymmetricCipherKeyPair keyPair, X509Certificate certificate) generated)
-            : this(serverTransport, new ServerCredentials(generated.keyPair, generated.certificate))
-        {
-        }
 
         /// <param name="credentials">
         /// The certificate and key, with the intermediates and OCSP staple to send; null for a server of PSK, SRP or PWD alone.

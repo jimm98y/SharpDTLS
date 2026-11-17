@@ -171,7 +171,7 @@ namespace SharpDTLS.Tests
         [TestMethod]
         public void BothSides_ReportTheSameParameters(int version)
         {
-            var clientCredentials = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
+            var clientCredentials = SelfSigned.Ec();
             var r = EngineRun.Connect(version, clientCredentials: clientCredentials);
             Assert.IsNull(r.Error, r.Error?.ToString());
             var client = r.Client;

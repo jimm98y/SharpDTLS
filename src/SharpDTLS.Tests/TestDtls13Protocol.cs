@@ -438,7 +438,7 @@ namespace SharpDTLS.Tests
         [TestMethod]
         public void ClientCertificateRequired_WithHelloRetry_SucceedsWithCertificate()
         {
-            var (kp, cert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
+            var (kp, cert) = SelfSigned.Ec();
             var h = new Harness(
                 configureServer: s => s.RequireClientCertificate = true,
                 configureClient: c => { c.ClientCredentials = TestCertificates.Credentials(kp, cert); });

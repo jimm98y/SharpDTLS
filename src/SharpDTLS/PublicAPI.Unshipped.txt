@@ -4,6 +4,7 @@ override SharpDTLS.NetTlsCrypto.CreateAead(SharpDTLS.TlsAeadAlgorithm algorithm,
 override SharpDTLS.NetTlsCrypto.CreateHash(SharpDTLS.TlsHashAlgorithm hash) -> SharpDTLS.ITlsHash
 override SharpDTLS.NetTlsCrypto.CreateHmac(SharpDTLS.TlsHashAlgorithm hash, System.ReadOnlySpan<byte> key) -> SharpDTLS.ITlsHash
 override SharpDTLS.NetTlsCrypto.CreateKeyShare(ushort group) -> SharpDTLS.ITlsKeyShare
+override SharpDTLS.NetTlsCrypto.CreateKeyShareOnDomainOf(byte[] subjectPublicKeyInfo) -> SharpDTLS.ITlsKeyShare
 override SharpDTLS.NetTlsCrypto.DecryptPreMasterSecret(SharpDTLS.CertificateCredentials credentials, byte[] encrypted) -> byte[]
 override SharpDTLS.NetTlsCrypto.EncryptPreMasterSecret(byte[] subjectPublicKeyInfo, byte[] preMasterSecret) -> byte[]
 override SharpDTLS.NetTlsCrypto.Sign(SharpDTLS.CertificateCredentials credentials, ushort scheme, byte[] content) -> byte[]
@@ -43,9 +44,11 @@ SharpDTLS.ITlsCrypto
 SharpDTLS.ITlsCrypto.Agree(SharpDTLS.CertificateCredentials credentials, byte[] peerPublicKey) -> byte[]
 SharpDTLS.ITlsCrypto.CreateAead(SharpDTLS.TlsAeadAlgorithm algorithm, System.ReadOnlySpan<byte> key) -> SharpDTLS.ITlsAead
 SharpDTLS.ITlsCrypto.CreateBlockCipher(SharpDTLS.TlsBlockCipherAlgorithm algorithm, System.ReadOnlySpan<byte> key) -> SharpDTLS.ITlsBlockCipher
+SharpDTLS.ITlsCrypto.CreateDhKeyShare(byte[] prime, byte[] generator) -> SharpDTLS.ITlsKeyShare
 SharpDTLS.ITlsCrypto.CreateHash(SharpDTLS.TlsHashAlgorithm hash) -> SharpDTLS.ITlsHash
 SharpDTLS.ITlsCrypto.CreateHmac(SharpDTLS.TlsHashAlgorithm hash, System.ReadOnlySpan<byte> key) -> SharpDTLS.ITlsHash
 SharpDTLS.ITlsCrypto.CreateKeyShare(ushort group) -> SharpDTLS.ITlsKeyShare
+SharpDTLS.ITlsCrypto.CreateKeyShareOnDomainOf(byte[] subjectPublicKeyInfo) -> SharpDTLS.ITlsKeyShare
 SharpDTLS.ITlsCrypto.DecryptPreMasterSecret(SharpDTLS.CertificateCredentials credentials, byte[] encrypted) -> byte[]
 SharpDTLS.ITlsCrypto.Encapsulate(ushort group, byte[] encapsulationKey, out byte[] sharedSecret) -> byte[]
 SharpDTLS.ITlsCrypto.EncryptPreMasterSecret(byte[] subjectPublicKeyInfo, byte[] preMasterSecret) -> byte[]
@@ -149,9 +152,11 @@ static SharpDTLS.SrpVerifier.StandardGroups.get -> System.Collections.Generic.IR
 virtual SharpDTLS.BouncyCastleTlsCrypto.Agree(SharpDTLS.CertificateCredentials credentials, byte[] peerPublicKey) -> byte[]
 virtual SharpDTLS.BouncyCastleTlsCrypto.CreateAead(SharpDTLS.TlsAeadAlgorithm algorithm, System.ReadOnlySpan<byte> key) -> SharpDTLS.ITlsAead
 virtual SharpDTLS.BouncyCastleTlsCrypto.CreateBlockCipher(SharpDTLS.TlsBlockCipherAlgorithm algorithm, System.ReadOnlySpan<byte> key) -> SharpDTLS.ITlsBlockCipher
+virtual SharpDTLS.BouncyCastleTlsCrypto.CreateDhKeyShare(byte[] prime, byte[] generator) -> SharpDTLS.ITlsKeyShare
 virtual SharpDTLS.BouncyCastleTlsCrypto.CreateHash(SharpDTLS.TlsHashAlgorithm hash) -> SharpDTLS.ITlsHash
 virtual SharpDTLS.BouncyCastleTlsCrypto.CreateHmac(SharpDTLS.TlsHashAlgorithm hash, System.ReadOnlySpan<byte> key) -> SharpDTLS.ITlsHash
 virtual SharpDTLS.BouncyCastleTlsCrypto.CreateKeyShare(ushort group) -> SharpDTLS.ITlsKeyShare
+virtual SharpDTLS.BouncyCastleTlsCrypto.CreateKeyShareOnDomainOf(byte[] subjectPublicKeyInfo) -> SharpDTLS.ITlsKeyShare
 virtual SharpDTLS.BouncyCastleTlsCrypto.DecryptPreMasterSecret(SharpDTLS.CertificateCredentials credentials, byte[] encrypted) -> byte[]
 virtual SharpDTLS.BouncyCastleTlsCrypto.Encapsulate(ushort group, byte[] encapsulationKey, out byte[] sharedSecret) -> byte[]
 virtual SharpDTLS.BouncyCastleTlsCrypto.EncryptPreMasterSecret(byte[] subjectPublicKeyInfo, byte[] preMasterSecret) -> byte[]

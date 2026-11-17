@@ -95,7 +95,7 @@ namespace SharpDTLS.Tests
         private static readonly TimeSpan Timeout = TestTimeouts.Interop;
 
         private static (AsymmetricCipherKeyPair, X509Certificate) Credentials(bool ec)
-            => ec ? Dtls13CryptoUtils.GenerateSelfSignedEcCertificate() : Dtls13CryptoUtils.GenerateSelfSignedCertificate();
+            => ec ? SelfSigned.Ec() : SelfSigned.Rsa();
 
         private static readonly Dictionary<string, ushort> SuiteIds = new()
         {

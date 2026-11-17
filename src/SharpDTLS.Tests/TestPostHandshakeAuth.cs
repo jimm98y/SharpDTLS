@@ -199,7 +199,7 @@ namespace SharpDTLS.Tests
         {
             WolfSsl.RequireWolfSsl();
             string dir = OpenSsl.NewTempDirectory();
-            var (serverKey, serverCert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
+            var (serverKey, serverCert) = SelfSigned.Ec();
             string certPath = OpenSsl.WritePem(dir, "cert.pem", serverCert);
             string keyPath = OpenSsl.WritePem(dir, "key.pem", serverKey.Private);
             string root = OpenSsl.WritePem(dir, "root.pem", Pki.Root.Cert);

@@ -19,8 +19,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 // SOFTWARE.
 
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Security;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -90,37 +88,10 @@ namespace SharpDTLS.Protocol13
             }
         }
 
-        public static byte[] Sign(ushort scheme, AsymmetricKeyParameter privateKey, byte[] content)
-        {
-            ISigner signer = CreateSigner(scheme);
-            signer.Init(true, privateKey);
-            signer.BlockUpdate(content, 0, content.Length);
-            return signer.GenerateSignature();
-        }
 
         public static bool Verify(ushort scheme, TlsPublicKey publicKey, byte[] content, byte[] signature, ITlsCrypto crypto = null)
             => IsCompatible(scheme, publicKey) && (crypto ?? BouncyCastleTlsCrypto.Default).Verify(scheme, publicKey.Spki, content, signature);
 
-        /// <summary>The signature alone, of BouncyCastle: <see cref="BouncyCastleTlsCrypto.Verify"/>.</summary>
-        internal static bool VerifySignature(ushort scheme, AsymmetricKeyParameter publicKey, byte[] content, byte[] signature)
-        {
-            ISigner signer = CreateSigner(scheme);
-            signer.Init(false, publicKey);
-            signer.BlockUpdate(content, 0, content.Length);
-            return signer.VerifySignature(signature);
-        }
 
-        private static ISigner CreateSigner(ushort scheme) => scheme switch
-        {
-            EcdsaSecp256r1Sha256 => SignerUtilities.GetSigner("SHA256WITHECDSA"),
-            EcdsaSecp384r1Sha384 => SignerUtilities.GetSigner("SHA384WITHECDSA"),
-            EcdsaSecp521r1Sha512 => SignerUtilities.GetSigner("SHA512WITHECDSA"),
-            RsaPssRsaeSha256     => SignerUtilities.GetSigner("SHA256WITHRSAANDMGF1"),
-            RsaPssRsaeSha384     => SignerUtilities.GetSigner("SHA384WITHRSAANDMGF1"),
-            RsaPssRsaeSha512     => SignerUtilities.GetSigner("SHA512WITHRSAANDMGF1"),
-            Ed25519              => SignerUtilities.GetSigner("Ed25519"),
-            Ed448                => SignerUtilities.GetSigner("Ed448"),
-            _ => throw new DtlsException(AlertDescription.IllegalParameter, $"Unsupported signature scheme 0x{scheme:X4}")
-        };
     }
 }

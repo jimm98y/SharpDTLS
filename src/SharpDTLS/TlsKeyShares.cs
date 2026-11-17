@@ -29,7 +29,6 @@ using Org.BouncyCastle.Math;
 using Org.BouncyCastle.Math.EC;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Utilities;
-using SharpDTLS.Protocol12;
 using SharpDTLS.Protocol13;
 using System;
 using System.Linq;
@@ -141,6 +140,36 @@ namespace SharpDTLS
             }
         }
 
+        /// <summary>
+        /// TLS 1.2's finite-field DH on explicit parameters: the public value and the secret without leading zeros (RFC 5246
+        /// §8.1.2), the peer's value checked (1 &lt; Y &lt; p - 1) and a secret of one refused.
+        /// </summary>
+        public static ITlsKeyShare Dh(byte[] prime, byte[] generator)
+        {
+            var parameters = new DHParameters(new BigInteger(1, prime), new BigInteger(1, generator));
+            var (x, y) = DhUtilities.GenerateKeyPair(parameters);
+            return new KeyShare(y.ToByteArrayUnsigned(), peer => DhUtilities.Agree(parameters, x, new BigInteger(1, peer)));
+        }
+
+        /// <summary>An ephemeral key on the curve or DH group of a peer's static key (static ECDH and DH, RFC 8422 §2.1, RFC 5246 §7.4.7.2).</summary>
+        public static ITlsKeyShare OnDomainOf(byte[] subjectPublicKeyInfo)
+        {
+            switch (PublicKeyFactory.CreateKey(subjectPublicKeyInfo))
+            {
+                case ECPublicKeyParameters ec:
+                {
+                    var generator = new ECKeyPairGenerator();
+                    generator.Init(new ECKeyGenerationParameters(ec.Parameters, new SecureRandom()));
+                    var pair = generator.GenerateKeyPair();
+                    return new KeyShare(((ECPublicKeyParameters)pair.Public).Q.GetEncoded(false), peer => StaticEcdh.Agree((ECPrivateKeyParameters)pair.Private, peer));
+                }
+                case DHPublicKeyParameters dh:
+                    return Dh(dh.Parameters.P.ToByteArrayUnsigned(), dh.Parameters.G.ToByteArrayUnsigned());
+                default:
+                    throw new DtlsException(AlertDescription.UnsupportedCertificate, "The peer's key is not a key agreement key.");
+            }
+        }
+
         public static byte[] Encapsulate(ushort group, byte[] encapsulationKey, out byte[] sharedSecret)
         {
             var parameters = MlKemParameters(group);
@@ -244,6 +273,96 @@ namespace SharpDTLS
         {
             if (value == null || value.Length != length)
                 throw new DtlsException(AlertDescription.IllegalParameter, $"Key share is {value?.Length ?? 0} bytes, expected {length}.");
+        }
+    }
+
+    /// <summary>The RFC 7919 FFDHE groups.</summary>
+    internal static class FfdheGroups
+    {
+        public const ushort Ffdhe2048 = 0x0100;
+        public const ushort Ffdhe3072 = 0x0101;
+        public const ushort Ffdhe4096 = 0x0102;
+        public const ushort Ffdhe6144 = 0x0103;
+        public const ushort Ffdhe8192 = 0x0104;
+
+        /// <summary>Groups in preference order (smallest first: all are considered secure, and they are faster).</summary>
+        public static readonly ushort[] Supported = { Ffdhe2048, Ffdhe3072, Ffdhe4096, Ffdhe6144, Ffdhe8192 };
+
+        public static DHParameters Parameters(ushort group) => group switch
+        {
+            Ffdhe2048 => DHStandardGroups.rfc7919_ffdhe2048,
+            Ffdhe3072 => DHStandardGroups.rfc7919_ffdhe3072,
+            Ffdhe4096 => DHStandardGroups.rfc7919_ffdhe4096,
+            Ffdhe6144 => DHStandardGroups.rfc7919_ffdhe6144,
+            Ffdhe8192 => DHStandardGroups.rfc7919_ffdhe8192,
+            _ => throw new ArgumentOutOfRangeException(nameof(group)),
+        };
+
+        /// <summary>The named group whose prime and generator match, or 0 for custom parameters.</summary>
+        public static ushort Identify(BigInteger p, BigInteger g)
+            => Supported.FirstOrDefault(id => Parameters(id).P.Equals(p) && Parameters(id).G.Equals(g));
+
+        /// <inheritdoc cref="Identify(BigInteger, BigInteger)"/>
+        public static ushort Identify(byte[] p, byte[] g) => Identify(new BigInteger(1, p), new BigInteger(1, g));
+
+        /// <summary>The group's prime and generator as TLS 1.2 sends them (unsigned, no leading zeros).</summary>
+        public static byte[] Prime(ushort group) => Parameters(group).P.ToByteArrayUnsigned();
+
+        public static byte[] Generator(ushort group) => Parameters(group).G.ToByteArrayUnsigned();
+    }
+
+    internal static class DhUtilities
+    {
+        public static (BigInteger PrivateX, BigInteger PublicY) GenerateKeyPair(DHParameters parameters)
+        {
+            var generator = new DHKeyPairGenerator();
+            generator.Init(new DHKeyGenerationParameters(new SecureRandom(), parameters));
+            var pair = generator.GenerateKeyPair();
+            var (x, y) = (((DHPrivateKeyParameters)pair.Private).X, ((DHPublicKeyParameters)pair.Public).Y);
+            if (TlsInspector.Current is { } inspector)
+                TlsInspector.KeyExchange(inspector, FfdheGroups.Identify(parameters.P, parameters.G), x.ToByteArrayUnsigned(), y.ToByteArrayUnsigned());
+            return (x, y);
+        }
+
+        /// <summary>Z = Y^x mod p with leading zero bytes stripped (RFC 5246 §8.1.2). Rejects Y outside 1 &lt; Y &lt; p-1.</summary>
+        public static byte[] Agree(DHParameters parameters, BigInteger privateX, BigInteger peerY)
+        {
+            if (peerY.CompareTo(BigInteger.One) <= 0 || peerY.CompareTo(parameters.P.Subtract(BigInteger.One)) >= 0)
+                throw new DtlsException(AlertDescription.IllegalParameter, "Invalid Diffie-Hellman public value.");
+
+            var agreement = new DHBasicAgreement();
+            agreement.Init(new DHPrivateKeyParameters(privateX, parameters));
+            BigInteger z = agreement.CalculateAgreement(new DHPublicKeyParameters(peerY, parameters));
+            if (z.Equals(BigInteger.One))
+                throw new DtlsException(AlertDescription.IllegalParameter, "Degenerate Diffie-Hellman shared secret.");
+            return z.ToByteArrayUnsigned();
+        }
+    }
+
+    internal static class StaticEcdh
+    {
+        /// <summary>The x-coordinate of d·Q, padded to the field size (RFC 8422 §5.10).</summary>
+        public static byte[] Agree(ECPrivateKeyParameters privateKey, byte[] peerPoint)
+        {
+            var domain = privateKey.Parameters;
+            int fieldLength = (domain.Curve.FieldSize + 7) / 8;
+            if (peerPoint == null || peerPoint.Length != 1 + 2 * fieldLength || peerPoint[0] != 0x04)
+                throw new DtlsException(AlertDescription.IllegalParameter, "Invalid EC point encoding.");
+
+            Org.BouncyCastle.Math.EC.ECPoint point;
+            try
+            {
+                point = domain.Curve.DecodePoint(peerPoint);
+            }
+            catch (ArgumentException ex)
+            {
+                throw new DtlsException(AlertDescription.IllegalParameter, "EC point is not on the curve.", ex);
+            }
+
+            var agreement = new ECDHBasicAgreement();
+            agreement.Init(privateKey);
+            return Org.BouncyCastle.Utilities.BigIntegers.AsUnsignedByteArray(fieldLength,
+                agreement.CalculateAgreement(new ECPublicKeyParameters(point, domain)));
         }
     }
 

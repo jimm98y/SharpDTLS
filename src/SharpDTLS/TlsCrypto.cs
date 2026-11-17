@@ -24,8 +24,6 @@ using Org.BouncyCastle.Crypto.Encodings;
 using Org.BouncyCastle.Crypto.Engines;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Security;
-using SharpDTLS.Protocol10;
-using SharpDTLS.Protocol12;
 using SharpDTLS.Protocol13;
 using System;
 using System.Security.Cryptography;
@@ -84,6 +82,18 @@ namespace SharpDTLS
         byte[] Encapsulate(ushort group, byte[] encapsulationKey, out byte[] sharedSecret);
 
         /// <summary>
+        /// TLS 1.2's DHE on the server's explicit parameters (big-endian unsigned): the key share's public value and its
+        /// secret are without leading zeros (RFC 5246 §8.1.2); it refuses a peer value outside 1 &lt; Y &lt; p - 1.
+        /// </summary>
+        ITlsKeyShare CreateDhKeyShare(byte[] prime, byte[] generator);
+
+        /// <summary>
+        /// An ephemeral key on the curve or DH group of the peer's static key (DER SubjectPublicKeyInfo): the client side of
+        /// static ECDH and DH (RFC 8422 §2.1, RFC 5246 §7.4.7.2).
+        /// </summary>
+        ITlsKeyShare CreateKeyShareOnDomainOf(byte[] subjectPublicKeyInfo);
+
+        /// <summary>
         /// Verifies the peer's <paramref name="signature"/> of <paramref name="content"/> with its public key, a DER
         /// SubjectPublicKeyInfo. <paramref name="scheme"/> fits the key (the protocol checks that first); ECDSA signatures
         /// are DER encoded.
@@ -103,12 +113,7 @@ namespace SharpDTLS
         public virtual byte[] Sign(CertificateCredentials credentials, ushort scheme, byte[] content)
         {
             var key = PrivateKey(credentials);
-            return scheme switch
-            {
-                SignatureSchemes.RsaPkcs1Md5Sha1 => Tls10Signatures.Sign(key, content),
-                SignatureSchemes.Ed25519 or SignatureSchemes.Ed448 => Dtls13Signatures.Sign(scheme, key, content),
-                _ => Dtls12Signatures.Sign(scheme, key, content),
-            };
+            return BcSignatures.Sign(scheme, key, content);
         }
 
         public virtual byte[] DecryptPreMasterSecret(CertificateCredentials credentials, byte[] encrypted)
@@ -146,14 +151,13 @@ namespace SharpDTLS
         public virtual byte[] Encapsulate(ushort group, byte[] encapsulationKey, out byte[] sharedSecret)
             => BcKeyShares.Encapsulate(group, encapsulationKey, out sharedSecret);
 
+        public virtual ITlsKeyShare CreateDhKeyShare(byte[] prime, byte[] generator) => BcKeyShares.Dh(prime, generator);
+
+        public virtual ITlsKeyShare CreateKeyShareOnDomainOf(byte[] subjectPublicKeyInfo) => BcKeyShares.OnDomainOf(subjectPublicKeyInfo);
+
         public virtual bool Verify(ushort scheme, byte[] subjectPublicKeyInfo, byte[] content, byte[] signature)
         {
-            var key = PublicKeyFactory.CreateKey(subjectPublicKeyInfo);
-            if (scheme == SignatureSchemes.RsaPkcs1Md5Sha1)
-                return Tls10Signatures.VerifySignature(key, content, signature);
-            return System.Array.IndexOf(Dtls12Signatures.Supported, scheme) >= 0
-                ? Dtls12Signatures.VerifySignature(scheme, key, content, signature)
-                : Dtls13Signatures.VerifySignature(scheme, key, content, signature);
+            return BcSignatures.Verify(scheme, PublicKeyFactory.CreateKey(subjectPublicKeyInfo), content, signature);
         }
 
         public virtual byte[] EncryptPreMasterSecret(byte[] subjectPublicKeyInfo, byte[] preMasterSecret)
@@ -387,6 +391,23 @@ namespace SharpDTLS
             (6, _) or (8, 6) => HashAlgorithmName.SHA512,
             _ => default,
         };
+
+        // static ECDH's ephemeral key on a NIST curve of .NET's ECDiffieHellman on .NET 8+
+        public override ITlsKeyShare CreateKeyShareOnDomainOf(byte[] subjectPublicKeyInfo)
+        {
+#if NETCOREAPP
+            ushort group = TlsPublicKey.FromSpki(subjectPublicKeyInfo).CurveOid switch
+            {
+                "1.2.840.10045.3.1.7" => Dtls13Groups.Secp256r1,
+                "1.3.132.0.34" => Dtls13Groups.Secp384r1,
+                "1.3.132.0.35" => Dtls13Groups.Secp521r1,
+                _ => 0,
+            };
+            if (group != 0)
+                return NetKeyShares.Create(group);
+#endif
+            return base.CreateKeyShareOnDomainOf(subjectPublicKeyInfo);
+        }
 
         // ECDHE of .NET's ECDiffieHellman on .NET 8+; X25519, X448, FFDHE and ML-KEM of BouncyCastle
         public override ITlsKeyShare CreateKeyShare(ushort group)

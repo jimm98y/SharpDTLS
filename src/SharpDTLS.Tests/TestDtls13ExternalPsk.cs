@@ -153,7 +153,7 @@ namespace SharpDTLS.Tests
         [TestMethod]
         public void ClientCertificateRequired_IgnoresExternalPsks()
         {
-            var (key, cert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
+            var (key, cert) = SelfSigned.Ec();
             var r = Connect(s => s.RequireClientCertificate = true, c => { c.ClientCredentials = TestCertificates.Credentials(key, cert); });
             Assert.IsFalse(r.Client.IsExternalPsk);
             Assert.AreEqual(cert, r.ServerConnection.ClientCertificate.Bc());

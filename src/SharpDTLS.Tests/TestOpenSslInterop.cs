@@ -188,7 +188,7 @@ namespace SharpDTLS.Tests
         private static readonly TimeSpan Timeout = TestTimeouts.Interop;
 
         private static (AsymmetricCipherKeyPair, X509Certificate) Credentials(bool ec)
-            => ec ? SharpDTLS.Protocol13.Dtls13CryptoUtils.GenerateSelfSignedEcCertificate() : Dtls12CryptoUtils.GenerateSelfSignedCertificate();
+            => ec ? SelfSigned.Ec() : SelfSigned.Rsa();
 
         [DataRow("ECDHE-RSA-AES128-GCM-SHA256", false, "X25519")]
         [DataRow("ECDHE-RSA-AES256-GCM-SHA384", false, "P-256")]
@@ -471,7 +471,7 @@ namespace SharpDTLS.Tests
         private static readonly TimeSpan Timeout = TestTimeouts.Interop;
 
         private static (AsymmetricCipherKeyPair, X509Certificate) Credentials(bool ec)
-            => ec ? SharpDTLS.Protocol13.Dtls13CryptoUtils.GenerateSelfSignedEcCertificate() : SharpDTLS.Protocol12.Dtls12CryptoUtils.GenerateSelfSignedCertificate();
+            => ec ? SelfSigned.Ec() : SelfSigned.Rsa();
 
         // OpenSSL 3 only allows DTLS 1.0 (SHA-1 / MD5 based) at security level 0.
         [DataRow("ECDHE-RSA-AES128-SHA", false, "X25519")]

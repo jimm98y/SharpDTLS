@@ -395,7 +395,7 @@ namespace SharpDTLS.Protocol12
                 PskResolver = _settings.PskIdentityResolver,
                 SrpVerifierProvider = _settings.SrpVerifierProvider,
                 PwdCredentialProvider = _settings.PwdCredentialProvider,
-                PwdProtectionKey = PwdCredential.PrivateKeyOf(_settings.PwdProtectionKey),
+                PwdProtectionKey = _settings.PwdProtectionKey,
                 PwdContext = () => Concat(ClientRandom, ServerRandom),
             });
 

@@ -37,8 +37,8 @@ namespace SharpDTLS.Tests
             var pair = new ScriptedTransportPair();
             var info = CipherSuites.Get(suite);
             var credentials = info.ServerCertificateType == CertificateKeyType.Ecdsa
-                ? SharpDTLS.Protocol13.Dtls13CryptoUtils.GenerateSelfSignedEcCertificate()
-                : Dtls12CryptoUtils.GenerateSelfSignedCertificate();
+                ? SelfSigned.Ec()
+                : SelfSigned.Rsa();
             var server = new Dtls12Server(pair.Server, TestCertificates.Server(credentials.keyPair, credentials.certificate)) { CipherSuites = new List<ushort> { suite } };
             var client = new Dtls12Client(pair.Client) { CipherSuites = new List<ushort> { suite } };
             var received = new List<string>();

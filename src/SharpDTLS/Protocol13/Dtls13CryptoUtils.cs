@@ -19,15 +19,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 // SOFTWARE.
 
-using Org.BouncyCastle.Asn1.X509;
-using Org.BouncyCastle.Asn1.X9;
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Crypto.Generators;
-using Org.BouncyCastle.Crypto.Operators;
-using Org.BouncyCastle.Crypto.Parameters;
-using Org.BouncyCastle.Math;
-using Org.BouncyCastle.Security;
-using Org.BouncyCastle.X509;
 using System;
 using System.Buffers.Binary;
 using System.Security.Cryptography;
@@ -45,7 +36,7 @@ namespace SharpDTLS.Protocol13
         static Dtls13CryptoUtils()
         {
             _cookieKey = new byte[32];
-            new SecureRandom().NextBytes(_cookieKey);
+            RandomNumberGenerator.Fill(_cookieKey);
         }
 
         // ── Stateless HelloRetryRequest cookie (RFC 8446 §4.2.2) ────────────────────────────────
@@ -112,41 +103,14 @@ namespace SharpDTLS.Protocol13
 
         // ── Certificates and key exchange ───────────────────────────────────────────────────────
 
-        public static (AsymmetricCipherKeyPair keyPair, X509Certificate certificate) GenerateSelfSignedCertificate()
-        {
-            var rsaGenerator = new RsaKeyPairGenerator();
-            rsaGenerator.Init(new KeyGenerationParameters(new SecureRandom(), 2048));
-            var keyPair = rsaGenerator.GenerateKeyPair();
-            return (keyPair, CreateSelfSigned(keyPair, "SHA256WITHRSA"));
-        }
 
-        public static (AsymmetricCipherKeyPair keyPair, X509Certificate certificate) GenerateSelfSignedEcCertificate()
-        {
-            // Named curve (OID) parameters: RFC 5480 §2.1.1 forbids explicit curve parameters in certificates,
-            // and platform validators (e.g. Apple's) reject them.
-            var ecGenerator = new ECKeyPairGenerator();
-            ecGenerator.Init(new ECKeyGenerationParameters(ECNamedCurveTable.GetOid("P-256"), new SecureRandom()));
-            var keyPair = ecGenerator.GenerateKeyPair();
-            return (keyPair, CreateSelfSigned(keyPair, "SHA256WITHECDSA"));
-        }
 
-        private static X509Certificate CreateSelfSigned(AsymmetricCipherKeyPair keyPair, string signatureAlgorithm)
-        {
-            var certGenerator = new X509V3CertificateGenerator();
-            certGenerator.SetSerialNumber(BigInteger.ValueOf(1));
-            certGenerator.SetIssuerDN(new X509Name("CN=SharpDTLS Server"));
-            certGenerator.SetSubjectDN(new X509Name("CN=SharpDTLS Server"));
-            certGenerator.SetNotBefore(DateTime.UtcNow.AddDays(-1));
-            certGenerator.SetNotAfter(DateTime.UtcNow.AddYears(10));
-            certGenerator.SetPublicKey(keyPair.Public);
-            return certGenerator.Generate(new Asn1SignatureFactory(signatureAlgorithm, keyPair.Private, new SecureRandom()));
-        }
 
 
         public static byte[] GenerateRandom(int length)
         {
             var bytes = new byte[length];
-            new SecureRandom().NextBytes(bytes);
+            RandomNumberGenerator.Fill(bytes);
             return bytes;
         }
 

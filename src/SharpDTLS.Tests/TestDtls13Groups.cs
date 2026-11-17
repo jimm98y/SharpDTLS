@@ -150,7 +150,7 @@ namespace SharpDTLS.Tests
         {
             WolfSsl.RequireWolfSsl();
             string dir = OpenSsl.NewTempDirectory();
-            var (key, cert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
+            var (key, cert) = SelfSigned.Ec();
             string certPath = OpenSsl.WritePem(dir, "cert.pem", cert);
             string keyPath = OpenSsl.WritePem(dir, "key.pem", key.Private);
             using var server = OpenSslProcess.StartServer(p => $"server {p} {certPath} {keyPath} -group {group}", dir, Timeout, out int port, WolfSsl.Harness);

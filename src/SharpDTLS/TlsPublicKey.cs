@@ -72,8 +72,21 @@ namespace SharpDTLS
             _ => Kind == TlsKeyKind.Ec && Bc is ECKeyParameters ec ? ec.Parameters.Curve.FieldSize : 0,
         };
 
-        /// <summary>The key as BouncyCastle's, for the static (EC)DH arithmetic, which is BouncyCastle's.</summary>
+        /// <summary>The key as BouncyCastle's, for its values below and for BouncyCastle's provider.</summary>
         internal AsymmetricKeyParameter Bc => _bc ??= PublicKeyFactory.CreateKey(Spki);
+
+        /// <summary>The DER of the AlgorithmIdentifier's parameters: the curve or the DH group, compared as they are.</summary>
+        public byte[] AlgorithmParameters => SubjectPublicKeyInfo.GetInstance(Asn1Object.FromByteArray(Spki)).Algorithm.Parameters?.ToAsn1Object().GetEncoded() ?? System.Array.Empty<byte>();
+
+        /// <summary>An EC key's point, uncompressed (RFC 8422 §5.4.1).</summary>
+        public byte[] EcPoint => ((ECPublicKeyParameters)Bc).Q.GetEncoded(false);
+
+        /// <summary>A DH key's prime, generator and public value, unsigned without leading zeros.</summary>
+        public byte[] DhPrime => ((DHPublicKeyParameters)Bc).Parameters.P.ToByteArrayUnsigned();
+
+        public byte[] DhGenerator => ((DHPublicKeyParameters)Bc).Parameters.G.ToByteArrayUnsigned();
+
+        public byte[] DhY => ((DHPublicKeyParameters)Bc).Y.ToByteArrayUnsigned();
 
         /// <summary>Of a DER SubjectPublicKeyInfo; throws for one that does not parse.</summary>
         public static TlsPublicKey FromSpki(byte[] subjectPublicKeyInfo, AsymmetricKeyParameter bc = null)

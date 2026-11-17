@@ -19,8 +19,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 // SOFTWARE.
 
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.X509;
 using SharpDTLS.Protocol12;
 using SharpDTLS.Protocol12.TLS12;
 using SharpDTLS.Protocol13;
@@ -49,7 +47,7 @@ namespace SharpDTLS
         private readonly ConcurrentDictionary<TlsConnectionBase, TaskCompletionSource<bool>> _handshakes = new();
 
         public TlsServer()
-            : this(Dtls13CryptoUtils.GenerateSelfSignedCertificate())
+            : this(SelfSigned.Credentials())
         {
         }
 
@@ -70,10 +68,6 @@ namespace SharpDTLS
             Tls13.ConnectionCreated += OnConnectionCreated;
         }
 
-        private TlsServer((AsymmetricCipherKeyPair keyPair, X509Certificate certificate) generated)
-            : this(new ServerCredentials(generated.keyPair, generated.certificate))
-        {
-        }
 
         /// <summary>The TLS 1.0-1.2 engine.</summary>
         internal Tls12Server Tls12 => (Tls12Server)Engine12;
