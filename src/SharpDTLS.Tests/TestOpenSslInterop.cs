@@ -241,7 +241,7 @@ namespace SharpDTLS.Tests
 
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
             int port = transport.LocalEndpoint.Port;
-            var server = new Dtls12Server(transport, kp, cert);
+            var server = new Dtls12Server(transport, TestCertificates.Server(kp, cert));
 
             var handshake = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var received = new TaskCompletionSource<(EndPoint, string)>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -297,7 +297,7 @@ namespace SharpDTLS.Tests
 
             // OpenSSL client -> SharpDTLS server
             using var serverTransport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
-            var sharpServer = new Dtls12Server(serverTransport, kp, cert) { CipherSuites = AllButWeak() };
+            var sharpServer = new Dtls12Server(serverTransport, TestCertificates.Server(kp, cert)) { CipherSuites = AllButWeak() };
             var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             sharpServer.ApplicationDataReceived += (_, e) => received.TrySetResult(Encoding.UTF8.GetString(e.ToArray()));
             using var openSslClient = new OpenSslProcess($"s_client -dtls1_2 -connect 127.0.0.1:{serverTransport.LocalEndpoint.Port} -cipher {cipher}{etm} -quiet", dir);
@@ -450,8 +450,7 @@ namespace SharpDTLS.Tests
             using var clientTransport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
             var client = new Dtls12Client(clientTransport)
             {
-                ClientCertificate = clientCert,
-                ClientCertificateKeyPair = clientKp,
+                ClientCredentials = TestCertificates.Credentials(clientKp, clientCert),
             };
             var handshake = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
@@ -522,7 +521,7 @@ namespace SharpDTLS.Tests
 
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
             int port = transport.LocalEndpoint.Port;
-            var server = new Dtls12Server(transport, kp, cert) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10 };
+            var server = new Dtls12Server(transport, TestCertificates.Server(kp, cert)) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10 };
 
             var handshake = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var received = new TaskCompletionSource<(EndPoint, string)>(TaskCreationOptions.RunContinuationsAsynchronously);

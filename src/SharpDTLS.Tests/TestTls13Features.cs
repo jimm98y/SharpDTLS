@@ -108,7 +108,7 @@ namespace SharpDTLS.Tests
             var established = new TaskCompletionSource<Tls13ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
             server.HandshakeFinished += (_, c) => established.TrySetResult(c);
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
-            TestTls13.Connect(server.LocalEndpoint, c => { (c.ClientCertificateKeyPair, c.ClientCertificate) = (key, cert); c.ClientIntermediateCertificates = new[] { Pki.Intermediate.Cert }; });
+            TestTls13.Connect(server.LocalEndpoint, c => { c.ClientCredentials = TestCertificates.Credentials((key, cert), new[] { Pki.Intermediate.Cert }); });
             Assert.IsTrue(established.Task.Wait(Timeout));
             Assert.AreEqual(cert, established.Task.Result.ClientCertificate.Bc());
 
@@ -117,8 +117,7 @@ namespace SharpDTLS.Tests
             server.HandshakeFinished += (_, c) => later.TrySetResult(c);
             TestTls13.Connect(server.LocalEndpoint, c =>
             {
-                (c.ClientCertificateKeyPair, c.ClientCertificate) = (key, cert);
-                c.ClientIntermediateCertificates = new[] { Pki.Intermediate.Cert };
+                c.ClientCredentials = TestCertificates.Credentials((key, cert), new[] { Pki.Intermediate.Cert });
                 c.AllowPostHandshakeAuthentication = true;
             });
             Assert.IsTrue(SpinWait.SpinUntil(() => later.Task.IsCompleted && later.Task.Result != established.Task.Result, Timeout));
@@ -188,7 +187,7 @@ namespace SharpDTLS.Tests
             OpenSsl.RequireOpenSsl();
             var f = Files();
             var (key, cert) = Pki.Leaf(new[] { "server.test" });
-            using var server = new Tls13Server(key, cert) { IntermediateCertificates = new[] { Pki.Intermediate.Cert }, ApplicationProtocols = new[] { "h2" } };
+            using var server = new Tls13Server(TestCertificates.Server(key, cert)) { IntermediateCertificates = new[] { Pki.Intermediate.Cert }.Net(), ApplicationProtocols = new[] { "h2" } };
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
 
             string session = Path.Combine(f.Dir, "session.pem");

@@ -179,8 +179,8 @@ namespace SharpDTLS.Tests
         {
             var keyPair = PwdCredential.GenerateProtectionKeyPair();
             var (client, server) = Pair(0xC0B0, TestCredentials.PwdUsername, TestCredentials.PwdPassword);
-            server.PwdProtectionKey = PwdCredential.PrivateKeyOf(keyPair);
-            client.PwdProtectionKey = PwdCredential.PublicKeyOf(keyPair);
+            server.PwdProtectionKey = keyPair;
+            client.PwdProtectionKey = new System.Security.Cryptography.ECParameters { Curve = keyPair.Curve, Q = keyPair.Q };
             Assert.IsNull(Run(client));
         }
 
@@ -188,8 +188,8 @@ namespace SharpDTLS.Tests
         public void ProtectedUsername_UnderTheWrongKey_FailsLikeAnUnknownUser()
         {
             var (client, server) = Pair(0xC0B0, TestCredentials.PwdUsername, TestCredentials.PwdPassword);
-            server.PwdProtectionKey = PwdCredential.PrivateKeyOf(PwdCredential.GenerateProtectionKeyPair());
-            client.PwdProtectionKey = PwdCredential.PublicKeyOf(PwdCredential.GenerateProtectionKeyPair());
+            server.PwdProtectionKey = PwdCredential.GenerateProtectionKeyPair();
+            client.PwdProtectionKey = PwdCredential.GenerateProtectionKeyPair();
             Assert.IsInstanceOfType<TimeoutException>(Run(client));
         }
 

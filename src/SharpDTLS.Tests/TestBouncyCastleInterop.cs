@@ -401,7 +401,7 @@ namespace SharpDTLS.Tests
             var (suite, crypto, bcVersion, version) = Prepare(id);
             var (keyPair, certificate) = TestCredentials.For(suite);
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
-            var server = new Dtls12Server(transport, keyPair, certificate)
+            var server = new Dtls12Server(transport, TestCertificates.Server(keyPair, certificate))
             {
                 MinimumVersion = DtlsVersion.Dtls10, CipherSuites = new List<ushort> { id }, UseConnectionIds = true,
             };
@@ -457,7 +457,7 @@ namespace SharpDTLS.Tests
             using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
             var client = new Dtls12Client(transport) { MinimumVersion = version, MaximumVersion = version, CipherSuites = new List<ushort> { id } };
             if (suite.IsStaticKeyAgreement)
-                (client.ClientCertificateKeyPair, client.ClientCertificate) = TestCredentials.FixedClientFor(suite);
+                client.ClientCredentials = TestCertificates.Credentials(TestCredentials.FixedClientFor(suite));
             if (suite.RequiresSrp)
                 (client.SrpIdentity, client.SrpPassword) = (TestCredentials.SrpIdentity, TestCredentials.SrpPassword);
             if (suite.RequiresPsk)
@@ -496,7 +496,7 @@ namespace SharpDTLS.Tests
             var (keyPair, certificate) = TestCredentials.For(suite);
 
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
-            var server = new Dtls12Server(transport, keyPair, certificate) { MinimumVersion = DtlsVersion.Dtls10, CipherSuites = new List<ushort> { id } };
+            var server = new Dtls12Server(transport, TestCertificates.Server(keyPair, certificate)) { MinimumVersion = DtlsVersion.Dtls10, CipherSuites = new List<ushort> { id } };
             var (fixedKeyPair, fixedCertificate) = TestCredentials.FixedClientFor(suite);
             if (suite.IsStaticKeyAgreement)
                 server.RequireClientCertificate = true;

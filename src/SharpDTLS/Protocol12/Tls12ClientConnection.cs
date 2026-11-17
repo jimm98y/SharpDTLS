@@ -85,11 +85,7 @@ namespace SharpDTLS.Protocol12
         }
 
         // Set these before BeginHandshake to enable client authentication.
-        public AsymmetricCipherKeyPair ClientCertificateKeyPair { get; set; }
-        public X509Certificate ClientCertificate { get; set; }
 
-        /// <summary>Intermediate CA certificates sent after <see cref="ClientCertificate"/>.</summary>
-        public IList<X509Certificate> ClientIntermediateCertificates { get; set; }
 
         /// <summary>The client's credentials, before <see cref="ClientCertificate"/> and <see cref="ClientCertificateKeyPair"/>.</summary>
         public CertificateCredentials ClientCredentials { get; set; }
@@ -192,7 +188,7 @@ namespace SharpDTLS.Protocol12
         /// The server's username-protection public key (RFC 8492 §4.3). When set the username is sent
         /// encrypted in pwd_protect instead of in the clear.
         /// </summary>
-        public ECPublicKeyParameters PwdProtectionKey { get; set; }
+        public System.Security.Cryptography.ECParameters? PwdProtectionKey { get; set; }
 
         private bool HavePwd => PwdUsername != null && PwdPassword != null;
 
@@ -418,7 +414,7 @@ namespace SharpDTLS.Protocol12
                 ch.Extensions.Add(new SrpExtension(SrpIdentity));
             if (offeredSuites.Any(s => s.RequiresPwd))
                 ch.Extensions.Add(PwdProtectionKey != null
-                    ? new PwdProtectExtension(EccPwd.ProtectUsername(PwdUsername, PwdProtectionKey, new Org.BouncyCastle.Security.SecureRandom()))
+                    ? new PwdProtectExtension(EccPwd.ProtectUsername(PwdUsername, PwdCredential.PublicKeyOf(PwdProtectionKey), new Org.BouncyCastle.Security.SecureRandom()))
                     : new PwdClearExtension(EccPwd.PrepareOpaqueString(PwdUsername)));
 
             _clientHello = ch;
@@ -724,7 +720,7 @@ namespace SharpDTLS.Protocol12
                 if (chosen != null)
                     return chosen;
             }
-            return ClientCredentials ?? CertificateCredentials.Of(ClientCertificateKeyPair, ClientCertificate, ClientIntermediateCertificates);
+            return ClientCredentials;
         }
 
         private void SendFinalFlight()

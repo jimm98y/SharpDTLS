@@ -34,7 +34,7 @@ namespace SharpDTLS.Tests
             bool certificate = true)
         {
             var r = new Run();
-            r.Server = certificate ? new Dtls13Server(r.Pair.Server) : new Dtls13Server(r.Pair.Server, null, null);
+            r.Server = certificate ? new Dtls13Server(r.Pair.Server) : new Dtls13Server(r.Pair.Server, TestCertificates.Server(null, null));
             r.Server.InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50);
             r.Server.ExternalPskResolver = Resolve;
             configureServer?.Invoke(r.Server);
@@ -154,7 +154,7 @@ namespace SharpDTLS.Tests
         public void ClientCertificateRequired_IgnoresExternalPsks()
         {
             var (key, cert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
-            var r = Connect(s => s.RequireClientCertificate = true, c => { c.ClientCertificate = cert; c.ClientCertificateKeyPair = key; });
+            var r = Connect(s => s.RequireClientCertificate = true, c => { c.ClientCredentials = TestCertificates.Credentials(key, cert); });
             Assert.IsFalse(r.Client.IsExternalPsk);
             Assert.AreEqual(cert, r.ServerConnection.ClientCertificate.Bc());
         }

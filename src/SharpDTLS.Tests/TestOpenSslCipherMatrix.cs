@@ -115,7 +115,7 @@ namespace SharpDTLS.Tests
             var (keyPair, certificate) = TestCredentials.For(suite);
 
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
-            var server = new Dtls12Server(transport, keyPair, certificate)
+            var server = new Dtls12Server(transport, TestCertificates.Server(keyPair, certificate))
             {
                 MinimumVersion = DtlsVersion.Dtls10,
                 CipherSuites = new List<ushort> { id },

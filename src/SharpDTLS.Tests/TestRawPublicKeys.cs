@@ -51,7 +51,7 @@ namespace SharpDTLS.Tests
             Func<TlsConnectionBase> server;
             if (version == 12)
             {
-                var s = new Dtls12Server(pair.Server, o.ServerKey, o.ServerCertificate)
+                var s = new Dtls12Server(pair.Server, TestCertificates.Server(o.ServerKey, o.ServerCertificate))
                 {
                     ServerCertificateTypes = o.ServerTypes, RequireClientCertificate = o.RequireClientAuth,
                     ClientCertificateTypes = o.ServerAcceptsClient, ClientRawPublicKeyValidator = o.ClientKeyCheck,
@@ -59,7 +59,7 @@ namespace SharpDTLS.Tests
                 var c = new Dtls12Client(pair.Client)
                 {
                     ServerCertificateTypes = o.ClientAcceptsServer, ServerRawPublicKeyValidator = o.ServerKeyCheck,
-                    ClientCertificateTypes = o.ClientTypes, ClientCertificateKeyPair = o.ClientKey,
+                    ClientCertificateTypes = o.ClientTypes, ClientCredentials = TestCertificates.Credentials(o.ClientKey, null),
                 };
                 c.HandshakeFinished += (_, _) => done.TrySetResult(null);
                 c.Failed += (_, ex) => { done.TrySetResult(ex); lateFailure.TrySetResult(ex); };
@@ -68,7 +68,7 @@ namespace SharpDTLS.Tests
             }
             else
             {
-                var s = new Dtls13Server(pair.Server, o.ServerKey, o.ServerCertificate)
+                var s = new Dtls13Server(pair.Server, TestCertificates.Server(o.ServerKey, o.ServerCertificate))
                 {
                     ServerCertificateTypes = o.ServerTypes, RequireClientCertificate = o.RequireClientAuth,
                     ClientCertificateTypes = o.ServerAcceptsClient, ClientRawPublicKeyValidator = o.ClientKeyCheck,
@@ -76,7 +76,7 @@ namespace SharpDTLS.Tests
                 var c = new Dtls13Client(pair.Client)
                 {
                     ServerCertificateTypes = o.ClientAcceptsServer, ServerRawPublicKeyValidator = o.ServerKeyCheck,
-                    ClientCertificateTypes = o.ClientTypes, ClientCertificateKeyPair = o.ClientKey,
+                    ClientCertificateTypes = o.ClientTypes, ClientCredentials = TestCertificates.Credentials(o.ClientKey, null),
                 };
                 c.HandshakeFinished += (_, _) => done.TrySetResult(null);
                 c.Failed += (_, ex) => { done.TrySetResult(ex); lateFailure.TrySetResult(ex); };
@@ -236,7 +236,7 @@ namespace SharpDTLS.Tests
 
             using var serverTransport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
             var serverKey = TestPki.NewKey();
-            _ = new Dtls12Server(serverTransport, serverKey, null) { ServerCertificateTypes = Rpk };
+            _ = new Dtls12Server(serverTransport, TestCertificates.Server(serverKey, null)) { ServerCertificateTypes = Rpk };
             using var openSslClient = new OpenSslProcess($"s_client -dtls1_2 -connect 127.0.0.1:{serverTransport.LocalEndpoint.Port} -enable_server_rpk", dir);
             Assert.IsTrue(openSslClient.WaitForOutput("Server raw public key", Timeout), openSslClient.Output);
         }
@@ -258,7 +258,7 @@ namespace SharpDTLS.Tests
             {
                 Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), server.Output);
                 using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
-                var client = new Dtls12Client(transport) { ClientCertificateTypes = Rpk, ClientCertificateKeyPair = clientKey };
+                var client = new Dtls12Client(transport) { ClientCertificateTypes = Rpk, ClientCredentials = TestCertificates.Credentials(clientKey, null)};
                 var error = Handshake(s => client.HandshakeFinished += (_, _) => s(), f => client.Failed += (_, ex) => f(ex), client.BeginHandshake, server.Output);
                 Assert.IsNull(error, error?.ToString());
                 Assert.IsTrue(server.WaitForOutput("Client raw public key", Timeout), server.Output);
@@ -266,7 +266,7 @@ namespace SharpDTLS.Tests
 
             // OpenSSL client with a raw public key, our server.
             using var serverTransport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
-            var dtlsServer = new Dtls12Server(serverTransport, key, cert) { RequireClientCertificate = true, ClientCertificateTypes = Rpk };
+            var dtlsServer = new Dtls12Server(serverTransport, TestCertificates.Server(key, cert)) { RequireClientCertificate = true, ClientCertificateTypes = Rpk };
             using var openSslClient = new OpenSslProcess(
                 $"s_client -dtls1_2 -connect 127.0.0.1:{serverTransport.LocalEndpoint.Port} -enable_client_rpk -cert {certPath} -key {keyPath}", dir);
             Assert.IsTrue(SpinWait.SpinUntil(() => dtlsServer.Connections.Any(c => c.IsHandshakeComplete), Timeout), openSslClient.Output);
@@ -295,7 +295,7 @@ namespace SharpDTLS.Tests
                 var client = new Dtls13Client(transport)
                 {
                     ServerCertificateTypes = Rpk, ServerRawPublicKeyValidator = spki => spki.AsSpan().SequenceEqual(Spki(wolfKey)),
-                    ClientCertificateTypes = Rpk, ClientCertificateKeyPair = ourKey,
+                    ClientCertificateTypes = Rpk, ClientCredentials = TestCertificates.Credentials(ourKey, null),
                 };
                 var error = Handshake(s => client.HandshakeFinished += (_, _) => s(), f => client.Failed += (_, ex) => f(ex), client.BeginHandshake, server.Output);
                 Assert.IsNull(error, error + "\n" + server.Output);
@@ -305,7 +305,7 @@ namespace SharpDTLS.Tests
 
             // wolfSSL client with a raw public key, pinning ours; our server.
             using var serverTransport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
-            var dtlsServer = new Dtls13Server(serverTransport, ourKey, null)
+            var dtlsServer = new Dtls13Server(serverTransport, TestCertificates.Server(ourKey, null))
             {
                 ServerCertificateTypes = Rpk, RequireClientCertificate = true, ClientCertificateTypes = Rpk,
                 ClientRawPublicKeyValidator = spki => spki.AsSpan().SequenceEqual(Spki(wolfKey)),

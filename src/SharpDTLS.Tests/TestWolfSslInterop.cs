@@ -414,7 +414,7 @@ namespace SharpDTLS.Tests
             Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), "server did not start:\n" + server.Output);
 
             using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
-            var client = new Dtls13Client(transport) { ClientCertificate = clientCert, ClientCertificateKeyPair = clientKp };
+            var client = new Dtls13Client(transport) { ClientCredentials = TestCertificates.Credentials(clientKp, clientCert)};
             var handshake = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
             client.Failed += (_, ex) => handshake.TrySetException(ex);

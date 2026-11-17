@@ -118,9 +118,9 @@ namespace SharpDTLS.Tests
             Func<byte[]> stapled;
             if (version == 12)
             {
-                _ = new Dtls12Server(pair.Server, credentials.Key, credentials.Cert)
+                _ = new Dtls12Server(pair.Server, TestCertificates.Server(credentials.Key, credentials.Cert))
                 {
-                    IntermediateCertificates = new[] { Pki.Intermediate.Cert }, OcspResponse = serverStaple, CertificateSelector = selector,
+                    IntermediateCertificates = new[] { Pki.Intermediate.Cert }.Net(), OcspResponse = serverStaple, CertificateSelector = selector,
                 };
                 var client = new Dtls12Client(pair.Client) { RequestOcspStapling = request, ServerCertificateStatusValidator = validator?.ForServer(), ServerName = serverName };
                 client.HandshakeFinished += (_, _) => done.TrySetResult(null);
@@ -130,9 +130,9 @@ namespace SharpDTLS.Tests
             }
             else
             {
-                _ = new Dtls13Server(pair.Server, credentials.Key, credentials.Cert)
+                _ = new Dtls13Server(pair.Server, TestCertificates.Server(credentials.Key, credentials.Cert))
                 {
-                    IntermediateCertificates = new[] { Pki.Intermediate.Cert }, OcspResponse = serverStaple, CertificateSelector = selector,
+                    IntermediateCertificates = new[] { Pki.Intermediate.Cert }.Net(), OcspResponse = serverStaple, CertificateSelector = selector,
                 };
                 var client = new Dtls13Client(pair.Client) { RequestOcspStapling = request, ServerCertificateStatusValidator = validator?.ForServer(), ServerName = serverName };
                 client.HandshakeFinished += (_, _) => done.TrySetResult(null);
@@ -301,7 +301,7 @@ namespace SharpDTLS.Tests
             string dir = OpenSsl.NewTempDirectory();
             var leaf = Pki.Leaf(new[] { "server.test" });
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
-            _ = new Dtls12Server(transport, leaf.Key, leaf.Cert) { IntermediateCertificates = new[] { Pki.Intermediate.Cert }, OcspResponse = Pki.OcspResponse(leaf.Cert) };
+            _ = new Dtls12Server(transport, TestCertificates.Server(leaf.Key, leaf.Cert)) { IntermediateCertificates = new[] { Pki.Intermediate.Cert }.Net(), OcspResponse = Pki.OcspResponse(leaf.Cert) };
             using var client = new OpenSslProcess($"s_client -dtls1_2 -connect 127.0.0.1:{transport.LocalEndpoint.Port} -status", dir);
             Assert.IsTrue(client.WaitForOutput("Cert Status: good", Timeout), client.Output);
             Assert.IsTrue(client.WaitForOutput("OCSP Response Status: successful", Timeout), client.Output);
@@ -345,9 +345,9 @@ namespace SharpDTLS.Tests
             var leaf = Pki.Leaf(new[] { "server.test" });
             string root = OpenSsl.WritePem(dir, "root.pem", Pki.Root.Cert);
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
-            _ = new Dtls13Server(transport, leaf.Key, leaf.Cert)
+            _ = new Dtls13Server(transport, TestCertificates.Server(leaf.Key, leaf.Cert))
             {
-                IntermediateCertificates = new[] { Pki.Intermediate.Cert }, OcspResponse = Pki.OcspResponse(leaf.Cert, revoked ? Revoked : null),
+                IntermediateCertificates = new[] { Pki.Intermediate.Cert }.Net(), OcspResponse = Pki.OcspResponse(leaf.Cert, revoked ? Revoked : null),
             };
             using var client = new OpenSslProcess($"client {transport.LocalEndpoint.Port} -verify {root} -ocsp", dir, WolfSsl.Harness);
             Assert.IsTrue(client.WaitForOutput(revoked ? "ERROR connect" : "CONNECTED", Timeout), client.Output);

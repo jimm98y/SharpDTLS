@@ -441,7 +441,7 @@ namespace SharpDTLS.Tests
             var (kp, cert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
             var h = new Harness(
                 configureServer: s => s.RequireClientCertificate = true,
-                configureClient: c => { c.ClientCertificate = cert; c.ClientCertificateKeyPair = kp; });
+                configureClient: c => { c.ClientCredentials = TestCertificates.Credentials(kp, cert); });
             h.Handshake();
 
             Assert.IsNotNull(h.ServerConnection.ClientCertificate);

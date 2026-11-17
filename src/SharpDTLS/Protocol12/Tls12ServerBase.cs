@@ -59,7 +59,7 @@ namespace SharpDTLS.Protocol12
         public IList<ushort> CipherSuites { get => Settings.CipherSuites; set => Settings.CipherSuites = value; }
 
         /// <summary>Intermediate CA certificates sent after the server certificate, issuer of the previous one first.</summary>
-        public IList<X509Certificate> IntermediateCertificates { get => Settings.IntermediateCertificates; set => Settings.IntermediateCertificates = value; }
+        public IList<System.Security.Cryptography.X509Certificates.X509Certificate2> IntermediateCertificates { get => Settings.IntermediateCertificates; set => Settings.IntermediateCertificates = value; }
 
         /// <summary>
         /// Chooses the credentials for the client's server_name (RFC 6066), which is null when the client sent none.
@@ -90,7 +90,7 @@ namespace SharpDTLS.Protocol12
         public Func<CertificateSelectionContext, ServerCredentials> CredentialsSelector { get => Settings.CredentialsSelector; set => Settings.CredentialsSelector = value; }
 
         /// <summary>CAs whose names a CertificateRequest lists, to guide the client's choice; null lists none.</summary>
-        public IList<X509Certificate> ClientCertificateAuthorities { get => Settings.ClientCertificateAuthorities; set => Settings.ClientCertificateAuthorities = value; }
+        public IList<System.Security.Cryptography.X509Certificates.X509Certificate2> ClientCertificateAuthorities { get => Settings.ClientCertificateAuthorities; set => Settings.ClientCertificateAuthorities = value; }
 
         /// <summary>Checks a client's raw public key (DER SubjectPublicKeyInfo); false aborts with bad_certificate.</summary>
         public Func<byte[], bool> ClientRawPublicKeyValidator { get => Settings.ClientRawPublicKeyValidator; set => Settings.ClientRawPublicKeyValidator = value; }
@@ -129,7 +129,7 @@ namespace SharpDTLS.Protocol12
         public SessionTicketKeys TicketKeys { get => Settings.TicketKeys; set => Settings.TicketKeys = value; }
 
         /// <summary>Private key for recovering pwd_protect usernames (RFC 8492 §4.3.2); null accepts only pwd_clear.</summary>
-        public Org.BouncyCastle.Crypto.Parameters.ECPrivateKeyParameters PwdProtectionKey { get => Settings.PwdProtectionKey; set => Settings.PwdProtectionKey = value; }
+        public System.Security.Cryptography.ECParameters? PwdProtectionKey { get => Settings.PwdProtectionKey; set => Settings.PwdProtectionKey = value; }
 
         /// <summary>A new connection, before it processes anything; for the version-negotiating servers.</summary>
         internal event Action<Tls12ServerConnection> ConnectionCreated;

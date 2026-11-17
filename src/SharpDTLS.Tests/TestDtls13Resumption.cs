@@ -131,7 +131,7 @@ namespace SharpDTLS.Tests
             var keys = new SessionTicketKeys();
             var (clientKey, clientCert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
             Action<Dtls13Server> requireCert = s => s.RequireClientCertificate = true;
-            Action<Dtls13Client> withCert = c => { c.ClientCertificate = clientCert; c.ClientCertificateKeyPair = clientKey; };
+            Action<Dtls13Client> withCert = c => { c.ClientCredentials = TestCertificates.Credentials(clientKey, clientCert); };
 
             var ticket = WaitForTicket(Connect(keys, null, configureServer: requireCert, configureClient: withCert));
             var r = Connect(keys, ticket, configureServer: requireCert);

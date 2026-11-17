@@ -97,7 +97,7 @@ namespace SharpDTLS.Tests
             string dir = OpenSsl.NewTempDirectory();
             var (keyPair, certificate) = TestCredentials.For(suite);
 
-            using var server = new Tls12Server(keyPair, certificate) { MinimumVersion = TlsVersion.Tls10, CipherSuites = new List<ushort> { id } };
+            using var server = new Tls12Server(TestCertificates.Server(keyPair, certificate)) { MinimumVersion = TlsVersion.Tls10, CipherSuites = new List<ushort> { id } };
             string psk = "";
             if (suite.RequiresPsk)
             {

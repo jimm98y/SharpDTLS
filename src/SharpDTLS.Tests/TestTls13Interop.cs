@@ -197,7 +197,7 @@ namespace SharpDTLS.Tests
 
             // BouncyCastle client, our server.
             var (serverKey, serverCert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
-            using var ours = new Tls13Server(serverKey, serverCert) { CipherSuites = new List<ushort> { suite } };
+            using var ours = new Tls13Server(TestCertificates.Server(serverKey, serverCert)) { CipherSuites = new List<ushort> { suite } };
             ours.ApplicationDataReceived += (conn, e) => conn.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.ToArray())));
             ours.Start(new IPEndPoint(IPAddress.Loopback, 0));
             var bcClient = RunBlocking(() =>

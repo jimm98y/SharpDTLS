@@ -60,7 +60,7 @@ namespace SharpDTLS.Tests
             // A long chain makes the Certificate message span several records.
             var (key, cert) = Pki.Leaf(new[] { "server.test" });
             var intermediates = Enumerable.Range(0, 40).Select(_ => Pki.Intermediate.Cert).ToList();
-            using var server = new Tls12Server(key, cert) { IntermediateCertificates = intermediates };
+            using var server = new Tls12Server(TestCertificates.Server(key, cert)) { IntermediateCertificates = intermediates.Net() };
             var received = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
             server.ApplicationDataReceived += (conn, e) => { received.TrySetResult(e.ToArray()); conn.SendApplicationData(new byte[16384]); };
             var (_, listener) = TrickleServer(server, chunk);
@@ -205,9 +205,7 @@ namespace SharpDTLS.Tests
                 Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), server.Output);
                 var client = TestTls12.Connect(new IPEndPoint(IPAddress.Loopback, port), c =>
                 {
-                    c.ClientCertificate = clientCert;
-                    c.ClientCertificateKeyPair = clientKey;
-                    c.ClientIntermediateCertificates = new[] { Pki.Intermediate.Cert };
+                    c.ClientCredentials = TestCertificates.Credentials(clientKey, clientCert, new[] { Pki.Intermediate.Cert });
                     c.ApplicationProtocols = new[] { "http/1.1" };
                     c.ServerName = "server.test";
                     c.ServerCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForServer("server.test");
@@ -219,9 +217,9 @@ namespace SharpDTLS.Tests
 
             // OpenSSL client with a certificate, ALPN and SNI; our server requiring the certificate.
             var (key, cert) = Pki.Leaf(new[] { "server.test" });
-            using var tlsServer = new Tls12Server(key, cert)
+            using var tlsServer = new Tls12Server(TestCertificates.Server(key, cert))
             {
-                IntermediateCertificates = new[] { Pki.Intermediate.Cert }, RequireClientCertificate = true,
+                IntermediateCertificates = new[] { Pki.Intermediate.Cert }.Net(), RequireClientCertificate = true,
                 ClientCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForClient(), ApplicationProtocols = new[] { "h2" },
             };
             var established = new TaskCompletionSource<Tls12ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);

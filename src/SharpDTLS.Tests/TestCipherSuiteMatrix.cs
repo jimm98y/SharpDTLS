@@ -150,12 +150,12 @@ namespace SharpDTLS.Tests
             var (keyPair, certificate) = TestCredentials.For(suite);
 
             var pair = new ScriptedTransportPair();
-            var server = new Dtls12Server(pair.Server, keyPair, certificate) { MinimumVersion = DtlsVersion.Dtls10, CipherSuites = new List<ushort> { id } };
+            var server = new Dtls12Server(pair.Server, TestCertificates.Server(keyPair, certificate)) { MinimumVersion = DtlsVersion.Dtls10, CipherSuites = new List<ushort> { id } };
             var client = new Dtls12Client(pair.Client) { MinimumVersion = version, MaximumVersion = version, CipherSuites = new List<ushort> { id }, MinimumDhPrimeBits = 2048 };
             if (suite.IsStaticKeyAgreement)
             {
                 server.RequireClientCertificate = true;
-                (client.ClientCertificateKeyPair, client.ClientCertificate) = TestCredentials.FixedClientFor(suite);
+                client.ClientCredentials = TestCertificates.Credentials(TestCredentials.FixedClientFor(suite));
             }
             if (suite.RequiresSrp)
             {
@@ -188,7 +188,7 @@ namespace SharpDTLS.Tests
             if (suite.RequiresPsk)
                 CollectionAssert.AreEqual(TestCredentials.PskHint, seenHint, "the server's identity hint reaches the client");
             if (suite.IsStaticKeyAgreement)
-                Assert.AreEqual(client.ClientCertificate, server.Connections.Single().ClientCertificate.Bc(), "fixed (EC)DH client authentication");
+                Assert.AreEqual(client.ClientCredentials.BcCertificate, server.Connections.Single().ClientCertificate.Bc(), "fixed (EC)DH client authentication");
 
             for (int i = 0; i < 20; i++)
                 client.SendApplicationData(Encoding.UTF8.GetBytes($"{name}-{i}"));

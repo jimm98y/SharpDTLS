@@ -84,7 +84,7 @@ namespace SharpDTLS
         public IList<X509Certificate2> IntermediateCertificates
         {
             get => _intermediateCertificates;
-            set { _intermediateCertificates = value; Engine12.IntermediateCertificates = Engine13.IntermediateCertificates = Certificates.ToBc(value); }
+            set { _intermediateCertificates = value; Engine12.IntermediateCertificates = Engine13.IntermediateCertificates = value == null ? null : new List<X509Certificate2>(value); }
         }
 
         private IList<X509Certificate2> _intermediateCertificates;
@@ -158,7 +158,7 @@ namespace SharpDTLS
         public IList<X509Certificate2> ClientCertificateAuthorities
         {
             get => _clientCertificateAuthorities;
-            set { _clientCertificateAuthorities = value; Engine12.ClientCertificateAuthorities = Engine13.ClientCertificateAuthorities = Certificates.ToBc(value); }
+            set { _clientCertificateAuthorities = value; Engine12.ClientCertificateAuthorities = Engine13.ClientCertificateAuthorities = value == null ? null : new List<X509Certificate2>(value); }
         }
 
         private IList<X509Certificate2> _clientCertificateAuthorities;
@@ -221,7 +221,7 @@ namespace SharpDTLS
         public System.Security.Cryptography.ECParameters? PwdProtectionKey
         {
             get => _pwdProtectionKey;
-            set { Engine12.PwdProtectionKey = PwdCredential.PrivateKeyOf(value); _pwdProtectionKey = value; }
+            set { Engine12.PwdProtectionKey = value; _pwdProtectionKey = value; }
         }
 
         private System.Security.Cryptography.ECParameters? _pwdProtectionKey;

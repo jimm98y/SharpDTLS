@@ -87,8 +87,8 @@ namespace SharpDTLS
 
         internal static IEnumerable<X509Name> ParseNames(IEnumerable<byte[]> names) => names?.Select(ParseName) ?? Enumerable.Empty<X509Name>();
 
-        internal static List<byte[]> Encode(IEnumerable<BcX509Certificate> authorities)
-            => authorities?.Select(c => c.SubjectDN.GetEncoded()).ToList() ?? new List<byte[]>();
+        internal static List<byte[]> Encode(IEnumerable<X509Certificate2> authorities)
+            => authorities?.Select(c => c.SubjectName.RawData).ToList() ?? new List<byte[]>();
     }
 
     /// <summary>certificate_authorities (RFC 8446 §4.2.4): DER distinguished names of the CAs the sender trusts.</summary>

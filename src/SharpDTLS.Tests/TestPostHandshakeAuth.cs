@@ -44,8 +44,7 @@ namespace SharpDTLS.Tests
             s.Client = new Dtls13Client(s.Pair.Client) { AllowPostHandshakeAuthentication = allow };
             if (withCertificate)
             {
-                (s.Client.ClientCertificateKeyPair, s.Client.ClientCertificate) = Pki.Leaf(commonName: "pha client", usage: KeyPurposeID.id_kp_clientAuth);
-                s.Client.ClientIntermediateCertificates = new[] { Pki.Intermediate.Cert };
+                s.Client.ClientCredentials = TestCertificates.Credentials(Pki.Leaf(commonName: "pha client", usage: KeyPurposeID.id_kp_clientAuth), new[] { Pki.Intermediate.Cert });
             }
             configure?.Invoke(s.Server, s.Client);
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -83,7 +82,7 @@ namespace SharpDTLS.Tests
             Assert.IsTrue(s.Connection.AllowsPostHandshakeAuthentication);
             Assert.IsNull(s.Connection.ClientCertificate);
             Assert.IsTrue(Authenticate(s), s.ServerFailed.Task.IsCompleted ? s.ServerFailed.Task.Result.ToString() : "no answer");
-            Assert.AreEqual(s.Client.ClientCertificate, s.Connection.ClientCertificate.Bc());
+            Assert.AreEqual(s.Client.ClientCredentials.BcCertificate, s.Connection.ClientCertificate.Bc());
             AssertDataFlows(s, "after authentication");
         }
 
@@ -155,7 +154,7 @@ namespace SharpDTLS.Tests
                 server.ClientCertificateTypes = new[] { CertificateType.RawPublicKey };
                 server.ClientRawPublicKeyValidator = k => k.AsSpan().SequenceEqual(spki);
                 client.ClientCertificateTypes = new[] { CertificateType.RawPublicKey };
-                client.ClientCertificateKeyPair = key;
+                client.ClientCredentials = TestCertificates.Credentials(key, null);
             });
             Assert.IsTrue(Authenticate(s), s.ServerFailed.Task.IsCompleted ? s.ServerFailed.Task.Result.ToString() : "no answer");
             CollectionAssert.AreEqual(spki, s.Connection.ClientRawPublicKey);
@@ -209,8 +208,7 @@ namespace SharpDTLS.Tests
 
             using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
             var client = new Dtls13Client(transport) { AllowPostHandshakeAuthentication = true };
-            (client.ClientCertificateKeyPair, client.ClientCertificate) = Pki.Leaf(commonName: "sharp client", usage: KeyPurposeID.id_kp_clientAuth);
-            client.ClientIntermediateCertificates = new[] { Pki.Intermediate.Cert };
+            client.ClientCredentials = TestCertificates.Credentials(Pki.Leaf(commonName: "sharp client", usage: KeyPurposeID.id_kp_clientAuth), new[] { Pki.Intermediate.Cert });
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var requested = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.HandshakeFinished += (_, _) => done.TrySetResult(true);

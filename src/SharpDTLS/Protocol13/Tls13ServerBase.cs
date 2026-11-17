@@ -54,7 +54,7 @@ namespace SharpDTLS.Protocol13
         public IList<ushort> CipherSuites { get; set; } = new List<ushort>(Dtls13CipherSuite.Supported);
 
         /// <summary>Intermediate CA certificates sent after the server certificate, issuer of the previous one first.</summary>
-        public IList<X509Certificate> IntermediateCertificates { get; set; }
+        public IList<System.Security.Cryptography.X509Certificates.X509Certificate2> IntermediateCertificates { get; set; }
 
         /// <summary>
         /// Chooses the credentials for the client's server_name (RFC 6066), which is null when the client sent none.
@@ -112,7 +112,7 @@ namespace SharpDTLS.Protocol13
         public Func<CertificateSelectionContext, ServerCredentials> CredentialsSelector { get; set; }
 
         /// <summary>CAs named in our CertificateRequests (certificate_authorities), to guide the client's choice; null names none.</summary>
-        public IList<X509Certificate> ClientCertificateAuthorities { get; set; }
+        public IList<System.Security.Cryptography.X509Certificates.X509Certificate2> ClientCertificateAuthorities { get; set; }
 
         /// <summary>Optional NSS key log sink (SSLKEYLOGFILE format).</summary>
         public Action<string> KeyLogWriter { get; set; }

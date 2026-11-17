@@ -58,7 +58,7 @@ namespace SharpDTLS.Protocol12
         public Func<CertificateSelectionContext, ServerCredentials> CredentialsSelector { get; set; }
 
         /// <summary>CAs whose names a CertificateRequest lists, to guide the client's choice; null lists none.</summary>
-        public IList<X509Certificate> ClientCertificateAuthorities { get; set; }
+        public IList<System.Security.Cryptography.X509Certificates.X509Certificate2> ClientCertificateAuthorities { get; set; }
 
         /// <summary>Certificate types accepted from clients, in preference order (RFC 7250); null for X.509 only.</summary>
         public IList<CertificateType> ClientCertificateTypes { get; set; }
@@ -92,13 +92,13 @@ namespace SharpDTLS.Protocol12
         public Func<string, PwdCredential> PwdCredentialProvider { get; set; }
 
         /// <summary>Private key for recovering pwd_protect usernames (RFC 8492 §4.3.2); null accepts only pwd_clear.</summary>
-        public ECPrivateKeyParameters PwdProtectionKey { get; set; }
+        public System.Security.Cryptography.ECParameters? PwdProtectionKey { get; set; }
 
         /// <summary>Resumable sessions by session ID; null disables session ID resumption.</summary>
         public ITlsSessionCache SessionCache { get; set; } = new TlsSessionCache();
 
         /// <summary>Intermediate CA certificates sent after the server certificate, issuer of the previous one first.</summary>
-        public IList<X509Certificate> IntermediateCertificates { get; set; }
+        public IList<System.Security.Cryptography.X509Certificates.X509Certificate2> IntermediateCertificates { get; set; }
 
         /// <summary>
         /// Chooses the credentials for the client's server_name (RFC 6066), which is null when the client sent none.
@@ -331,7 +331,7 @@ namespace SharpDTLS.Protocol12
             _serverNameUsed = selected != null && ServerName != null;
             (_credentials, _intermediates, _ocspResponse) = selected != null
                 ? (selected, selected.IntermediateChain, selected.OcspResponse)
-                : (_settings.Credentials, _settings.IntermediateCertificates?.Select(c => c.GetEncoded()) ?? _settings.Credentials?.IntermediateChain,
+                : (_settings.Credentials, _settings.IntermediateCertificates?.Select(c => c.RawData) ?? _settings.Credentials?.IntermediateChain,
                    _settings.OcspResponse ?? (_settings.Credentials as ServerCredentials)?.OcspResponse);
             _certificate = _credentials?.Certificate;
             if (ch.Extension<StatusRequestExtension>()?.StatusType != StatusRequestExtension.Ocsp)
@@ -381,7 +381,7 @@ namespace SharpDTLS.Protocol12
                         || (_serverCertificateType == CertificateType.X509 && Tls12ClientConnection.SignedWith(_certificate, s.RequiredCertificateSigner)))
                     && (!s.RequiresPsk || _settings.PskIdentityResolver != null)
                     && (!s.RequiresSrp || (_settings.SrpVerifierProvider != null && ch.Extension<SrpExtension>() != null))
-                    && (!s.RequiresPwd || (_settings.PwdCredentialProvider != null && EccPwd.HasUsername(ch, _settings.PwdProtectionKey)
+                    && (!s.RequiresPwd || (_settings.PwdCredentialProvider != null && EccPwd.HasUsername(ch, PwdCredential.PrivateKeyOf(_settings.PwdProtectionKey))
                                            && EccPwd.SelectGroup(ch) != 0)))
                 ?? throw (_serverCertificateType == null && serverKey != null
                     ? new DtlsException(AlertDescription.UnsupportedCertificate, "No certificate type in common.")
@@ -398,7 +398,7 @@ namespace SharpDTLS.Protocol12
                 PskResolver = _settings.PskIdentityResolver,
                 SrpVerifierProvider = _settings.SrpVerifierProvider,
                 PwdCredentialProvider = _settings.PwdCredentialProvider,
-                PwdProtectionKey = _settings.PwdProtectionKey,
+                PwdProtectionKey = PwdCredential.PrivateKeyOf(_settings.PwdProtectionKey),
                 PwdContext = () => Concat(ClientRandom, ServerRandom),
             });
 

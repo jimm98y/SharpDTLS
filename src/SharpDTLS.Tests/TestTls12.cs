@@ -90,7 +90,7 @@ namespace SharpDTLS.Tests
             OpenSsl.RequireOpenSsl();
             string dir = OpenSsl.NewTempDirectory();
             var (key, cert) = TestCredentials.For(CertificateKeyType.Rsa);
-            using var server = new Tls12Server(key, cert);
+            using var server = new Tls12Server(TestCertificates.Server(key, cert));
             var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             server.ApplicationDataReceived += (conn, e) =>
             {

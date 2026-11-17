@@ -34,7 +34,7 @@ namespace SharpDTLS.Tests
                 var server = new Dtls12Server(r.Pair.Server) { SrtpProtectionProfiles = srtpProfiles, SrtpDisableMki = disableMki, RequireClientCertificate = clientCredentials != null };
                 var client = new Dtls12Client(r.Pair.Client) { SrtpProtectionProfiles = srtpProfiles, SrtpMasterKeyIdentifier = clientMki };
                 if (clientCredentials != null)
-                    (client.ClientCertificateKeyPair, client.ClientCertificate) = clientCredentials.Value;
+                    client.ClientCredentials = TestCertificates.Credentials(clientCredentials.Value);
                 client.HandshakeFinished += (_, _) => done.TrySetResult(null);
                 r.Client = client;
                 r.ServerConnection = () => server.Connections.SingleOrDefault();
@@ -45,7 +45,7 @@ namespace SharpDTLS.Tests
                 var server = new Dtls13Server(r.Pair.Server) { SrtpProtectionProfiles = srtpProfiles, SrtpDisableMki = disableMki, RequireClientCertificate = clientCredentials != null };
                 var client = new Dtls13Client(r.Pair.Client) { SrtpProtectionProfiles = srtpProfiles, SrtpMasterKeyIdentifier = clientMki };
                 if (clientCredentials != null)
-                    (client.ClientCertificateKeyPair, client.ClientCertificate) = clientCredentials.Value;
+                    client.ClientCredentials = TestCertificates.Credentials(clientCredentials.Value);
                 client.HandshakeFinished += (_, _) => done.TrySetResult(null);
                 r.Client = client;
                 r.ServerConnection = () => server.Connections.SingleOrDefault();

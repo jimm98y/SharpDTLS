@@ -28,14 +28,14 @@ namespace SharpDTLS.Tests
         {
             var pair = new ScriptedTransportPair();
             var leaf = Pki.Leaf(new[] { "server.test" });
-            var server = new Dtls13Server(pair.Server, leaf.Key, leaf.Cert)
+            var server = new Dtls13Server(pair.Server, TestCertificates.Server(leaf.Key, leaf.Cert))
             {
-                IntermediateCertificates = new[] { Pki.Intermediate.Cert }, CertificateCompressionAlgorithms = serverAlgorithms,
+                IntermediateCertificates = new[] { Pki.Intermediate.Cert }.Net(), CertificateCompressionAlgorithms = serverAlgorithms,
                 RequireClientCertificate = clientAuth,
             };
             var client = new Dtls13Client(pair.Client) { CertificateCompressionAlgorithms = clientAlgorithms };
             if (clientAuth)
-                (client.ClientCertificateKeyPair, client.ClientCertificate) = Pki.Leaf(commonName: "client", usage: Org.BouncyCastle.Asn1.X509.KeyPurposeID.id_kp_clientAuth);
+                client.ClientCredentials = TestCertificates.Credentials(Pki.Leaf(commonName: "client", usage: Org.BouncyCastle.Asn1.X509.KeyPurposeID.id_kp_clientAuth));
             var done = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.HandshakeFinished += (_, _) => done.TrySetResult(null);
             client.Failed += (_, ex) => done.TrySetResult(ex);

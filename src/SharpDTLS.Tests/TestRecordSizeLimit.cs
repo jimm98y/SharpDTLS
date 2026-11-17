@@ -229,7 +229,7 @@ namespace SharpDTLS.Tests
 
             // OpenSSL enforces the length on what it receives, so our server's flight must be fragmented to 512.
             using var serverTransport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
-            var dtlsServer = new Dtls12Server(serverTransport, key, cert);
+            var dtlsServer = new Dtls12Server(serverTransport, TestCertificates.Server(key, cert));
             using var openSslClient = new OpenSslProcess($"s_client -dtls1_2 -connect 127.0.0.1:{serverTransport.LocalEndpoint.Port} -maxfraglen 512", dir);
             Assert.IsTrue(SpinWait.SpinUntil(() => dtlsServer.Connections.Any(c => c.IsHandshakeComplete), Timeout), openSslClient.Output);
             var connection = dtlsServer.Connections.Single();
@@ -280,7 +280,7 @@ namespace SharpDTLS.Tests
             // BouncyCastle client with a 256-byte limit, our server.
             using (var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0)))
             {
-                var server = new Dtls12Server(transport, keyPair, certificate) { RecordSizeLimit = 1000 };
+                var server = new Dtls12Server(transport, TestCertificates.Server(keyPair, certificate)) { RecordSizeLimit = 1000 };
                 server.ApplicationDataReceived += (conn, e) => server.SendApplicationData(conn.RemoteEndPoint, new byte[256]);
                 using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
                 socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));

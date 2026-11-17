@@ -49,10 +49,6 @@ namespace SharpDTLS.Protocol13.TLS13
         {
         }
 
-        public Tls13Server(AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
-            : this(CertificateCredentials.OfServer(keyPair, certificate))
-        {
-        }
 
         public Tls13Server(CertificateCredentials credentials)
             : base(credentials)
@@ -60,7 +56,7 @@ namespace SharpDTLS.Protocol13.TLS13
         }
 
         private Tls13Server((AsymmetricCipherKeyPair keyPair, X509Certificate certificate) credentials)
-            : this(credentials.keyPair, credentials.certificate)
+            : this(new ServerCredentials(credentials.keyPair, credentials.certificate))
         {
         }
 

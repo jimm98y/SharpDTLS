@@ -203,7 +203,7 @@ namespace SharpDTLS.Protocol13
                 _serverNameUsed = selected != null && ServerName != null;
                 (_credentials, _intermediates, _ocspResponse) = selected != null
                     ? (selected, selected.IntermediateChain, selected.OcspResponse)
-                    : (_server.Credentials, _server.IntermediateCertificates?.Select(c => c.GetEncoded()) ?? _server.Credentials?.IntermediateChain,
+                    : (_server.Credentials, _server.IntermediateCertificates?.Select(c => c.RawData) ?? _server.Credentials?.IntermediateChain,
                        _server.OcspResponse ?? (_server.Credentials as ServerCredentials)?.OcspResponse);
                 _certificate = _credentials?.Certificate;
                 if (_clientHello.Extensions.OfType<StatusRequestExtension>().FirstOrDefault()?.StatusType != StatusRequestExtension.Ocsp)

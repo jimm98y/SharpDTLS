@@ -180,11 +180,7 @@ namespace SharpDTLS.Protocol13
         public byte[] EarlyData { get; set; }
 
         // Set these before BeginHandshake to enable client authentication.
-        public AsymmetricCipherKeyPair ClientCertificateKeyPair { get; set; }
-        public X509Certificate ClientCertificate { get; set; }
 
-        /// <summary>Intermediate CA certificates sent after <see cref="ClientCertificate"/>.</summary>
-        public IList<X509Certificate> ClientIntermediateCertificates { get; set; }
 
         /// <summary>The client's credentials, before <see cref="ClientCertificate"/> and <see cref="ClientCertificateKeyPair"/>.</summary>
         public CertificateCredentials ClientCredentials { get; set; }
@@ -196,7 +192,7 @@ namespace SharpDTLS.Protocol13
         public Func<CertificateSelectionContext, CertificateCredentials> ClientCredentialsSelector { get; set; }
 
         /// <summary>CAs we trust, named in certificate_authorities (RFC 8446 §4.2.4) so the server can pick a matching chain.</summary>
-        public IList<X509Certificate> CertificateAuthorities { get; set; }
+        public IList<System.Security.Cryptography.X509Certificates.X509Certificate2> CertificateAuthorities { get; set; }
 
         /// <summary>Signature schemes we accept in certificates (signature_algorithms_cert, RFC 8446 §4.2.3); null to not send it.</summary>
         public IList<ushort> SignatureAlgorithmsCert { get; set; }
@@ -955,7 +951,7 @@ namespace SharpDTLS.Protocol13
             bool inHandshake = transcript == Session.Transcript;
             var chosen = ClientCredentialsSelector?.Invoke(new CertificateSelectionContext(null,
                 CertificateSelectionContext.ParseNames(request.CertificateAuthorities), request.SignatureAlgorithms, request.SignatureAlgorithmsCert));
-            var credentials = chosen ?? ClientCredentials ?? CertificateCredentials.Of(ClientCertificateKeyPair, ClientCertificate, ClientIntermediateCertificates);
+            var credentials = chosen ?? ClientCredentials;
             var clientCertificate = credentials?.Certificate;
 
             // Send our certificate only if we can sign with a scheme the server accepts.

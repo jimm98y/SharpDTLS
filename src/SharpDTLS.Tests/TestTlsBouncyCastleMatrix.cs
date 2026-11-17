@@ -92,7 +92,7 @@ namespace SharpDTLS.Tests
                 tcp.Connect((IPEndPoint)listener.LocalEndpoint);
                 var client = new Tls12Client(tcp.GetStream()) { MinimumVersion = version, MaximumVersion = version, CipherSuites = new List<ushort> { id } };
                 if (suite.IsStaticKeyAgreement)
-                    (client.ClientCertificateKeyPair, client.ClientCertificate) = TestCredentials.FixedClientFor(suite);
+                    client.ClientCredentials = TestCertificates.Credentials(TestCredentials.FixedClientFor(suite));
                 if (suite.RequiresSrp)
                     (client.SrpIdentity, client.SrpPassword) = (TestCredentials.SrpIdentity, TestCredentials.SrpPassword);
                 if (suite.RequiresPsk)
@@ -141,7 +141,7 @@ namespace SharpDTLS.Tests
                 Assert.Inconclusive("BouncyCastle's TLS client fails to send the empty ClientKeyExchange of fixed (EC)DH "
                     + "authentication (TlsFatalAlert from CheckUint24 in HandshakeMessageOutput.Send); its DTLS client works");
             var (keyPair, certificate) = TestCredentials.For(suite);
-            using var server = new Tls12Server(keyPair, certificate) { MinimumVersion = TlsVersion.Tls10, CipherSuites = new List<ushort> { id } };
+            using var server = new Tls12Server(TestCertificates.Server(keyPair, certificate)) { MinimumVersion = TlsVersion.Tls10, CipherSuites = new List<ushort> { id } };
             var (fixedKeyPair, fixedCertificate) = TestCredentials.FixedClientFor(suite);
             if (suite.IsStaticKeyAgreement)
                 server.RequireClientCertificate = true;

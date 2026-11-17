@@ -288,7 +288,7 @@ namespace SharpDTLS
         public System.Security.Cryptography.ECParameters? PwdProtectionKey
         {
             get => _pwdProtectionKey;
-            set { Engine12.PwdProtectionKey = PwdCredential.PublicKeyOf(value); _pwdProtectionKey = value; }
+            set { Engine12.PwdProtectionKey = value; _pwdProtectionKey = value; }
         }
 
         private System.Security.Cryptography.ECParameters? _pwdProtectionKey;
@@ -329,7 +329,7 @@ namespace SharpDTLS
         public IList<X509Certificate2> CertificateAuthorities
         {
             get => _certificateAuthorities;
-            set { _certificateAuthorities = value; Engine13.CertificateAuthorities = Certificates.ToBc(value); }
+            set { _certificateAuthorities = value; Engine13.CertificateAuthorities = value == null ? null : new List<X509Certificate2>(value); }
         }
 
         private IList<X509Certificate2> _certificateAuthorities;
