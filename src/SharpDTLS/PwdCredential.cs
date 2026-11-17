@@ -110,6 +110,10 @@ namespace SharpDTLS
         }
 
         /// <summary>A protection key's public half, as BouncyCastle's; null for none.</summary>
+        /// <summary>The username protected under the server's key (RFC 8492 §4.3), of the client's ECParameters.</summary>
+        internal static byte[] ProtectUsername(string username, ECParameters? key)
+            => EccPwd.ProtectUsername(username, PublicKeyOf(key), new SecureRandom());
+
         internal static ECPublicKeyParameters PublicKeyOf(ECParameters? key)
         {
             if (key == null)

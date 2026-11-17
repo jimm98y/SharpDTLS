@@ -411,7 +411,7 @@ namespace SharpDTLS.Protocol12
                 ch.Extensions.Add(new SrpExtension(SrpIdentity));
             if (offeredSuites.Any(s => s.RequiresPwd))
                 ch.Extensions.Add(PwdProtectionKey != null
-                    ? new PwdProtectExtension(EccPwd.ProtectUsername(PwdUsername, PwdCredential.PublicKeyOf(PwdProtectionKey), new Org.BouncyCastle.Security.SecureRandom()))
+                    ? new PwdProtectExtension(PwdCredential.ProtectUsername(PwdUsername, PwdProtectionKey))
                     : new PwdClearExtension(EccPwd.PrepareOpaqueString(PwdUsername)));
 
             _clientHello = ch;
