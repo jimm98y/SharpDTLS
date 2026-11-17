@@ -117,7 +117,7 @@ namespace SharpDTLS.Tests
             })
                 Assert.IsTrue(Org.BouncyCastle.Asn1.X9.X962Parameters.GetInstance(certificate.CertificateStructure.SubjectPublicKeyInfo.Algorithm.Parameters).IsNamedCurve);
 
-            var protectionKey = (Org.BouncyCastle.Crypto.Parameters.ECPublicKeyParameters)PwdCredential.GenerateProtectionKeyPair().Public;
+            var protectionKey = PwdCredential.PublicKeyOf(PwdCredential.GenerateProtectionKeyPair());
             Assert.IsInstanceOfType<Org.BouncyCastle.Crypto.Parameters.ECNamedDomainParameters>(protectionKey.Parameters);
         }
 

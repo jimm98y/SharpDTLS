@@ -54,11 +54,11 @@ namespace SharpDTLS.Protocol12
         // ServerSRPParams: srp_N<1..2^16-1> srp_g<1..2^16-1> srp_s<1..2^8-1> srp_B<1..2^16-1>
         public byte[] CreateServerParams()
         {
-            _server.Init(_verifier.Group, _verifier.Verifier, new Sha1Digest(), new SecureRandom());
+            _server.Init(_verifier.Group.Bc, new BigInteger(1, _verifier.Verifier), new Sha1Digest(), new SecureRandom());
             BigInteger b = _server.GenerateServerCredentials();
             return new TlsWriter()
-                .WriteOpaque16(BigIntegers.AsUnsignedByteArray(_verifier.Group.N))
-                .WriteOpaque16(BigIntegers.AsUnsignedByteArray(_verifier.Group.G))
+                .WriteOpaque16(_verifier.Group.N)
+                .WriteOpaque16(_verifier.Group.G)
                 .WriteOpaque8(_verifier.Salt)
                 .WriteOpaque16(BigIntegers.AsUnsignedByteArray(b))
                 .ToArray();
@@ -108,7 +108,7 @@ namespace SharpDTLS.Protocol12
             _b = new BigInteger(1, reader.ReadOpaque16());
 
             // RFC 5054 §2.5.3: only accept known-good groups, as checking N and g is impractical.
-            _group = SrpVerifier.StandardGroups.FirstOrDefault(s => s.N.Equals(n) && s.G.Equals(g))
+            _group = SrpVerifier.StandardGroups.FirstOrDefault(s => s.Bc.N.Equals(n) && s.Bc.G.Equals(g))?.Bc
                 ?? throw new DtlsException(AlertDescription.InsufficientSecurity, "Server sent an unknown SRP group.");
             if (n.BitLength < _context.MinimumDhPrimeBits)
                 throw new DtlsException(AlertDescription.InsufficientSecurity, $"SRP group of {n.BitLength} bits is below the configured minimum.");

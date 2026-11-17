@@ -210,8 +210,8 @@ namespace SharpDTLS.Tests
             if (verifier == null)
                 return null;
             var config = new TlsSrpConfig();
-            config.SetExplicitNG(new[] { verifier.Group.N, verifier.Group.G });
-            return new TlsSrpLoginParameters(identity, config, verifier.Verifier, verifier.Salt);
+            config.SetExplicitNG(new[] { verifier.Group.Bc.N, verifier.Group.Bc.G });
+            return new TlsSrpLoginParameters(identity, config, new Org.BouncyCastle.Math.BigInteger(1, verifier.Verifier), verifier.Salt);
         }
     }
 

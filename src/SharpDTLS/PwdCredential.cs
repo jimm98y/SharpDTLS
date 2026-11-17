@@ -30,6 +30,10 @@ using Org.BouncyCastle.Security;
 using SharpDTLS.Protocol12;
 using System;
 using System.Linq;
+using System.Security.Cryptography;
+using Org.BouncyCastle.Asn1;
+using Org.BouncyCastle.Utilities;
+using BcECPoint = Org.BouncyCastle.Math.EC.ECPoint;
 
 namespace SharpDTLS
 {
@@ -70,17 +74,64 @@ namespace SharpDTLS
         }
 
         /// <summary>
-        /// A username-protection key pair (RFC 8492 §4.3), on secp256r1 unless another curve is named.
-        /// The server keeps the private key; clients are provisioned with the public key.
+        /// A username-protection key pair (RFC 8492 §4.3), on secp256r1 unless another curve is named: D and Q.
+        /// The server keeps the private key; clients are provisioned with the public key, Q alone.
         /// </summary>
-        public static AsymmetricCipherKeyPair GenerateProtectionKeyPair(string curveName = "P-256")
+        public static ECParameters GenerateProtectionKeyPair(string curveName = "P-256")
         {
             var curve = ECNamedCurveTable.GetByName(curveName) ?? throw new ArgumentException($"Unknown curve {curveName}.", nameof(curveName));
             if (!curve.H.Equals(BigInteger.One))
                 throw new ArgumentException("Username protection needs a curve with cofactor 1.", nameof(curveName));
+            var oid = ECNamedCurveTable.GetOid(curveName);
             var generator = new ECKeyPairGenerator();
-            generator.Init(new ECKeyGenerationParameters(ECNamedCurveTable.GetOid(curveName), new SecureRandom()));
-            return generator.GenerateKeyPair();
+            generator.Init(new ECKeyGenerationParameters(oid, new SecureRandom()));
+            var pair = generator.GenerateKeyPair();
+            int length = (curve.Curve.FieldSize + 7) / 8;
+            var q = ((ECPublicKeyParameters)pair.Public).Q;
+            return new ECParameters
+            {
+                Curve = ECCurve.CreateFromValue(oid.Id),
+                D = BigIntegers.AsUnsignedByteArray(length, ((ECPrivateKeyParameters)pair.Private).D),
+                Q = new ECPoint
+                {
+                    X = BigIntegers.AsUnsignedByteArray(length, q.AffineXCoord.ToBigInteger()),
+                    Y = BigIntegers.AsUnsignedByteArray(length, q.AffineYCoord.ToBigInteger()),
+                },
+            };
+        }
+
+        /// <summary>A protection key's private half, as BouncyCastle's; null for none.</summary>
+        internal static ECPrivateKeyParameters PrivateKeyOf(ECParameters? key)
+        {
+            if (key == null)
+                return null;
+            if (key.Value.D == null)
+                throw new ArgumentException("The protection key has no private key (D).");
+            return new ECPrivateKeyParameters("EC", new BigInteger(1, key.Value.D), Certificates.CurveOid(key.Value.Curve));
+        }
+
+        /// <summary>A protection key's public half, as BouncyCastle's; null for none.</summary>
+        internal static ECPublicKeyParameters PublicKeyOf(ECParameters? key)
+        {
+            if (key == null)
+                return null;
+            var q = key.Value.Q;
+            if (q.X == null || q.Y == null)
+                throw new ArgumentException("The protection key has no public key (Q).");
+            DerObjectIdentifier oid = Certificates.CurveOid(key.Value.Curve);
+            var curve = ECNamedCurveTable.GetByOid(oid) ?? throw new ArgumentException("The protection key's curve is unknown.");
+            BcECPoint point;
+            try
+            {
+                point = curve.Curve.CreatePoint(new BigInteger(1, q.X), new BigInteger(1, q.Y));
+            }
+            catch (ArgumentException ex)
+            {
+                throw new ArgumentException("The protection key's Q is not on its curve.", ex);
+            }
+            if (!point.IsValid())
+                throw new ArgumentException("The protection key's Q is not on its curve.");
+            return new ECPublicKeyParameters("EC", point, oid);
         }
     }
 }

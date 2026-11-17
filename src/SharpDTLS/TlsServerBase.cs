@@ -216,9 +216,15 @@ namespace SharpDTLS
         /// <remarks>Used when 1.0-1.2 is negotiated.</remarks>
         public Func<string, PwdCredential> PwdCredentialProvider { get => Engine12.PwdCredentialProvider; set => Engine12.PwdCredentialProvider = value; }
 
-        /// <summary>Private key for recovering pwd_protect usernames (RFC 8492 §4.3.2); null accepts only pwd_clear.</summary>
+        /// <summary>Private key (D, on a named curve) for recovering pwd_protect usernames (RFC 8492 §4.3.2); null accepts only pwd_clear.</summary>
         /// <remarks>Used when 1.0-1.2 is negotiated.</remarks>
-        public Org.BouncyCastle.Crypto.Parameters.ECPrivateKeyParameters PwdProtectionKey { get => Engine12.PwdProtectionKey; set => Engine12.PwdProtectionKey = value; }
+        public System.Security.Cryptography.ECParameters? PwdProtectionKey
+        {
+            get => _pwdProtectionKey;
+            set { Engine12.PwdProtectionKey = PwdCredential.PrivateKeyOf(value); _pwdProtectionKey = value; }
+        }
+
+        private System.Security.Cryptography.ECParameters? _pwdProtectionKey;
 
         /// <summary>Resumable sessions by session ID; null disables session ID resumption.</summary>
         /// <remarks>Used when 1.0-1.2 is negotiated.</remarks>

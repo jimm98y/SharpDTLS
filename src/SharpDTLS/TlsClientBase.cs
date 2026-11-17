@@ -281,11 +281,17 @@ namespace SharpDTLS
         public string PwdPassword { get => Engine12.PwdPassword; set => Engine12.PwdPassword = value; }
 
         /// <summary>
-        /// The server's username-protection public key (RFC 8492 §4.3). When set the username is sent
+        /// The server's username-protection public key (Q, on a named curve; RFC 8492 §4.3). When set the username is sent
         /// encrypted in pwd_protect instead of in the clear.
         /// </summary>
         /// <remarks>Used when 1.0-1.2 is negotiated.</remarks>
-        public ECPublicKeyParameters PwdProtectionKey { get => Engine12.PwdProtectionKey; set => Engine12.PwdProtectionKey = value; }
+        public System.Security.Cryptography.ECParameters? PwdProtectionKey
+        {
+            get => _pwdProtectionKey;
+            set { Engine12.PwdProtectionKey = PwdCredential.PublicKeyOf(value); _pwdProtectionKey = value; }
+        }
+
+        private System.Security.Cryptography.ECParameters? _pwdProtectionKey;
 
         /// <summary>
         /// Set when this handshake is a retry at a lower version after a failed one: sends TLS_FALLBACK_SCSV
