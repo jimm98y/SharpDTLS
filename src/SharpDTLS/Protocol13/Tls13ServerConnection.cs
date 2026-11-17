@@ -51,6 +51,8 @@ namespace SharpDTLS.Protocol13
 
         // The DTLS server, for its datagram-only settings (connection IDs, SRTP, address updates).
         private Dtls13Server DatagramServer => (Dtls13Server)_server;
+
+        internal override ITlsCrypto Crypto => _server.Crypto;
         private State _state = State.Start;
         private ClientHelloDatagram _clientHello;
         private CertificateRequestDatagram _certificateRequest;

@@ -21,10 +21,6 @@
 
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Digests;
-using Org.BouncyCastle.Crypto.Engines;
-using Org.BouncyCastle.Crypto.Macs;
-using Org.BouncyCastle.Crypto.Modes;
-using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Tls.Crypto;
 using System;
 using System.Buffers.Binary;
@@ -63,11 +59,11 @@ namespace SharpDTLS.Protocol13
 
         private static readonly Dictionary<ushort, Dtls13CipherSuite> _suites = new[]
         {
-            new Dtls13CipherSuite(TLS_AES_128_GCM_SHA256, CryptoHashAlgorithm.sha256, 32, 16, 12, new BcAeadCipher(() => new GcmBlockCipher(new AesEngine()), 16, aesMask: true)),
-            new Dtls13CipherSuite(TLS_AES_256_GCM_SHA384, CryptoHashAlgorithm.sha384, 48, 32, 12, new BcAeadCipher(() => new GcmBlockCipher(new AesEngine()), 16, aesMask: true)),
-            new Dtls13CipherSuite(TLS_CHACHA20_POLY1305_SHA256, CryptoHashAlgorithm.sha256, 32, 32, 12, new BcAeadCipher(() => new Org.BouncyCastle.Crypto.Modes.ChaCha20Poly1305(), 16, aesMask: false)),
-            new Dtls13CipherSuite(TLS_AES_128_CCM_SHA256, CryptoHashAlgorithm.sha256, 32, 16, 12, new BcAeadCipher(() => new CcmBlockCipher(new AesEngine()), 16, aesMask: true)),
-            new Dtls13CipherSuite(TLS_AES_128_CCM_8_SHA256, CryptoHashAlgorithm.sha256, 32, 16, 12, new BcAeadCipher(() => new CcmBlockCipher(new AesEngine()), 8, aesMask: true)),
+            new Dtls13CipherSuite(TLS_AES_128_GCM_SHA256, CryptoHashAlgorithm.sha256, 32, 16, 12, new AeadRecordCipher(TlsAeadAlgorithm.AesGcm, 16, aesMask: true)),
+            new Dtls13CipherSuite(TLS_AES_256_GCM_SHA384, CryptoHashAlgorithm.sha384, 48, 32, 12, new AeadRecordCipher(TlsAeadAlgorithm.AesGcm, 16, aesMask: true)),
+            new Dtls13CipherSuite(TLS_CHACHA20_POLY1305_SHA256, CryptoHashAlgorithm.sha256, 32, 32, 12, new AeadRecordCipher(TlsAeadAlgorithm.ChaCha20Poly1305, 16, aesMask: false)),
+            new Dtls13CipherSuite(TLS_AES_128_CCM_SHA256, CryptoHashAlgorithm.sha256, 32, 16, 12, new AeadRecordCipher(TlsAeadAlgorithm.AesCcm, 16, aesMask: true)),
+            new Dtls13CipherSuite(TLS_AES_128_CCM_8_SHA256, CryptoHashAlgorithm.sha256, 32, 16, 12, new AeadRecordCipher(TlsAeadAlgorithm.AesCcm8, 8, aesMask: true)),
             new Dtls13CipherSuite(TLS_AEGIS_256_SHA512, CryptoHashAlgorithm.sha512, 64, 32, 32, new AegisCipher(aegis256: true)),
             new Dtls13CipherSuite(TLS_AEGIS_128L_SHA256, CryptoHashAlgorithm.sha256, 32, 16, 16, new AegisCipher(aegis256: false)),
             new Dtls13CipherSuite(TLS_SHA256_SHA256, CryptoHashAlgorithm.sha256, 32, 32, 32, new IntegrityOnlyCipher(sha384: false)),
@@ -157,80 +153,92 @@ namespace SharpDTLS.Protocol13
         };
     }
 
-    /// <summary>Record protection of a DTLS 1.3 cipher suite.</summary>
+    /// <summary>Record protection of a DTLS 1.3 cipher suite: of each traffic key, an <see cref="IDtls13Protection"/>.</summary>
     internal interface IDtls13RecordCipher
     {
         int TagLength { get; }
 
-        /// <summary>Returns ciphertext || tag.</summary>
-        byte[] Seal(byte[] key, byte[] nonce, byte[] aad, byte[] plaintext);
-
-        /// <summary>Returns the plaintext, or null when authentication fails.</summary>
-        byte[] Open(byte[] key, byte[] nonce, byte[] aad, byte[] ciphertext);
-
-        /// <summary>
-        /// The record number mask (RFC 9147 §4.2.3) from the start of the ciphertext, or null when record
-        /// numbers are sent in the clear (RFC 9150 §9).
-        /// </summary>
-        byte[] Mask(byte[] snKey, ReadOnlySpan<byte> ciphertext);
+        /// <summary>The protection of one traffic key and its record number key (sn_key).</summary>
+        IDtls13Protection Create(ITlsCrypto crypto, byte[] key, byte[] snKey);
     }
 
-    /// <summary>GCM, CCM, CCM_8 and ChaCha20-Poly1305 through BouncyCastle.</summary>
-    internal sealed class BcAeadCipher : IDtls13RecordCipher
+    /// <summary>The records of one traffic key, in one direction. Not thread-safe.</summary>
+    internal interface IDtls13Protection : IDisposable
     {
-        private readonly Func<IAeadCipher> _factory;
+        /// <summary>Writes ciphertext || tag; the output may be the plaintext itself.</summary>
+        void Seal(ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> aad, ReadOnlySpan<byte> plaintext, Span<byte> ciphertextAndTag);
+
+        /// <summary>Writes the plaintext, false when authentication fails; the output may be the ciphertext itself.</summary>
+        bool Open(ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> aad, ReadOnlySpan<byte> ciphertextAndTag, Span<byte> plaintext);
+
+        /// <summary>
+        /// The first bytes of the record number mask (RFC 9147 §4.2.3) of the start of the ciphertext; false when record
+        /// numbers are sent in the clear (RFC 9150 §9).
+        /// </summary>
+        bool Mask(ReadOnlySpan<byte> ciphertext, Span<byte> mask);
+    }
+
+    /// <summary>GCM, CCM, CCM_8 and ChaCha20-Poly1305, of the connection's <see cref="ITlsCrypto"/>.</summary>
+    internal sealed class AeadRecordCipher : IDtls13RecordCipher
+    {
+        private readonly TlsAeadAlgorithm _algorithm;
         private readonly bool _aesMask;
 
-        public BcAeadCipher(Func<IAeadCipher> factory, int tagLength, bool aesMask)
+        public AeadRecordCipher(TlsAeadAlgorithm algorithm, int tagLength, bool aesMask)
         {
-            _factory = factory;
+            _algorithm = algorithm;
             TagLength = tagLength;
             _aesMask = aesMask;
         }
 
         public int TagLength { get; }
 
-        public byte[] Seal(byte[] key, byte[] nonce, byte[] aad, byte[] plaintext)
-        {
-            var aead = _factory();
-            aead.Init(true, new AeadParameters(new KeyParameter(key), TagLength * 8, nonce, aad));
-            byte[] output = new byte[aead.GetOutputSize(plaintext.Length)];
-            int written = aead.ProcessBytes(plaintext, 0, plaintext.Length, output, 0);
-            aead.DoFinal(output, written);
-            return output;
-        }
+        public IDtls13Protection Create(ITlsCrypto crypto, byte[] key, byte[] snKey)
+            => new Protection(crypto.CreateAead(_algorithm, key), _aesMask ? crypto.CreateBlockCipher(TlsBlockCipherAlgorithm.Aes, snKey) : null, snKey);
 
-        public byte[] Open(byte[] key, byte[] nonce, byte[] aad, byte[] ciphertext)
+        private sealed class Protection : IDtls13Protection
         {
-            if (ciphertext.Length < TagLength)
-                return null;
-            try
+            private readonly ITlsAead _aead;
+            private readonly ITlsBlockCipher _mask;
+            private readonly byte[] _snKey;
+
+            public Protection(ITlsAead aead, ITlsBlockCipher mask, byte[] snKey)
             {
-                var aead = _factory();
-                aead.Init(false, new AeadParameters(new KeyParameter(key), TagLength * 8, nonce, aad));
-                byte[] output = new byte[aead.GetOutputSize(ciphertext.Length)];
-                int written = aead.ProcessBytes(ciphertext, 0, ciphertext.Length, output, 0);
-                aead.DoFinal(output, written);
-                return output;
+                _aead = aead;
+                _mask = mask;
+                _snKey = snKey;
             }
-            catch (InvalidCipherTextException)
+
+            public void Seal(ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> aad, ReadOnlySpan<byte> plaintext, Span<byte> ciphertextAndTag)
+                => _aead.Seal(nonce, aad, plaintext, ciphertextAndTag);
+
+            public bool Open(ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> aad, ReadOnlySpan<byte> ciphertextAndTag, Span<byte> plaintext)
+                => _aead.Open(nonce, aad, ciphertextAndTag, plaintext);
+
+            // AES-based AEADs: AES-ECB(sn_key, sample); ChaCha20: the block keyed by sn_key, with the sample
+            // as counter (first 4 bytes, little-endian) and nonce (next 12).
+            public bool Mask(ReadOnlySpan<byte> ciphertext, Span<byte> mask)
             {
-                return null;
+                if (_mask == null)
+                {
+                    Span<byte> block = stackalloc byte[64];
+                    ChaCha20Block.Compute(_snKey, BinaryPrimitives.ReadUInt32LittleEndian(ciphertext), ciphertext.Slice(4, 12), block);
+                    block.Slice(0, mask.Length).CopyTo(mask);
+                    return true;
+                }
+                Span<byte> zeroIv = stackalloc byte[16];
+                zeroIv.Clear();
+                Span<byte> sample = stackalloc byte[16];
+                _mask.EncryptCbc(zeroIv, ciphertext.Slice(0, 16), sample);
+                sample.Slice(0, mask.Length).CopyTo(mask);
+                return true;
             }
-        }
 
-        // AES-based AEADs: AES-ECB(sn_key, sample); ChaCha20: the block keyed by sn_key, with the sample
-        // as counter (first 4 bytes, little-endian) and nonce (next 12).
-        public byte[] Mask(byte[] snKey, ReadOnlySpan<byte> ciphertext)
-        {
-            if (!_aesMask)
-                return ChaCha20Block.Compute(snKey, BinaryPrimitives.ReadUInt32LittleEndian(ciphertext), ciphertext.Slice(4, 12).ToArray());
-
-            byte[] sample = ciphertext.Slice(0, 16).ToArray();
-            var aes = new AesEngine();
-            aes.Init(true, new KeyParameter(snKey));
-            aes.ProcessBlock(sample, 0, sample, 0);
-            return sample;
+            public void Dispose()
+            {
+                (_aead as IDisposable)?.Dispose();
+                (_mask as IDisposable)?.Dispose();
+            }
         }
     }
 
@@ -243,18 +251,50 @@ namespace SharpDTLS.Protocol13
 
         public int TagLength => 16;
 
-        public byte[] Seal(byte[] key, byte[] nonce, byte[] aad, byte[] plaintext)
-            => _aegis256 ? Aegis.Encrypt256(key, nonce, aad, plaintext) : Aegis.Encrypt128L(key, nonce, aad, plaintext);
+        public IDtls13Protection Create(ITlsCrypto crypto, byte[] key, byte[] snKey) => new Protection(_aegis256, key, snKey);
 
-        public byte[] Open(byte[] key, byte[] nonce, byte[] aad, byte[] ciphertext)
-            => _aegis256 ? Aegis.Decrypt256(key, nonce, aad, ciphertext) : Aegis.Decrypt128L(key, nonce, aad, ciphertext);
-
-        // mask = Stream(5, sn_key, ZeroPad(ciphertext[0..16], nonce_len))
-        public byte[] Mask(byte[] snKey, ReadOnlySpan<byte> ciphertext)
+        // AEGIS is our own code, of arrays.
+        private sealed class Protection : IDtls13Protection
         {
-            byte[] nonce = new byte[_aegis256 ? 32 : 16];
-            ciphertext.Slice(0, 16).CopyTo(nonce);
-            return _aegis256 ? Aegis.Stream256(5, snKey, nonce) : Aegis.Stream128L(5, snKey, nonce);
+            private readonly bool _aegis256;
+            private readonly byte[] _key, _snKey;
+
+            public Protection(bool aegis256, byte[] key, byte[] snKey)
+            {
+                _aegis256 = aegis256;
+                _key = key;
+                _snKey = snKey;
+            }
+
+            public void Seal(ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> aad, ReadOnlySpan<byte> plaintext, Span<byte> ciphertextAndTag)
+            {
+                byte[] sealedData = _aegis256
+                    ? Aegis.Encrypt256(_key, nonce.ToArray(), aad.ToArray(), plaintext.ToArray())
+                    : Aegis.Encrypt128L(_key, nonce.ToArray(), aad.ToArray(), plaintext.ToArray());
+                sealedData.CopyTo(ciphertextAndTag);
+            }
+
+            public bool Open(ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> aad, ReadOnlySpan<byte> ciphertextAndTag, Span<byte> plaintext)
+            {
+                byte[] result = _aegis256
+                    ? Aegis.Decrypt256(_key, nonce.ToArray(), aad.ToArray(), ciphertextAndTag.ToArray())
+                    : Aegis.Decrypt128L(_key, nonce.ToArray(), aad.ToArray(), ciphertextAndTag.ToArray());
+                result?.CopyTo(plaintext);
+                return result != null;
+            }
+
+            // mask = Stream(5, sn_key, ZeroPad(ciphertext[0..16], nonce_len))
+            public bool Mask(ReadOnlySpan<byte> ciphertext, Span<byte> mask)
+            {
+                byte[] nonce = new byte[_aegis256 ? 32 : 16];
+                ciphertext.Slice(0, 16).CopyTo(nonce);
+                (_aegis256 ? Aegis.Stream256(5, _snKey, nonce) : Aegis.Stream128L(5, _snKey, nonce)).AsSpan(0, mask.Length).CopyTo(mask);
+                return true;
+            }
+
+            public void Dispose()
+            {
+            }
         }
     }
 
@@ -269,35 +309,46 @@ namespace SharpDTLS.Protocol13
 
         public int TagLength => _sha384 ? 48 : 32;
 
-        public byte[] Seal(byte[] key, byte[] nonce, byte[] aad, byte[] plaintext)
-        {
-            byte[] output = new byte[plaintext.Length + TagLength];
-            plaintext.CopyTo(output, 0);
-            Mac(key, nonce, aad, plaintext).CopyTo(output, plaintext.Length);
-            return output;
-        }
+        public IDtls13Protection Create(ITlsCrypto crypto, byte[] key, byte[] snKey)
+            => new Protection(crypto.CreateHmac(_sha384 ? TlsHashAlgorithm.Sha384 : TlsHashAlgorithm.Sha256, key));
 
-        public byte[] Open(byte[] key, byte[] nonce, byte[] aad, byte[] ciphertext)
+        private sealed class Protection : IDtls13Protection
         {
-            if (ciphertext.Length < TagLength)
-                return null;
-            byte[] plaintext = ciphertext.AsSpan(0, ciphertext.Length - TagLength).ToArray();
-            return CryptographicOperations.FixedTimeEquals(Mac(key, nonce, aad, plaintext), ciphertext.AsSpan(plaintext.Length)) ? plaintext : null;
-        }
+            private readonly ITlsHash _hmac;
 
-        // RFC 9150 §9: record sequence numbers are sent unencrypted.
-        public byte[] Mask(byte[] snKey, ReadOnlySpan<byte> ciphertext) => null;
+            public Protection(ITlsHash hmac) => _hmac = hmac;
 
-        private byte[] Mac(byte[] key, byte[] nonce, byte[] aad, byte[] plaintext)
-        {
-            var hmac = new HMac(_sha384 ? new Sha384Digest() : new Sha256Digest());
-            hmac.Init(new KeyParameter(key));
-            hmac.BlockUpdate(nonce, 0, nonce.Length);
-            hmac.BlockUpdate(aad, 0, aad.Length);
-            hmac.BlockUpdate(plaintext, 0, plaintext.Length);
-            byte[] tag = new byte[hmac.GetMacSize()];
-            hmac.DoFinal(tag, 0);
-            return tag;
+            public void Seal(ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> aad, ReadOnlySpan<byte> plaintext, Span<byte> ciphertextAndTag)
+            {
+                plaintext.CopyTo(ciphertextAndTag);
+                Mac(nonce, aad, plaintext, ciphertextAndTag.Slice(plaintext.Length, _hmac.HashLength));
+            }
+
+            public bool Open(ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> aad, ReadOnlySpan<byte> ciphertextAndTag, Span<byte> plaintext)
+            {
+                int length = ciphertextAndTag.Length - _hmac.HashLength;
+                if (length < 0)
+                    return false;
+                Span<byte> tag = stackalloc byte[_hmac.HashLength];
+                Mac(nonce, aad, ciphertextAndTag.Slice(0, length), tag);
+                if (!CryptographicOperations.FixedTimeEquals(tag, ciphertextAndTag.Slice(length)))
+                    return false;
+                ciphertextAndTag.Slice(0, length).CopyTo(plaintext);
+                return true;
+            }
+
+            // RFC 9150 §9: record sequence numbers are sent unencrypted.
+            public bool Mask(ReadOnlySpan<byte> ciphertext, Span<byte> mask) => false;
+
+            private void Mac(ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> aad, ReadOnlySpan<byte> plaintext, Span<byte> tag)
+            {
+                _hmac.Append(nonce);
+                _hmac.Append(aad);
+                _hmac.Append(plaintext);
+                _hmac.Finish(tag);
+            }
+
+            public void Dispose() => (_hmac as IDisposable)?.Dispose();
         }
     }
 }

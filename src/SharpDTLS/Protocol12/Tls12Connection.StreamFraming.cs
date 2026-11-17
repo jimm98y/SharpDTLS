@@ -40,6 +40,14 @@ namespace SharpDTLS.Protocol12
             private readonly ByteQueue _handshake = new();
 
             private IRecordCipher _readCipher, _writeCipher, _pendingReadCipher, _pendingWriteCipher;
+
+            public override void DisposeCiphers()
+            {
+                _readCipher?.Dispose();
+                _writeCipher?.Dispose();
+                _pendingReadCipher?.Dispose();
+                _pendingWriteCipher?.Dispose();
+            }
             private ulong _readSequence, _writeSequence;
             private ushort _readEpoch;
 

@@ -53,6 +53,9 @@ namespace SharpDTLS.Protocol12
             /// <summary>The ciphers that take effect at the next ChangeCipherSpec in each direction.</summary>
             public abstract void SetPendingCiphers(IRecordCipher read, IRecordCipher write);
 
+            /// <summary>Releases every cipher's native resources (.NET's ciphers), when the connection closes.</summary>
+            public abstract void DisposeCiphers();
+
             /// <summary>Whether reads have switched to the negotiated keys.</summary>
             public abstract bool IsReadProtected { get; }
 

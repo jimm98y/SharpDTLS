@@ -188,9 +188,6 @@ namespace SharpDTLS.Protocol13
         /// <summary>The client's credentials, before <see cref="ClientCertificate"/> and <see cref="ClientCertificateKeyPair"/>.</summary>
         public CertificateCredentials ClientCredentials { get; set; }
 
-        /// <summary>The operations of the client's private key.</summary>
-        public ITlsCrypto Crypto { get; set; } = BouncyCastleTlsCrypto.Default;
-
         /// <summary>
         /// Chooses the client credentials for a CertificateRequest (the CAs and signature schemes the server accepts);
         /// returning null uses <see cref="ClientCertificate"/> and <see cref="ClientCertificateKeyPair"/>.

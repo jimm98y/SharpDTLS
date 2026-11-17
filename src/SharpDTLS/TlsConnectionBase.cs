@@ -187,6 +187,9 @@ namespace SharpDTLS
         /// <summary>Server: where this connection sends, the client's address, which can move with connection IDs.</summary>
         public virtual EndPoint RemoteEndPoint => null;
 
+        /// <summary>The cryptography of the connection: its private key operations and its record protection.</summary>
+        internal virtual ITlsCrypto Crypto { get; set; } = BouncyCastleTlsCrypto.Default;
+
         /// <summary>Server: a newer client address awaiting <see cref="ConfirmPeerAddress"/> (when not following automatically).</summary>
         public virtual EndPoint PendingPeerAddress => null;
 

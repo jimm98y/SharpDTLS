@@ -86,5 +86,26 @@ namespace SharpDTLS.Protocol13
         public byte[] ServerIv { get; }
         public byte[] ClientSnKey { get; }
         public byte[] ServerSnKey { get; }
+
+        private IDtls13Protection _client, _server;
+
+        /// <summary>
+        /// The records of one direction's key: built on first use, of <paramref name="crypto"/> (the default when null),
+        /// and kept for every record of the epoch.
+        /// </summary>
+        internal IDtls13Protection Protection(bool fromClient, ITlsCrypto crypto)
+        {
+            crypto ??= BouncyCastleTlsCrypto.Default;
+            return fromClient
+                ? _client ??= Suite.Cipher.Create(crypto, ClientKey, ClientSnKey)
+                : _server ??= Suite.Cipher.Create(crypto, ServerKey, ServerSnKey);
+        }
+
+        /// <summary>Releases the keys' native resources (.NET's ciphers); the context is of no use afterwards.</summary>
+        internal void Dispose()
+        {
+            _client?.Dispose();
+            _server?.Dispose();
+        }
     }
 }

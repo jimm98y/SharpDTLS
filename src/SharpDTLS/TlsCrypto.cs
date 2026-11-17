@@ -27,6 +27,7 @@ using Org.BouncyCastle.Security;
 using SharpDTLS.Protocol10;
 using SharpDTLS.Protocol12;
 using SharpDTLS.Protocol13;
+using System;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using BigInteger = Org.BouncyCastle.Math.BigInteger;
@@ -34,8 +35,9 @@ using BigInteger = Org.BouncyCastle.Math.BigInteger;
 namespace SharpDTLS
 {
     /// <summary>
-    /// The operations of a local private key: whatever holds the key (BouncyCastle, .NET, an HSM) implements them.
-    /// Set it as <see cref="TlsClientBase.Crypto"/> or <see cref="TlsServerBase.Crypto"/>.
+    /// The cryptography of a connection: the operations of the local private key, whatever holds it (BouncyCastle, .NET,
+    /// an HSM), and the primitives of record protection. Set it as <see cref="TlsClientBase.Crypto"/> or
+    /// <see cref="TlsServerBase.Crypto"/>; derive from <see cref="BouncyCastleTlsCrypto"/> to keep what is not overridden.
     /// </summary>
     public interface ITlsCrypto
     {
@@ -58,6 +60,16 @@ namespace SharpDTLS
         /// or a DH public value as unsigned big-endian bytes. Returns the shared secret as TLS uses it (RFC 8422 §5.10, RFC 5246 §8.1.2).
         /// </summary>
         byte[] Agree(CertificateCredentials credentials, byte[] peerPublicKey);
+
+        /// <summary>The AEAD of one record protection key, used for every record of that key.</summary>
+        ITlsAead CreateAead(TlsAeadAlgorithm algorithm, ReadOnlySpan<byte> key);
+
+        /// <summary>The block cipher of one CBC record key, or of the DTLS 1.3 record number key.</summary>
+        ITlsBlockCipher CreateBlockCipher(TlsBlockCipherAlgorithm algorithm, ReadOnlySpan<byte> key);
+
+        ITlsHash CreateHash(TlsHashAlgorithm hash);
+
+        ITlsHash CreateHmac(TlsHashAlgorithm hash, ReadOnlySpan<byte> key);
     }
 
     /// <summary>The default <see cref="ITlsCrypto"/>: the private key is BouncyCastle's.</summary>
@@ -98,6 +110,14 @@ namespace SharpDTLS
             ECPrivateKeyParameters ec => StaticEcdh.Agree(ec, peerPublicKey),
             _ => throw new CryptographicException("The key is not a key agreement key."),
         };
+
+        public virtual ITlsAead CreateAead(TlsAeadAlgorithm algorithm, ReadOnlySpan<byte> key) => BcPrimitives.Aead(algorithm, key);
+
+        public virtual ITlsBlockCipher CreateBlockCipher(TlsBlockCipherAlgorithm algorithm, ReadOnlySpan<byte> key) => BcPrimitives.BlockCipher(algorithm, key);
+
+        public virtual ITlsHash CreateHash(TlsHashAlgorithm hash) => new BcHash(BcPrimitives.Digest(hash));
+
+        public virtual ITlsHash CreateHmac(TlsHashAlgorithm hash, ReadOnlySpan<byte> key) => new BcHash(BcPrimitives.Digest(hash), key);
 
         /// <summary>The BouncyCastle private key of <paramref name="credentials"/>: of PKCS#8, or exported of the certificate once.</summary>
         private static AsymmetricKeyParameter PrivateKey(CertificateCredentials credentials)
@@ -155,6 +175,8 @@ namespace SharpDTLS
     /// (PKCS#8 keys, Ed25519, Ed448, DSA, DH, static ECDH) and the MD5 || SHA-1 RSA signature of TLS 1.0/1.1 are left to
     /// <see cref="BouncyCastleTlsCrypto"/>. RSA key transport is the platform's PKCS#1 v1.5 decryption, whose failures may
     /// take longer than successes; prefer the ECDHE and DHE cipher suites, as the defaults do.
+    /// On .NET 8 and later, records are protected by .NET's AES-GCM, AES-CCM and ChaCha20-Poly1305 where the platform has
+    /// them, which allocate nothing per record, and hashed by .NET's hashes and HMACs.
     /// </summary>
     public class NetTlsCrypto : BouncyCastleTlsCrypto
     {
@@ -207,6 +229,28 @@ namespace SharpDTLS
                 throw new CryptographicException("RSA decryption failed.", ex);
             }
         }
+
+        // .NET Framework and .NET Standard have no AEAD and no span hashes: BouncyCastle's there
+        public override ITlsAead CreateAead(TlsAeadAlgorithm algorithm, ReadOnlySpan<byte> key)
+#if NETCOREAPP
+            => (ITlsAead)NetAead.Create(algorithm, key) ?? base.CreateAead(algorithm, key);
+#else
+            => base.CreateAead(algorithm, key);
+#endif
+
+        public override ITlsHash CreateHash(TlsHashAlgorithm hash)
+#if NETCOREAPP
+            => new NetHash(hash, default, hmac: false);
+#else
+            => base.CreateHash(hash);
+#endif
+
+        public override ITlsHash CreateHmac(TlsHashAlgorithm hash, ReadOnlySpan<byte> key)
+#if NETCOREAPP
+            => new NetHash(hash, key, hmac: true);
+#else
+            => base.CreateHmac(hash, key);
+#endif
 
         // The certificate holds the key, and BouncyCastle has none of it: of PKCS#8, or of the engines' key pairs.
         private static bool OwnKey(CertificateCredentials credentials)

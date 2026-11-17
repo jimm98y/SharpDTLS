@@ -54,6 +54,16 @@ namespace SharpDTLS.Protocol12
             private readonly Dictionary<ushort, IRecordCipher> _readCiphers = new() { [0] = null };
             private readonly Dictionary<ushort, RecordWindow> _readWindows = new() { [0] = new RecordWindow() };
             private IRecordCipher _pendingReadCipher;
+
+            public override void DisposeCiphers()
+            {
+                foreach (var cipher in _writeCiphers.Values)
+                    cipher?.Dispose();
+                foreach (var cipher in _readCiphers.Values)
+                    cipher?.Dispose();
+                _pendingReadCipher?.Dispose();
+                _pendingWriteCipher?.Dispose();
+            }
             private bool _changeCipherSpecPending;
             private readonly List<byte[]> _futureEpochRecords = new();
 

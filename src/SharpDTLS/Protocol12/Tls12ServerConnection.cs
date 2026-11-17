@@ -159,6 +159,8 @@ namespace SharpDTLS.Protocol12
         }
 
         private readonly Tls12ServerSettings _settings;
+
+        internal override ITlsCrypto Crypto => _settings.Crypto;
         private ITlsExtension _recordSizeResponse;
         private State _state = State.Start;
         private ClientHelloMessage _clientHello;

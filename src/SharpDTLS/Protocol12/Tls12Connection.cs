@@ -265,6 +265,9 @@ namespace SharpDTLS.Protocol12
         /// The pending ciphers from an existing master secret: a resumed session's keys come from its master
         /// secret and the new hello randoms (RFC 5246 §7.3).
         /// </summary>
+        // .NET's ciphers hold native resources: released when the connection closes, not by their finalizers
+        protected override void OnClosed() => _framing.DisposeCiphers();
+
         protected void DeriveKeysFromMasterSecret(byte[] masterSecret)
         {
             MasterSecret = masterSecret;
@@ -276,7 +279,7 @@ namespace SharpDTLS.Protocol12
                 inspector.OnSecret(this, IsClient, TlsInspector.MasterSecret, MasterSecret);
                 inspector.OnSecret(this, IsClient, TlsInspector.KeyBlock, keyBlock);
             }
-            var (clientWrite, serverWrite) = RecordCiphers.Create(CipherSuite, keyBlock, UseEncryptThenMac && CipherSuite.IsCbc, implicitIv);
+            var (clientWrite, serverWrite) = RecordCiphers.Create(CipherSuite, keyBlock, UseEncryptThenMac && CipherSuite.IsCbc, implicitIv, Crypto);
             _framing.SetPendingCiphers(read: IsClient ? serverWrite : clientWrite, write: IsClient ? clientWrite : serverWrite);
 
             KeyLogWriter?.Invoke($"CLIENT_RANDOM {Convert.ToHexString(ClientRandom).ToLowerInvariant()} {Convert.ToHexString(MasterSecret).ToLowerInvariant()}");

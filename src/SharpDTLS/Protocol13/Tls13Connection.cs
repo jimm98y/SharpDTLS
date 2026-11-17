@@ -305,6 +305,16 @@ namespace SharpDTLS.Protocol13
         /// </summary>
         protected Dtls13CryptoContext TlsReadKeysOverride { get; set; }
 
+        // .NET's ciphers hold native resources: released when the connection closes, not by their finalizers
+        protected override void OnClosed()
+        {
+            Session.WriteKeys?.Dispose();
+            foreach (var keys in Session.ReadKeys)
+                keys.Dispose();
+            Session.ServerApplicationKeys?.Dispose();
+            TlsReadKeysOverride?.Dispose();
+        }
+
         /// <summary>Processes bytes received from a TLS stream (any amount: partial or several records).</summary>
         public void ProcessStreamData(byte[] data, int offset, int count) => Run(() =>
         {
@@ -400,7 +410,7 @@ namespace SharpDTLS.Protocol13
             if (keys == null)
                 throw new DtlsException(AlertDescription.UnexpectedMessage, "Protected record before the keys are known.");
             _tlsReadSequence.TryGetValue(keys, out ulong sequence);
-            byte[] inner = Dtls13RecordProtection.UnprotectTls(keys, fromClient: !IsClient, sequence, record);
+            byte[] inner = Dtls13RecordProtection.UnprotectTls(keys, fromClient: !IsClient, sequence, record, Crypto);
             if (inner == null)
             {
                 if (SkipUndecryptableBytes >= record.Length)
@@ -589,7 +599,7 @@ namespace SharpDTLS.Protocol13
             Dtls13RecordProtection.UnprotectedRecord unprotected;
             try
             {
-                unprotected = Dtls13RecordProtection.Unprotect(keys, fromClient: !IsClient, record, ReceiveConnectionIdLength);
+                unprotected = Dtls13RecordProtection.Unprotect(keys, fromClient: !IsClient, record, ReceiveConnectionIdLength, Crypto);
             }
             catch (DtlsRecordAuthenticationException)
             {
@@ -1031,9 +1041,9 @@ namespace SharpDTLS.Protocol13
             TlsInspector.Current?.OnProtectedRecord(this, IsClient, true, innerPlaintext[^1], keys.Epoch, seq, innerPlaintext.AsSpan(0, innerPlaintext.Length - 1));
 
             if (!IsDatagram)
-                return (Dtls13RecordProtection.ProtectTls(keys, IsClient, seq, innerPlaintext), (keys.Epoch, seq));
+                return (Dtls13RecordProtection.ProtectTls(keys, IsClient, seq, innerPlaintext, Crypto), (keys.Epoch, seq));
             byte[] cid = keys.Epoch >= 2 && WriteConnectionId is { Length: > 0 } ? WriteConnectionId : null;
-            return (Dtls13RecordProtection.Protect(keys, IsClient, (int)keys.Epoch, seq, innerPlaintext, cid), (keys.Epoch, seq));
+            return (Dtls13RecordProtection.Protect(keys, IsClient, (int)keys.Epoch, seq, innerPlaintext, cid, Crypto), (keys.Epoch, seq));
         }
 
         /// <summary>Protects and queues one record outside any flight. Returns its record number.</summary>

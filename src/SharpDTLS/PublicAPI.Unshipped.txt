@@ -1,4 +1,7 @@
 const SharpDTLS.SignatureSchemes.RsaPkcs1Md5Sha1 = 65281 -> ushort
+override SharpDTLS.NetTlsCrypto.CreateAead(SharpDTLS.TlsAeadAlgorithm algorithm, System.ReadOnlySpan<byte> key) -> SharpDTLS.ITlsAead
+override SharpDTLS.NetTlsCrypto.CreateHash(SharpDTLS.TlsHashAlgorithm hash) -> SharpDTLS.ITlsHash
+override SharpDTLS.NetTlsCrypto.CreateHmac(SharpDTLS.TlsHashAlgorithm hash, System.ReadOnlySpan<byte> key) -> SharpDTLS.ITlsHash
 override SharpDTLS.NetTlsCrypto.DecryptPreMasterSecret(SharpDTLS.CertificateCredentials credentials, byte[] encrypted) -> byte[]
 override SharpDTLS.NetTlsCrypto.Sign(SharpDTLS.CertificateCredentials credentials, ushort scheme, byte[] content) -> byte[]
 SharpDTLS.AlertDescription.GeneralError = 117 -> SharpDTLS.AlertDescription
@@ -19,10 +22,26 @@ SharpDTLS.CertificateValidatorExtensions
 SharpDTLS.DtlsServer.DtlsServer(SharpDTLS.UDP.IServerTransport serverTransport, SharpDTLS.ServerCredentials credentials) -> void
 SharpDTLS.ICertificateValidator
 SharpDTLS.ICertificateValidator.Validate(System.Collections.Generic.IReadOnlyList<byte[]> chain, string usage, string hostName) -> void
+SharpDTLS.ITlsAead
+SharpDTLS.ITlsAead.Open(System.ReadOnlySpan<byte> nonce, System.ReadOnlySpan<byte> associatedData, System.ReadOnlySpan<byte> ciphertextAndTag, System.Span<byte> plaintext) -> bool
+SharpDTLS.ITlsAead.Seal(System.ReadOnlySpan<byte> nonce, System.ReadOnlySpan<byte> associatedData, System.ReadOnlySpan<byte> plaintext, System.Span<byte> ciphertextAndTag) -> void
+SharpDTLS.ITlsAead.TagLength.get -> int
+SharpDTLS.ITlsBlockCipher
+SharpDTLS.ITlsBlockCipher.BlockSize.get -> int
+SharpDTLS.ITlsBlockCipher.DecryptCbc(System.ReadOnlySpan<byte> iv, System.ReadOnlySpan<byte> input, System.Span<byte> output) -> void
+SharpDTLS.ITlsBlockCipher.EncryptCbc(System.ReadOnlySpan<byte> iv, System.ReadOnlySpan<byte> input, System.Span<byte> output) -> void
 SharpDTLS.ITlsCrypto
 SharpDTLS.ITlsCrypto.Agree(SharpDTLS.CertificateCredentials credentials, byte[] peerPublicKey) -> byte[]
+SharpDTLS.ITlsCrypto.CreateAead(SharpDTLS.TlsAeadAlgorithm algorithm, System.ReadOnlySpan<byte> key) -> SharpDTLS.ITlsAead
+SharpDTLS.ITlsCrypto.CreateBlockCipher(SharpDTLS.TlsBlockCipherAlgorithm algorithm, System.ReadOnlySpan<byte> key) -> SharpDTLS.ITlsBlockCipher
+SharpDTLS.ITlsCrypto.CreateHash(SharpDTLS.TlsHashAlgorithm hash) -> SharpDTLS.ITlsHash
+SharpDTLS.ITlsCrypto.CreateHmac(SharpDTLS.TlsHashAlgorithm hash, System.ReadOnlySpan<byte> key) -> SharpDTLS.ITlsHash
 SharpDTLS.ITlsCrypto.DecryptPreMasterSecret(SharpDTLS.CertificateCredentials credentials, byte[] encrypted) -> byte[]
 SharpDTLS.ITlsCrypto.Sign(SharpDTLS.CertificateCredentials credentials, ushort scheme, byte[] content) -> byte[]
+SharpDTLS.ITlsHash
+SharpDTLS.ITlsHash.Append(System.ReadOnlySpan<byte> data) -> void
+SharpDTLS.ITlsHash.Finish(System.Span<byte> destination) -> void
+SharpDTLS.ITlsHash.HashLength.get -> int
 SharpDTLS.NetTlsCrypto
 SharpDTLS.NetTlsCrypto.NetTlsCrypto() -> void
 SharpDTLS.OcspStapleValidator.OcspStapleValidator(System.Collections.Generic.IEnumerable<System.Security.Cryptography.X509Certificates.X509Certificate2> issuers = null) -> void
@@ -35,6 +54,21 @@ SharpDTLS.SrpGroup.SrpGroup(byte[] n, byte[] g) -> void
 SharpDTLS.SrpVerifier.Group.get -> SharpDTLS.SrpGroup
 SharpDTLS.SrpVerifier.SrpVerifier(SharpDTLS.SrpGroup group, byte[] salt, byte[] verifier) -> void
 SharpDTLS.SrpVerifier.Verifier.get -> byte[]
+SharpDTLS.TlsAeadAlgorithm
+SharpDTLS.TlsAeadAlgorithm.AesCcm = 1 -> SharpDTLS.TlsAeadAlgorithm
+SharpDTLS.TlsAeadAlgorithm.AesCcm8 = 2 -> SharpDTLS.TlsAeadAlgorithm
+SharpDTLS.TlsAeadAlgorithm.AesGcm = 0 -> SharpDTLS.TlsAeadAlgorithm
+SharpDTLS.TlsAeadAlgorithm.AriaGcm = 5 -> SharpDTLS.TlsAeadAlgorithm
+SharpDTLS.TlsAeadAlgorithm.CamelliaGcm = 4 -> SharpDTLS.TlsAeadAlgorithm
+SharpDTLS.TlsAeadAlgorithm.ChaCha20Poly1305 = 3 -> SharpDTLS.TlsAeadAlgorithm
+SharpDTLS.TlsBlockCipherAlgorithm
+SharpDTLS.TlsBlockCipherAlgorithm.Aes = 0 -> SharpDTLS.TlsBlockCipherAlgorithm
+SharpDTLS.TlsBlockCipherAlgorithm.Aria = 2 -> SharpDTLS.TlsBlockCipherAlgorithm
+SharpDTLS.TlsBlockCipherAlgorithm.Camellia = 1 -> SharpDTLS.TlsBlockCipherAlgorithm
+SharpDTLS.TlsBlockCipherAlgorithm.Des = 5 -> SharpDTLS.TlsBlockCipherAlgorithm
+SharpDTLS.TlsBlockCipherAlgorithm.Idea = 6 -> SharpDTLS.TlsBlockCipherAlgorithm
+SharpDTLS.TlsBlockCipherAlgorithm.Seed = 3 -> SharpDTLS.TlsBlockCipherAlgorithm
+SharpDTLS.TlsBlockCipherAlgorithm.TripleDes = 4 -> SharpDTLS.TlsBlockCipherAlgorithm
 SharpDTLS.TlsClientBase.CertificateAuthorities.get -> System.Collections.Generic.IList<System.Security.Cryptography.X509Certificates.X509Certificate2>
 SharpDTLS.TlsClientBase.ClientCredentials.get -> SharpDTLS.CertificateCredentials
 SharpDTLS.TlsClientBase.ClientCredentials.set -> void
@@ -44,6 +78,12 @@ SharpDTLS.TlsClientBase.PwdProtectionKey.get -> System.Security.Cryptography.ECP
 SharpDTLS.TlsClientBase.ServerCertificateValidator.get -> System.Func<System.Security.Cryptography.X509Certificates.X509Certificate2, System.Collections.Generic.IReadOnlyList<byte[]>, bool>
 SharpDTLS.TlsConnectionBase.LocalCertificate.get -> System.Security.Cryptography.X509Certificates.X509Certificate2
 SharpDTLS.TlsConnectionBase.PeerCertificate.get -> System.Security.Cryptography.X509Certificates.X509Certificate2
+SharpDTLS.TlsHashAlgorithm
+SharpDTLS.TlsHashAlgorithm.Md5 = 0 -> SharpDTLS.TlsHashAlgorithm
+SharpDTLS.TlsHashAlgorithm.Sha1 = 1 -> SharpDTLS.TlsHashAlgorithm
+SharpDTLS.TlsHashAlgorithm.Sha256 = 2 -> SharpDTLS.TlsHashAlgorithm
+SharpDTLS.TlsHashAlgorithm.Sha384 = 3 -> SharpDTLS.TlsHashAlgorithm
+SharpDTLS.TlsHashAlgorithm.Sha512 = 4 -> SharpDTLS.TlsHashAlgorithm
 SharpDTLS.TlsServer.TlsServer(SharpDTLS.ServerCredentials credentials) -> void
 SharpDTLS.TlsServerBase.ClientCertificateAuthorities.get -> System.Collections.Generic.IList<System.Security.Cryptography.X509Certificates.X509Certificate2>
 SharpDTLS.TlsServerBase.ClientCertificateValidator.get -> System.Func<System.Security.Cryptography.X509Certificates.X509Certificate2, System.Collections.Generic.IReadOnlyList<byte[]>, bool>
@@ -74,6 +114,10 @@ static SharpDTLS.PwdCredential.GenerateProtectionKeyPair(string curveName = "P-2
 static SharpDTLS.SrpVerifier.Create(byte[] identity, byte[] password, SharpDTLS.SrpGroup group = null) -> SharpDTLS.SrpVerifier
 static SharpDTLS.SrpVerifier.StandardGroups.get -> System.Collections.Generic.IReadOnlyList<SharpDTLS.SrpGroup>
 virtual SharpDTLS.BouncyCastleTlsCrypto.Agree(SharpDTLS.CertificateCredentials credentials, byte[] peerPublicKey) -> byte[]
+virtual SharpDTLS.BouncyCastleTlsCrypto.CreateAead(SharpDTLS.TlsAeadAlgorithm algorithm, System.ReadOnlySpan<byte> key) -> SharpDTLS.ITlsAead
+virtual SharpDTLS.BouncyCastleTlsCrypto.CreateBlockCipher(SharpDTLS.TlsBlockCipherAlgorithm algorithm, System.ReadOnlySpan<byte> key) -> SharpDTLS.ITlsBlockCipher
+virtual SharpDTLS.BouncyCastleTlsCrypto.CreateHash(SharpDTLS.TlsHashAlgorithm hash) -> SharpDTLS.ITlsHash
+virtual SharpDTLS.BouncyCastleTlsCrypto.CreateHmac(SharpDTLS.TlsHashAlgorithm hash, System.ReadOnlySpan<byte> key) -> SharpDTLS.ITlsHash
 virtual SharpDTLS.BouncyCastleTlsCrypto.DecryptPreMasterSecret(SharpDTLS.CertificateCredentials credentials, byte[] encrypted) -> byte[]
 virtual SharpDTLS.BouncyCastleTlsCrypto.Sign(SharpDTLS.CertificateCredentials credentials, ushort scheme, byte[] content) -> byte[]
 *REMOVED*abstract SharpDTLS.TlsConnectionBase.PeerCertificate.get -> Org.BouncyCastle.X509.X509Certificate
