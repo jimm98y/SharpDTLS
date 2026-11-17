@@ -310,7 +310,7 @@ namespace SharpDTLS.Protocol13
             {
                 if (!SupportedGroups.Contains(group))
                     throw new InvalidOperationException($"Key share group {Dtls13Groups.Name(group)} is not in SupportedGroups.");
-                _keyShares[group] = Dtls13Groups.Generate(group);
+                _keyShares[group] = Dtls13Groups.Generate(group, Crypto);
             }
 
             _clientHello = BuildClientHello(random, cookie: null);
@@ -657,7 +657,7 @@ namespace SharpDTLS.Protocol13
                     throw new DtlsException(AlertDescription.IllegalParameter,
                         $"HelloRetryRequest selected group {Dtls13Groups.Name(keyShare.KeyType)}, which was not offered or already had a key share.");
                 _keyShares.Clear();
-                _keyShares[keyShare.KeyType] = Dtls13Groups.Generate(keyShare.KeyType);
+                _keyShares[keyShare.KeyType] = Dtls13Groups.Generate(keyShare.KeyType, Crypto);
             }
             else if (cookie == null)
             {

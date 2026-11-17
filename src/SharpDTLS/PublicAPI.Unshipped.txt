@@ -2,6 +2,7 @@ const SharpDTLS.SignatureSchemes.RsaPkcs1Md5Sha1 = 65281 -> ushort
 override SharpDTLS.NetTlsCrypto.CreateAead(SharpDTLS.TlsAeadAlgorithm algorithm, System.ReadOnlySpan<byte> key) -> SharpDTLS.ITlsAead
 override SharpDTLS.NetTlsCrypto.CreateHash(SharpDTLS.TlsHashAlgorithm hash) -> SharpDTLS.ITlsHash
 override SharpDTLS.NetTlsCrypto.CreateHmac(SharpDTLS.TlsHashAlgorithm hash, System.ReadOnlySpan<byte> key) -> SharpDTLS.ITlsHash
+override SharpDTLS.NetTlsCrypto.CreateKeyShare(ushort group) -> SharpDTLS.ITlsKeyShare
 override SharpDTLS.NetTlsCrypto.DecryptPreMasterSecret(SharpDTLS.CertificateCredentials credentials, byte[] encrypted) -> byte[]
 override SharpDTLS.NetTlsCrypto.Sign(SharpDTLS.CertificateCredentials credentials, ushort scheme, byte[] content) -> byte[]
 SharpDTLS.AlertDescription.GeneralError = 117 -> SharpDTLS.AlertDescription
@@ -41,12 +42,17 @@ SharpDTLS.ITlsCrypto.CreateAead(SharpDTLS.TlsAeadAlgorithm algorithm, System.Rea
 SharpDTLS.ITlsCrypto.CreateBlockCipher(SharpDTLS.TlsBlockCipherAlgorithm algorithm, System.ReadOnlySpan<byte> key) -> SharpDTLS.ITlsBlockCipher
 SharpDTLS.ITlsCrypto.CreateHash(SharpDTLS.TlsHashAlgorithm hash) -> SharpDTLS.ITlsHash
 SharpDTLS.ITlsCrypto.CreateHmac(SharpDTLS.TlsHashAlgorithm hash, System.ReadOnlySpan<byte> key) -> SharpDTLS.ITlsHash
+SharpDTLS.ITlsCrypto.CreateKeyShare(ushort group) -> SharpDTLS.ITlsKeyShare
 SharpDTLS.ITlsCrypto.DecryptPreMasterSecret(SharpDTLS.CertificateCredentials credentials, byte[] encrypted) -> byte[]
+SharpDTLS.ITlsCrypto.Encapsulate(ushort group, byte[] encapsulationKey, out byte[] sharedSecret) -> byte[]
 SharpDTLS.ITlsCrypto.Sign(SharpDTLS.CertificateCredentials credentials, ushort scheme, byte[] content) -> byte[]
 SharpDTLS.ITlsHash
 SharpDTLS.ITlsHash.Append(System.ReadOnlySpan<byte> data) -> void
 SharpDTLS.ITlsHash.Finish(System.Span<byte> destination) -> void
 SharpDTLS.ITlsHash.HashLength.get -> int
+SharpDTLS.ITlsKeyShare
+SharpDTLS.ITlsKeyShare.Agree(byte[] peerPublicKey) -> byte[]
+SharpDTLS.ITlsKeyShare.PublicKey.get -> byte[]
 SharpDTLS.NetTlsCrypto
 SharpDTLS.NetTlsCrypto.NetTlsCrypto() -> void
 SharpDTLS.OcspStapleValidator.OcspStapleValidator(System.Collections.Generic.IEnumerable<System.Security.Cryptography.X509Certificates.X509Certificate2> issuers = null) -> void
@@ -140,7 +146,9 @@ virtual SharpDTLS.BouncyCastleTlsCrypto.CreateAead(SharpDTLS.TlsAeadAlgorithm al
 virtual SharpDTLS.BouncyCastleTlsCrypto.CreateBlockCipher(SharpDTLS.TlsBlockCipherAlgorithm algorithm, System.ReadOnlySpan<byte> key) -> SharpDTLS.ITlsBlockCipher
 virtual SharpDTLS.BouncyCastleTlsCrypto.CreateHash(SharpDTLS.TlsHashAlgorithm hash) -> SharpDTLS.ITlsHash
 virtual SharpDTLS.BouncyCastleTlsCrypto.CreateHmac(SharpDTLS.TlsHashAlgorithm hash, System.ReadOnlySpan<byte> key) -> SharpDTLS.ITlsHash
+virtual SharpDTLS.BouncyCastleTlsCrypto.CreateKeyShare(ushort group) -> SharpDTLS.ITlsKeyShare
 virtual SharpDTLS.BouncyCastleTlsCrypto.DecryptPreMasterSecret(SharpDTLS.CertificateCredentials credentials, byte[] encrypted) -> byte[]
+virtual SharpDTLS.BouncyCastleTlsCrypto.Encapsulate(ushort group, byte[] encapsulationKey, out byte[] sharedSecret) -> byte[]
 virtual SharpDTLS.BouncyCastleTlsCrypto.Sign(SharpDTLS.CertificateCredentials credentials, ushort scheme, byte[] content) -> byte[]
 *REMOVED*abstract SharpDTLS.TlsConnectionBase.PeerCertificate.get -> Org.BouncyCastle.X509.X509Certificate
 *REMOVED*SharpDTLS.CertificateCredentials.Certificate.get -> Org.BouncyCastle.X509.X509Certificate

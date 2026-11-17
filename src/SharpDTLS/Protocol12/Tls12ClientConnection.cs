@@ -672,6 +672,7 @@ namespace SharpDTLS.Protocol12
         {
             _keyExchange = KeyExchanges.CreateClient(CipherSuite, new ClientKeyExchangeContext
             {
+                Crypto = Crypto,
                 ClientHelloVersion = _clientHello.ClientVersion,
                 ServerPublicKey = _serverPublicKey,
                 MinimumDhPrimeBits = MinimumDhPrimeBits,

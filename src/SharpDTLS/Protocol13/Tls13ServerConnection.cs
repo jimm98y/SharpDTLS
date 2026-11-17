@@ -372,7 +372,7 @@ namespace SharpDTLS.Protocol13
             if (!_pskOnly)
             {
                 (share, sharedSecret) = Dtls13Groups.Respond(_group,
-                    _clientHello.Extensions.OfType<ClientKeyShareExtension>().First().GetKeyShare(_group));
+                    _clientHello.Extensions.OfType<ClientKeyShareExtension>().First().GetKeyShare(_group), Crypto);
                 NegotiatedGroup = _group;
             }
 

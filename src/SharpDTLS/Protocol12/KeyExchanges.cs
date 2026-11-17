@@ -28,6 +28,7 @@ using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Math;
 using Org.BouncyCastle.Security;
 using SharpDTLS.Protocol12.Messages;
+using SharpDTLS.Protocol13;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -97,6 +98,7 @@ namespace SharpDTLS.Protocol12
 
     internal sealed class ServerKeyExchangeContext
     {
+        public ITlsCrypto Crypto { get; set; } = BouncyCastleTlsCrypto.Default;
         public ClientHelloMessage ClientHello { get; set; }
         /// <summary>The public key of the server's certificate (or raw public key); its private key's operations are below.</summary>
         public AsymmetricKeyParameter ServerPublicKey { get; set; }
@@ -114,6 +116,7 @@ namespace SharpDTLS.Protocol12
 
     internal sealed class ClientKeyExchangeContext
     {
+        public ITlsCrypto Crypto { get; set; } = BouncyCastleTlsCrypto.Default;
         public ushort ClientHelloVersion { get; set; }
         public AsymmetricKeyParameter ServerPublicKey { get; set; }
         public int MinimumDhPrimeBits { get; set; }
@@ -154,15 +157,15 @@ namespace SharpDTLS.Protocol12
 
         public static IClientKeyExchange CreateClient(CipherSuiteInfo suite, ClientKeyExchangeContext context) => suite.KeyExchange switch
         {
-            KeyExchangeAlgorithm.ECDHE_ECDSA or KeyExchangeAlgorithm.ECDHE_RSA => new EcdheClientKeyExchange(),
+            KeyExchangeAlgorithm.ECDHE_ECDSA or KeyExchangeAlgorithm.ECDHE_RSA => new EcdheClientKeyExchange(context.Crypto),
             KeyExchangeAlgorithm.DHE_RSA or KeyExchangeAlgorithm.DHE_DSS => new DheClientKeyExchange(context),
             KeyExchangeAlgorithm.RSA => new RsaClientKeyExchange(context),
             KeyExchangeAlgorithm.PSK => new PskClientKeyExchange(context, null),
             KeyExchangeAlgorithm.DHE_PSK or KeyExchangeAlgorithm.PSK_DHE => new PskClientKeyExchange(context, new DheClientKeyExchange(context)),
-            KeyExchangeAlgorithm.ECDHE_PSK => new PskClientKeyExchange(context, new EcdheClientKeyExchange()),
+            KeyExchangeAlgorithm.ECDHE_PSK => new PskClientKeyExchange(context, new EcdheClientKeyExchange(context.Crypto)),
             KeyExchangeAlgorithm.RSA_PSK => new PskClientKeyExchange(context, new RsaClientKeyExchange(context)),
             KeyExchangeAlgorithm.DH_anon => new DheClientKeyExchange(context, signed: false),
-            KeyExchangeAlgorithm.ECDH_anon => new EcdheClientKeyExchange(signed: false),
+            KeyExchangeAlgorithm.ECDH_anon => new EcdheClientKeyExchange(context.Crypto, signed: false),
             KeyExchangeAlgorithm.DH_DSS or KeyExchangeAlgorithm.DH_RSA => new StaticDhClientKeyExchange(context),
             KeyExchangeAlgorithm.ECDH_ECDSA or KeyExchangeAlgorithm.ECDH_RSA => new StaticEcdhClientKeyExchange(context),
             KeyExchangeAlgorithm.SRP_SHA => new SrpClientKeyExchange(context, signed: false),
@@ -176,10 +179,12 @@ namespace SharpDTLS.Protocol12
 
     internal sealed class EcdheServerKeyExchange : IServerKeyExchange
     {
-        private byte[] _privateKey;
+        private readonly ITlsCrypto _crypto;
+        private ITlsKeyShare _share;
 
         public EcdheServerKeyExchange(ServerKeyExchangeContext context, bool signed = true)
         {
+            _crypto = context.Crypto;
             SignsParams = signed;
             // RFC 8422 §5.1.1: without supported_groups the client is assumed to support any curve.
             var groups = context.ClientHello.Extension<SupportedGroupsExtension>();
@@ -194,8 +199,8 @@ namespace SharpDTLS.Protocol12
         // ServerECDHParams: curve_type(3 = named_curve) || named_curve || point<1..255>
         public byte[] CreateServerParams()
         {
-            (_privateKey, byte[] publicKey) = EcdheGroups.GenerateKeyPair(Group);
-            return new TlsWriter().WriteUInt8(3).WriteUInt16(Group).WriteOpaque8(publicKey).ToArray();
+            _share = Dtls13Groups.Share(_crypto, Group);
+            return new TlsWriter().WriteUInt8(3).WriteUInt16(Group).WriteOpaque8(_share.PublicKey).ToArray();
         }
 
         public byte[] ProcessClientKeyExchange(byte[] body)
@@ -203,15 +208,20 @@ namespace SharpDTLS.Protocol12
             var r = new TlsReader(body);
             byte[] clientPublicKey = r.ReadOpaque8();
             r.EnsureEnd();
-            return EcdheGroups.Agree(Group, _privateKey, clientPublicKey);
+            return Dtls13Groups.Agree(_share, clientPublicKey);
         }
     }
 
     internal sealed class EcdheClientKeyExchange : IClientKeyExchange
     {
+        private readonly ITlsCrypto _crypto;
         private byte[] _serverPublicKey;
 
-        public EcdheClientKeyExchange(bool signed = true) => ServerParamsSigned = signed;
+        public EcdheClientKeyExchange(ITlsCrypto crypto, bool signed = true)
+        {
+            _crypto = crypto;
+            ServerParamsSigned = signed;
+        }
 
         public ServerKeyExchangeRequirement ServerKeyExchange => ServerKeyExchangeRequirement.Required;
         public bool ServerParamsSigned { get; }
@@ -229,9 +239,9 @@ namespace SharpDTLS.Protocol12
 
         public byte[] CreateClientKeyExchange(out byte[] preMasterSecret)
         {
-            var (privateKey, publicKey) = EcdheGroups.GenerateKeyPair(Group);
-            preMasterSecret = EcdheGroups.Agree(Group, privateKey, _serverPublicKey);
-            return new TlsWriter().WriteOpaque8(publicKey).ToArray();
+            var share = Dtls13Groups.Share(_crypto, Group);
+            preMasterSecret = Dtls13Groups.Agree(share, _serverPublicKey);
+            return new TlsWriter().WriteOpaque8(share.PublicKey).ToArray();
         }
     }
 

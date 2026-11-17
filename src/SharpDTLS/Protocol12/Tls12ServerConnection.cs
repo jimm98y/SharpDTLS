@@ -388,6 +388,7 @@ namespace SharpDTLS.Protocol12
 
             _keyExchange = KeyExchanges.CreateServer(CipherSuite, new ServerKeyExchangeContext
             {
+                Crypto = Crypto,
                 ClientHello = ch,
                 ServerPublicKey = serverKey,
                 DecryptPreMasterSecret = encrypted => _settings.Crypto.DecryptPreMasterSecret(_credentials, encrypted),

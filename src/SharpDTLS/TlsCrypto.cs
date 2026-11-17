@@ -70,6 +70,18 @@ namespace SharpDTLS
         ITlsHash CreateHash(TlsHashAlgorithm hash);
 
         ITlsHash CreateHmac(TlsHashAlgorithm hash, ReadOnlySpan<byte> key);
+
+        /// <summary>
+        /// An ephemeral key of the named group <paramref name="group"/> (RFC 8446 §4.2.7: an elliptic curve, x25519, x448,
+        /// ffdhe or ML-KEM); null when this provider has none for it.
+        /// </summary>
+        ITlsKeyShare CreateKeyShare(ushort group);
+
+        /// <summary>
+        /// ML-KEM encapsulation to the peer's <paramref name="encapsulationKey"/>: returns the ciphertext. Throws a
+        /// <see cref="CryptographicException"/> for an invalid key.
+        /// </summary>
+        byte[] Encapsulate(ushort group, byte[] encapsulationKey, out byte[] sharedSecret);
     }
 
     /// <summary>The default <see cref="ITlsCrypto"/>: the private key is BouncyCastle's.</summary>
@@ -118,6 +130,11 @@ namespace SharpDTLS
         public virtual ITlsHash CreateHash(TlsHashAlgorithm hash) => new BcHash(BcPrimitives.Digest(hash));
 
         public virtual ITlsHash CreateHmac(TlsHashAlgorithm hash, ReadOnlySpan<byte> key) => new BcHash(BcPrimitives.Digest(hash), key);
+
+        public virtual ITlsKeyShare CreateKeyShare(ushort group) => Dtls13Groups.IsSupported(group) ? BcKeyShares.Create(group) : null;
+
+        public virtual byte[] Encapsulate(ushort group, byte[] encapsulationKey, out byte[] sharedSecret)
+            => BcKeyShares.Encapsulate(group, encapsulationKey, out sharedSecret);
 
         /// <summary>The BouncyCastle private key of <paramref name="credentials"/>: of PKCS#8, or exported of the certificate once.</summary>
         private static AsymmetricKeyParameter PrivateKey(CertificateCredentials credentials)
@@ -250,6 +267,14 @@ namespace SharpDTLS
             => new NetHash(hash, key, hmac: true);
 #else
             => base.CreateHmac(hash, key);
+#endif
+
+        // ECDHE of .NET's ECDiffieHellman on .NET 8+; X25519, X448, FFDHE and ML-KEM of BouncyCastle
+        public override ITlsKeyShare CreateKeyShare(ushort group)
+#if NETCOREAPP
+            => NetKeyShares.Create(group) ?? base.CreateKeyShare(group);
+#else
+            => base.CreateKeyShare(group);
 #endif
 
         // The certificate holds the key, and BouncyCastle has none of it: of PKCS#8, or of the engines' key pairs.

@@ -19,17 +19,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 // SOFTWARE.
 
-using Org.BouncyCastle.Asn1.X9;
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Crypto.Agreement;
-using Org.BouncyCastle.Crypto.Generators;
-using Org.BouncyCastle.Crypto.Kems;
-using Org.BouncyCastle.Crypto.Parameters;
-using Org.BouncyCastle.Math;
-using Org.BouncyCastle.Math.EC;
-using Org.BouncyCastle.Security;
-using Org.BouncyCastle.Utilities;
-using SharpDTLS.Protocol12;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -95,45 +84,25 @@ namespace SharpDTLS.Protocol13
             internal Func<byte[], byte[]> Complete { get; set; }
         }
 
-        /// <summary>Generates the client's key share for <paramref name="group"/>.</summary>
-        internal static ClientKeyShare Generate(ushort group)
+        /// <summary>Generates the client's key share for <paramref name="group"/>, of <paramref name="crypto"/>'s keys.</summary>
+        internal static ClientKeyShare Generate(ushort group, ITlsCrypto crypto = null)
         {
+            crypto ??= BouncyCastleTlsCrypto.Default;
             switch (group)
             {
-                case X25519:
-                case X448:
-                case Secp256r1:
-                case Secp384r1:
-                case Secp521r1:
-                case Ffdhe2048:
-                case Ffdhe3072:
-                case Ffdhe4096:
-                case Ffdhe6144:
-                case Ffdhe8192:
-                {
-                    var (share, agree) = GenerateClassical(group);
-                    return new ClientKeyShare { Group = group, Share = share, Complete = agree };
-                }
-                case MlKem512:
-                case MlKem768:
-                case MlKem1024:
-                {
-                    var (share, decapsulate) = GenerateMlKem(MlKemParameters(group));
-                    return new ClientKeyShare { Group = group, Share = share, Complete = decapsulate };
-                }
                 case X25519MlKem768:
                 {
                     // ML-KEM first for X25519MLKEM768: share = ek || x25519, secret = ss || x25519 secret.
-                    var (ek, decapsulate) = GenerateMlKem(Org.BouncyCastle.Crypto.Parameters.MLKemParameters.ml_kem_768);
-                    var (ecdh, agree) = GenerateClassical(X25519);
+                    var kem = Share(crypto, MlKem768);
+                    var ecdh = Share(crypto, X25519);
                     return new ClientKeyShare
                     {
                         Group = group,
-                        Share = Concat(ek, ecdh),
+                        Share = Concat(kem.PublicKey, ecdh.PublicKey),
                         Complete = serverShare =>
                         {
-                            Expect(serverShare, 1088 + 32);
-                            return Concat(decapsulate(serverShare.AsSpan(0, 1088).ToArray()), agree(serverShare.AsSpan(1088).ToArray()));
+                            BcKeyShares.Expect(serverShare, 1088 + 32);
+                            return Concat(Agree(kem, serverShare.AsSpan(0, 1088).ToArray()), Agree(ecdh, serverShare.AsSpan(1088).ToArray()));
                         },
                     };
                 }
@@ -141,242 +110,99 @@ namespace SharpDTLS.Protocol13
                 case SecP384r1MlKem1024:
                 {
                     // ECDH first: share = point || ek, secret = ECDH secret || ss.
-                    ushort curve = group == SecP256r1MlKem768 ? Secp256r1 : Secp384r1;
-                    var parameters = group == SecP256r1MlKem768
-                        ? Org.BouncyCastle.Crypto.Parameters.MLKemParameters.ml_kem_768
-                        : Org.BouncyCastle.Crypto.Parameters.MLKemParameters.ml_kem_1024;
+                    var ecdh = Share(crypto, group == SecP256r1MlKem768 ? Secp256r1 : Secp384r1);
+                    var kem = Share(crypto, group == SecP256r1MlKem768 ? MlKem768 : MlKem1024);
                     int pointLength = group == SecP256r1MlKem768 ? 65 : 97;
                     int ciphertextLength = group == SecP256r1MlKem768 ? 1088 : 1568;
-                    var (ecdh, agree) = GenerateClassical(curve);
-                    var (ek, decapsulate) = GenerateMlKem(parameters);
                     return new ClientKeyShare
                     {
                         Group = group,
-                        Share = Concat(ecdh, ek),
+                        Share = Concat(ecdh.PublicKey, kem.PublicKey),
                         Complete = serverShare =>
                         {
-                            Expect(serverShare, pointLength + ciphertextLength);
-                            return Concat(agree(serverShare.AsSpan(0, pointLength).ToArray()), decapsulate(serverShare.AsSpan(pointLength).ToArray()));
+                            BcKeyShares.Expect(serverShare, pointLength + ciphertextLength);
+                            return Concat(Agree(ecdh, serverShare.AsSpan(0, pointLength).ToArray()), Agree(kem, serverShare.AsSpan(pointLength).ToArray()));
                         },
                     };
                 }
                 default:
-                    throw new DtlsException(AlertDescription.InternalError, $"Group {Name(group)} is not supported.");
+                {
+                    if (!IsSupported(group))
+                        throw new DtlsException(AlertDescription.InternalError, $"Group {Name(group)} is not supported.");
+                    var share = Share(crypto, group);
+                    return new ClientKeyShare { Group = group, Share = share.PublicKey, Complete = peer => Agree(share, peer) };
+                }
             }
         }
 
         /// <summary>The server's side: its key share and the shared secret for the client's <paramref name="clientShare"/>.</summary>
-        internal static (byte[] Share, byte[] Secret) Respond(ushort group, byte[] clientShare)
+        internal static (byte[] Share, byte[] Secret) Respond(ushort group, byte[] clientShare, ITlsCrypto crypto = null)
         {
+            crypto ??= BouncyCastleTlsCrypto.Default;
             switch (group)
             {
                 case MlKem512:
                 case MlKem768:
                 case MlKem1024:
-                    return Encapsulate(MlKemParameters(group), clientShare);
+                    return Encapsulate(crypto, group, clientShare);
 
                 case X25519MlKem768:
                 {
-                    Expect(clientShare, 1184 + 32);
-                    var (ciphertext, kemSecret) = Encapsulate(Org.BouncyCastle.Crypto.Parameters.MLKemParameters.ml_kem_768, clientShare.AsSpan(0, 1184).ToArray());
-                    var (ecdh, ecdhSecret) = RespondClassical(X25519, clientShare.AsSpan(1184).ToArray());
+                    BcKeyShares.Expect(clientShare, 1184 + 32);
+                    var (ciphertext, kemSecret) = Encapsulate(crypto, MlKem768, clientShare.AsSpan(0, 1184).ToArray());
+                    var (ecdh, ecdhSecret) = RespondClassical(crypto, X25519, clientShare.AsSpan(1184).ToArray());
                     return (Concat(ciphertext, ecdh), Concat(kemSecret, ecdhSecret));
                 }
                 case SecP256r1MlKem768:
                 case SecP384r1MlKem1024:
                 {
                     ushort curve = group == SecP256r1MlKem768 ? Secp256r1 : Secp384r1;
-                    var parameters = group == SecP256r1MlKem768
-                        ? Org.BouncyCastle.Crypto.Parameters.MLKemParameters.ml_kem_768
-                        : Org.BouncyCastle.Crypto.Parameters.MLKemParameters.ml_kem_1024;
                     int pointLength = group == SecP256r1MlKem768 ? 65 : 97;
                     int keyLength = group == SecP256r1MlKem768 ? 1184 : 1568;
-                    Expect(clientShare, pointLength + keyLength);
-                    var (ecdh, ecdhSecret) = RespondClassical(curve, clientShare.AsSpan(0, pointLength).ToArray());
-                    var (ciphertext, kemSecret) = Encapsulate(parameters, clientShare.AsSpan(pointLength).ToArray());
+                    BcKeyShares.Expect(clientShare, pointLength + keyLength);
+                    var (ecdh, ecdhSecret) = RespondClassical(crypto, curve, clientShare.AsSpan(0, pointLength).ToArray());
+                    var (ciphertext, kemSecret) = Encapsulate(crypto, group == SecP256r1MlKem768 ? MlKem768 : MlKem1024, clientShare.AsSpan(pointLength).ToArray());
                     return (Concat(ecdh, ciphertext), Concat(ecdhSecret, kemSecret));
                 }
                 default:
-                    return RespondClassical(group, clientShare);
+                    return RespondClassical(crypto, group, clientShare);
             }
         }
 
-        // ── (EC)DHE ──────────────────────────────────────────────────────────────────────────
-
-        private static (byte[] Share, Func<byte[], byte[]> Agree) GenerateClassical(ushort group)
+        private static (byte[] Share, byte[] Secret) RespondClassical(ITlsCrypto crypto, ushort group, byte[] clientShare)
         {
-            var random = new SecureRandom();
-            switch (group)
-            {
-                case X25519:
-                {
-                    var key = new X25519PrivateKeyParameters(random);
-                    byte[] share = key.GeneratePublicKey().GetEncoded();
-                    if (TlsInspector.Current is { } inspector)
-                        TlsInspector.KeyExchange(inspector, group, key.GetEncoded(), share);
-                    return (share, peer =>
-                    {
-                        Expect(peer, 32);
-                        return NonZero(Agree(new X25519Agreement(), key, new X25519PublicKeyParameters(peer, 0)));
-                    });
-                }
-                case X448:
-                {
-                    var key = new X448PrivateKeyParameters(random);
-                    byte[] share = key.GeneratePublicKey().GetEncoded();
-                    if (TlsInspector.Current is { } inspector)
-                        TlsInspector.KeyExchange(inspector, group, key.GetEncoded(), share);
-                    return (share, peer =>
-                    {
-                        Expect(peer, 56);
-                        return NonZero(Agree(new X448Agreement(), key, new X448PublicKeyParameters(peer, 0)));
-                    });
-                }
-                case Secp256r1:
-                case Secp384r1:
-                case Secp521r1:
-                {
-                    var domain = Curve(group);
-                    var generator = new ECKeyPairGenerator();
-                    generator.Init(new ECKeyGenerationParameters(domain, random));
-                    var pair = generator.GenerateKeyPair();
-                    var key = (ECPrivateKeyParameters)pair.Private;
-                    // RFC 8446 §4.2.8.2: uncompressed points; the secret is the x-coordinate, field-size long.
-                    byte[] share = ((ECPublicKeyParameters)pair.Public).Q.GetEncoded(false);
-                    if (TlsInspector.Current is { } inspector)
-                        TlsInspector.KeyExchange(inspector, group, BigIntegers.AsUnsignedByteArray((domain.Curve.FieldSize + 7) / 8, key.D), share);
-                    return (share, peer => EcdhSecret(domain, key, peer));
-                }
-                default:
-                {
-                    var parameters = FfdheGroups.Parameters(group);
-                    int length = (parameters.P.BitLength + 7) / 8;
-                    var (x, y) = DhUtilities.GenerateKeyPair(parameters);
-                    // RFC 8446 §4.2.8.1 / §7.4.1: values and the secret keep their leading zeros, as long as p.
-                    return (BigIntegers.AsUnsignedByteArray(length, y), peer =>
-                    {
-                        Expect(peer, length);
-                        var peerY = new BigInteger(1, peer);
-                        if (peerY.CompareTo(BigInteger.One) <= 0 || peerY.CompareTo(parameters.P.Subtract(BigInteger.One)) >= 0)
-                            throw new DtlsException(AlertDescription.IllegalParameter, "Invalid FFDHE public value.");
-                        return BigIntegers.AsUnsignedByteArray(length, peerY.ModPow(x, parameters.P));
-                    });
-                }
-            }
+            var share = Share(crypto, group);
+            return (share.PublicKey, Agree(share, clientShare));
         }
 
-        private static (byte[] Share, byte[] Secret) RespondClassical(ushort group, byte[] clientShare)
-        {
-            var (share, agree) = GenerateClassical(group);
-            return (share, agree(clientShare));
-        }
+        // ── Of the crypto provider: its failures for an invalid peer value are illegal_parameter ──
 
-        private static byte[] Agree(IRawAgreement agreement, ICipherParameters privateKey, ICipherParameters publicKey)
+        internal static ITlsKeyShare Share(ITlsCrypto crypto, ushort group)
+            => crypto.CreateKeyShare(group) ?? throw new DtlsException(AlertDescription.InternalError, $"Group {Name(group)} is not supported.");
+
+        internal static byte[] Agree(ITlsKeyShare share, byte[] peer)
         {
-            agreement.Init(privateKey);
-            byte[] secret = new byte[agreement.AgreementSize];
             try
             {
-                agreement.CalculateAgreement(publicKey, secret, 0);
+                return share.Agree(peer);
             }
-            catch (InvalidOperationException ex)
+            catch (System.Security.Cryptography.CryptographicException ex)
             {
-                // BouncyCastle refuses X25519/X448 small-order points itself.
                 throw new DtlsException(AlertDescription.IllegalParameter, "Invalid key share.", ex);
             }
-            return secret;
         }
 
-        private static byte[] NonZero(byte[] secret)
+        private static (byte[] Ciphertext, byte[] Secret) Encapsulate(ITlsCrypto crypto, ushort group, byte[] encapsulationKey)
         {
-            // RFC 8446 §7.4.2: an all-zero X25519/X448 result means a small-order peer key.
-            if (secret.All(b => b == 0))
-                throw new DtlsException(AlertDescription.IllegalParameter, "All-zero key exchange result.");
-            return secret;
-        }
-
-        private static ECDomainParameters Curve(ushort group)
-        {
-            string name = group switch { Secp256r1 => "P-256", Secp384r1 => "P-384", _ => "P-521" };
-            return new ECNamedDomainParameters(ECNamedCurveTable.GetOid(name), ECNamedCurveTable.GetByName(name));
-        }
-
-        private static byte[] EcdhSecret(ECDomainParameters domain, ECPrivateKeyParameters key, byte[] peer)
-        {
-            int fieldLength = (domain.Curve.FieldSize + 7) / 8;
-            ECPoint point;
             try
             {
-                Expect(peer, 1 + 2 * fieldLength);
-                if (peer[0] != 0x04)
-                    throw new ArgumentException("not uncompressed");
-                point = domain.Curve.DecodePoint(peer);
+                byte[] ciphertext = crypto.Encapsulate(group, encapsulationKey, out byte[] secret);
+                return (ciphertext, secret);
             }
-            catch (ArgumentException)
+            catch (System.Security.Cryptography.CryptographicException ex)
             {
-                throw new DtlsException(AlertDescription.IllegalParameter, "Invalid elliptic curve key share.");
+                throw new DtlsException(AlertDescription.IllegalParameter, "Invalid ML-KEM encapsulation key.", ex);
             }
-            var agreement = new ECDHBasicAgreement();
-            agreement.Init(key);
-            BigInteger z = agreement.CalculateAgreement(new ECPublicKeyParameters(point, domain));
-            return BigIntegers.AsUnsignedByteArray(fieldLength, z);
-        }
-
-        // ── ML-KEM ───────────────────────────────────────────────────────────────────────────
-
-        private static MLKemParameters MlKemParameters(ushort group) => group switch
-        {
-            MlKem512 => Org.BouncyCastle.Crypto.Parameters.MLKemParameters.ml_kem_512,
-            MlKem768 => Org.BouncyCastle.Crypto.Parameters.MLKemParameters.ml_kem_768,
-            _ => Org.BouncyCastle.Crypto.Parameters.MLKemParameters.ml_kem_1024,
-        };
-
-        private static (byte[] EncapsulationKey, Func<byte[], byte[]> Decapsulate) GenerateMlKem(MLKemParameters parameters)
-        {
-            var generator = new MLKemKeyPairGenerator();
-            generator.Init(new MLKemKeyGenerationParameters(new SecureRandom(), parameters));
-            var pair = generator.GenerateKeyPair();
-            byte[] encapsulationKey = ((MLKemPublicKeyParameters)pair.Public).GetEncoded();
-            if (TlsInspector.Current is { } inspector)
-            {
-                ushort group = parameters == Org.BouncyCastle.Crypto.Parameters.MLKemParameters.ml_kem_512 ? MlKem512
-                    : parameters == Org.BouncyCastle.Crypto.Parameters.MLKemParameters.ml_kem_768 ? MlKem768 : MlKem1024;
-                TlsInspector.KeyExchange(inspector, group, ((MLKemPrivateKeyParameters)pair.Private).GetEncoded(), encapsulationKey);
-            }
-            return (encapsulationKey, ciphertext =>
-            {
-                var decapsulator = new MLKemDecapsulator(parameters);
-                decapsulator.Init(pair.Private);
-                Expect(ciphertext, decapsulator.EncapsulationLength);
-                byte[] secret = new byte[decapsulator.SecretLength];
-                decapsulator.Decapsulate(ciphertext, 0, ciphertext.Length, secret, 0, secret.Length);
-                return secret;
-            });
-        }
-
-        private static (byte[] Ciphertext, byte[] Secret) Encapsulate(MLKemParameters parameters, byte[] encapsulationKey)
-        {
-            MLKemPublicKeyParameters publicKey;
-            try
-            {
-                publicKey = MLKemPublicKeyParameters.FromEncoding(parameters, encapsulationKey);
-            }
-            catch (ArgumentException)
-            {
-                throw new DtlsException(AlertDescription.IllegalParameter, "Invalid ML-KEM encapsulation key.");
-            }
-            var encapsulator = new MLKemEncapsulator(parameters);
-            encapsulator.Init(new ParametersWithRandom(publicKey, new SecureRandom()));
-            byte[] ciphertext = new byte[encapsulator.EncapsulationLength];
-            byte[] secret = new byte[encapsulator.SecretLength];
-            encapsulator.Encapsulate(ciphertext, 0, ciphertext.Length, secret, 0, secret.Length);
-            return (ciphertext, secret);
-        }
-
-        private static void Expect(byte[] value, int length)
-        {
-            if (value == null || value.Length != length)
-                throw new DtlsException(AlertDescription.IllegalParameter, $"Key share is {value?.Length ?? 0} bytes, expected {length}.");
         }
 
         private static byte[] Concat(byte[] a, byte[] b)

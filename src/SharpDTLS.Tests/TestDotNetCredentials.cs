@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -131,6 +132,31 @@ namespace SharpDTLS.Tests
             {
                 listener.Stop();
             }
+        }
+
+        /// <summary>.NET's ECDHE against BouncyCastle's, each way, on every NIST curve.</summary>
+        [TestMethod]
+        [DataRow((ushort)0x0017, true, false)]
+        [DataRow((ushort)0x0018, false, true)]
+        [DataRow((ushort)0x0019, true, true)]
+        public void EcdheOfNetTlsCrypto(ushort group, bool clientNet, bool serverNet)
+        {
+            var (serverTransport, clientTransport) = MockTransportPair.Create();
+            var server = new DtlsServer(serverTransport) { SupportedGroups = new[] { group }, Crypto = serverNet ? new NetTlsCrypto() : null };
+            var client = new DtlsClient(clientTransport)
+            {
+                KeyShareGroups = new[] { group },
+                SupportedGroups = new[] { group },
+                Crypto = clientNet ? new NetTlsCrypto() : null,
+                ServerCertificateValidator = (certificate, chain) => true,
+            };
+            string received = null;
+            server.ApplicationDataReceived += (connection, data) => received = System.Text.Encoding.ASCII.GetString(data.ToArray());
+            client.HandshakeFinished += (_, _) => client.SendApplicationData(System.Text.Encoding.ASCII.GetBytes("ping"));
+            client.BeginHandshake();
+            Assert.IsTrue(System.Threading.SpinWait.SpinUntil(() => received != null, Timeout));
+            Assert.AreEqual("ping", received);
+            Assert.AreEqual(group, ((Protocol13.Tls13ServerConnection)server.Connections.Single()).NegotiatedGroup);
         }
 
         [TestMethod]
