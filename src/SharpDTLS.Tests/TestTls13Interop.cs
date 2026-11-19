@@ -38,7 +38,7 @@ namespace SharpDTLS.Tests
         private static (string Cert, string Key, string Dir) EcFiles()
         {
             string dir = OpenSsl.NewTempDirectory();
-            var (key, cert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
+            var (key, cert) = SelfSigned.Ec();
             return (OpenSsl.WritePem(dir, "cert.pem", cert), OpenSsl.WritePem(dir, "key.pem", key.Private), dir);
         }
 
@@ -46,7 +46,7 @@ namespace SharpDTLS.Tests
         {
             var server = new Tls13Server();
             configure?.Invoke(server);
-            server.ApplicationDataReceived += (_, e) => e.Connection.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.Data)));
+            server.ApplicationDataReceived += (conn, e) => conn.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.ToArray())));
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
             return server;
         }
@@ -124,7 +124,7 @@ namespace SharpDTLS.Tests
         {
             WolfSsl.RequireWolfSsl();
             var f = EcFiles();
-            var (clientKey, clientCert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
+            var (clientKey, clientCert) = SelfSigned.Ec();
             string clientCertPath = OpenSsl.WritePem(f.Dir, "client.pem", clientCert);
             string clientKeyPath = OpenSsl.WritePem(f.Dir, "client-key.pem", clientKey.Private);
 
@@ -145,7 +145,7 @@ namespace SharpDTLS.Tests
             connection.PostHandshakeAuthenticationCompleted += (_, _) => done.TrySetResult(true);
             connection.RequestClientCertificate();
             Assert.IsTrue(done.Task.Wait(Timeout), wolfClient.Output);
-            Assert.AreEqual(clientCert, connection.ClientCertificate);
+            Assert.AreEqual(clientCert, connection.ClientCertificate.Bc());
         }
 
         // ── BouncyCastle ─────────────────────────────────────────────────────────────────────
@@ -160,7 +160,7 @@ namespace SharpDTLS.Tests
             var crypto = new BcTlsCrypto(new SecureRandom());
             if (!TlsUtilities.IsSupportedCipherSuite(crypto, suite))
                 Assert.Inconclusive($"BouncyCastle does not support 0x{suite:X4}");
-            var (key, cert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
+            var (key, cert) = SelfSigned.Ec();
 
             // BouncyCastle server, our client.
             var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -184,7 +184,7 @@ namespace SharpDTLS.Tests
                 try { client = TestTls13.Connect((IPEndPoint)listener.LocalEndpoint, c => c.CipherSuites = new List<ushort> { suite }); }
                 catch (Exception) { try { bcServer.Wait(2000); } catch (AggregateException ex) { throw new Exception("BC:" + ex.GetBaseException()); } throw; }
                 var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-                client.ApplicationDataReceived += (_, d) => received.TrySetResult(Encoding.UTF8.GetString(d));
+                client.ApplicationDataReceived += (_, d) => received.TrySetResult(Encoding.UTF8.GetString(d.ToArray()));
                 client.SendApplicationData(Encoding.UTF8.GetBytes("ping"));
                 Assert.IsTrue(received.Task.Wait(Timeout), bcServer.IsFaulted ? bcServer.Exception.GetBaseException().ToString() : "no reply");
                 Assert.AreEqual("pong:ping", received.Task.Result);
@@ -196,9 +196,9 @@ namespace SharpDTLS.Tests
             }
 
             // BouncyCastle client, our server.
-            var (serverKey, serverCert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
-            using var ours = new Tls13Server(serverKey, serverCert) { CipherSuites = new List<ushort> { suite } };
-            ours.ApplicationDataReceived += (_, e) => e.Connection.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.Data)));
+            var (serverKey, serverCert) = SelfSigned.Ec();
+            using var ours = new Tls13Server(TestCertificates.Server(serverKey, serverCert)) { CipherSuites = new List<ushort> { suite } };
+            ours.ApplicationDataReceived += (conn, e) => conn.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.ToArray())));
             ours.Start(new IPEndPoint(IPAddress.Loopback, 0));
             var bcClient = RunBlocking(() =>
             {

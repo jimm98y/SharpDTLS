@@ -19,8 +19,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 // SOFTWARE.
 
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.X509;
 using SharpDTLS.Protocol13.DTLS13;
 using SharpDTLS.Protocol13.Messages;
 using System;
@@ -36,17 +34,16 @@ namespace SharpDTLS.Protocol13
     /// </summary>
     internal abstract class Tls13ServerBase
     {
-        protected Tls13ServerBase(AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
+        protected Tls13ServerBase(TransportCertificate credentials)
         {
-            if (certificate != null && keyPair == null)
-                throw new ArgumentException("A certificate needs its key pair.");
-            ServerKeyPair = keyPair;
-            ServerCertificate = certificate;
+            Credentials = credentials;
         }
 
-        internal AsymmetricCipherKeyPair ServerKeyPair { get; }
+        /// <summary>The default key and certificate; null for a PSK-only server.</summary>
+        internal TransportCertificate Credentials { get; }
 
-        internal X509Certificate ServerCertificate { get; }
+        /// <summary>The operations of the server's private keys.</summary>
+        public ITlsCrypto Crypto { get; set; } = BouncyCastleTlsCrypto.Default;
 
         /// <summary>Request a client certificate and abort with certificate_required if none is sent.</summary>
         public bool RequireClientCertificate { get; set; } = false;
@@ -55,13 +52,13 @@ namespace SharpDTLS.Protocol13
         public IList<ushort> CipherSuites { get; set; } = new List<ushort>(Dtls13CipherSuite.Supported);
 
         /// <summary>Intermediate CA certificates sent after the server certificate, issuer of the previous one first.</summary>
-        public IList<X509Certificate> IntermediateCertificates { get; set; }
+        public IList<System.Security.Cryptography.X509Certificates.X509Certificate2> IntermediateCertificates { get; set; }
 
         /// <summary>
         /// Chooses the credentials for the client's server_name (RFC 6066), which is null when the client sent none.
         /// Returning null uses the default certificate.
         /// </summary>
-        public Func<string, ServerCredentials> CertificateSelector { get; set; }
+        public Func<string, TransportCertificate> CertificateSelector { get; set; }
 
         /// <summary>Application protocols (ALPN, RFC 7301) in server preference order; null to ignore ALPN.</summary>
         public IList<string> ApplicationProtocols { get; set; }
@@ -74,7 +71,7 @@ namespace SharpDTLS.Protocol13
 
         /// <summary>
         /// A DER OCSP response for the server certificate to staple for clients that ask (RFC 8446 §4.4.2.1); null for
-        /// none. Certificates from the CertificateSelector staple their own <see cref="ServerCredentials.OcspResponse"/>.
+        /// none. Certificates from the CertificateSelector staple their own <see cref="TransportCertificate.OcspResponse"/>.
         /// </summary>
         public byte[] OcspResponse { get; set; }
 
@@ -85,7 +82,7 @@ namespace SharpDTLS.Protocol13
         public IList<ushort> SupportedGroups { get; set; } = new List<ushort>(Dtls13Groups.DefaultPreference);
 
         /// <summary>Optional client certificate validation. Return false to abort with bad_certificate.</summary>
-        public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ClientCertificateValidator { get; set; }
+        public Func<System.Security.Cryptography.X509Certificates.X509Certificate2, IReadOnlyList<byte[]>, bool> ClientCertificateValidator { get; set; }
 
         /// <summary>
         /// Certificate types we authenticate with, in preference order (RFC 7250); null for X.509 only. With
@@ -110,10 +107,10 @@ namespace SharpDTLS.Protocol13
         /// Chooses credentials from what the client said (server name, trusted CAs, signature schemes); returning null
         /// falls back to <see cref="CertificateSelector"/> and then the default certificate.
         /// </summary>
-        public Func<CertificateSelectionContext, ServerCredentials> CredentialsSelector { get; set; }
+        public Func<CertificateSelectionContext, TransportCertificate> CredentialsSelector { get; set; }
 
         /// <summary>CAs named in our CertificateRequests (certificate_authorities), to guide the client's choice; null names none.</summary>
-        public IList<X509Certificate> ClientCertificateAuthorities { get; set; }
+        public IList<System.Security.Cryptography.X509Certificates.X509Certificate2> ClientCertificateAuthorities { get; set; }
 
         /// <summary>Optional NSS key log sink (SSLKEYLOGFILE format).</summary>
         public Action<string> KeyLogWriter { get; set; }
@@ -271,7 +268,7 @@ namespace SharpDTLS.Protocol13
         // ── Callbacks from connections ───────────────────────────────────────────────────────
 
         internal abstract void OnConnectionEstablished(Tls13ServerConnection connection);
-        internal abstract void OnApplicationData(Tls13ServerConnection connection, byte[] data);
+        internal abstract void OnApplicationData(Tls13ServerConnection connection, ReadOnlySpan<byte> data);
         internal abstract void OnEarlyData(Tls13ServerConnection connection, byte[] data);
         internal abstract void OnKeyUpdate(KeyUpdateDatagram keyUpdate);
         internal abstract void OnConnectionClosed(Tls13ServerConnection connection);

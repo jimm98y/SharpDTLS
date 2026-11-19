@@ -64,7 +64,7 @@ namespace SharpDTLS.Tests
             var generator = new Org.BouncyCastle.Crypto.Agreement.Srp.Srp6VerifierGenerator();
             generator.Init(group, new Org.BouncyCastle.Crypto.Digests.Sha1Digest());
             byte[] salt = { 1, 2, 3, 4 };
-            var verifier = new SrpVerifier(group, salt, generator.GenerateVerifier(salt, TestCredentials.SrpIdentity, TestCredentials.SrpPassword));
+            var verifier = new SrpVerifier(new SrpGroup(ffdhe.P.ToByteArrayUnsigned(), ffdhe.G.ToByteArrayUnsigned()), salt, generator.GenerateVerifier(salt, TestCredentials.SrpIdentity, TestCredentials.SrpPassword).ToByteArrayUnsigned());
 
             var (client, _) = Pair(_ => verifier, TestCredentials.SrpIdentity, TestCredentials.SrpPassword);
             Assert.AreEqual(AlertDescription.InsufficientSecurity, Fail(client)?.Alert);

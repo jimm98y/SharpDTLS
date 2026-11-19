@@ -16,7 +16,7 @@ namespace SharpDTLS.Tests
 
         private static Tls12Server Echo(Tls12Server server)
         {
-            server.ApplicationDataReceived += (_, e) => e.Connection.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.Data)));
+            server.ApplicationDataReceived += (conn, e) => conn.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.ToArray())));
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
             return server;
         }
@@ -52,7 +52,7 @@ namespace SharpDTLS.Tests
             {
                 lock (text)
                 {
-                    text.Append(Encoding.UTF8.GetString(d));
+                    text.Append(Encoding.UTF8.GetString(d.ToArray()));
                     if (text.ToString().Replace("pong:", "") == "ping")
                         reply.TrySetResult(text.ToString());
                 }
@@ -100,7 +100,7 @@ namespace SharpDTLS.Tests
         public void Client_To_TlsServer_ThatAllowsOldVersions(ushort version)
         {
             using var server = new TlsServer { MinimumVersion = TlsVersion.Tls10 };
-            server.ApplicationDataReceived += (_, e) => e.Connection.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.Data)));
+            server.ApplicationDataReceived += (conn, e) => conn.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.ToArray())));
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
             var (client, error) = Connect(version, server.LocalEndpoint);
             Assert.IsNull(error, error?.ToString());

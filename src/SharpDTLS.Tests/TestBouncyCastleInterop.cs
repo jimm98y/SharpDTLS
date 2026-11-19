@@ -210,8 +210,8 @@ namespace SharpDTLS.Tests
             if (verifier == null)
                 return null;
             var config = new TlsSrpConfig();
-            config.SetExplicitNG(new[] { verifier.Group.N, verifier.Group.G });
-            return new TlsSrpLoginParameters(identity, config, verifier.Verifier, verifier.Salt);
+            config.SetExplicitNG(new[] { verifier.Group.Bc.N, verifier.Group.Bc.G });
+            return new TlsSrpLoginParameters(identity, config, new Org.BouncyCastle.Math.BigInteger(1, verifier.Verifier), verifier.Salt);
         }
     }
 
@@ -380,7 +380,7 @@ namespace SharpDTLS.Tests
             var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
             client.Failed += (_, ex) => handshake.TrySetException(ex);
-            client.ApplicationDataReceived += (_, d) => received.TrySetResult(Encoding.UTF8.GetString(d));
+            client.ApplicationDataReceived += (_, d) => received.TrySetResult(Encoding.UTF8.GetString(d.ToArray()));
             client.BeginHandshake();
             Assert.IsTrue(handshake.Task.Wait(Timeout), "handshake did not complete: " + (bcServer.IsFaulted ? bcServer.Exception.GetBaseException().Message : ""));
             CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 }, client.PeerConnectionId);
@@ -401,11 +401,11 @@ namespace SharpDTLS.Tests
             var (suite, crypto, bcVersion, version) = Prepare(id);
             var (keyPair, certificate) = TestCredentials.For(suite);
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
-            var server = new Dtls12Server(transport, keyPair, certificate)
+            var server = new Dtls12Server(transport, TestCertificates.Server(keyPair, certificate))
             {
                 MinimumVersion = DtlsVersion.Dtls10, CipherSuites = new List<ushort> { id }, UseConnectionIds = true,
             };
-            server.ApplicationDataReceived += (_, e) => server.SendApplicationData(e.RemoteEndPoint, Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.Data)));
+            server.ApplicationDataReceived += (conn, e) => server.SendApplicationData(conn.RemoteEndPoint, Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.ToArray())));
 
             using var clientSocket = LoopbackSocket();
             clientSocket.Connect(new IPEndPoint(IPAddress.Loopback, transport.LocalEndpoint.Port));
@@ -457,7 +457,7 @@ namespace SharpDTLS.Tests
             using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
             var client = new Dtls12Client(transport) { MinimumVersion = version, MaximumVersion = version, CipherSuites = new List<ushort> { id } };
             if (suite.IsStaticKeyAgreement)
-                (client.ClientCertificateKeyPair, client.ClientCertificate) = TestCredentials.FixedClientFor(suite);
+                client.ClientCredentials = TestCertificates.Credentials(TestCredentials.FixedClientFor(suite));
             if (suite.RequiresSrp)
                 (client.SrpIdentity, client.SrpPassword) = (TestCredentials.SrpIdentity, TestCredentials.SrpPassword);
             if (suite.RequiresPsk)
@@ -469,7 +469,7 @@ namespace SharpDTLS.Tests
             var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
             client.Failed += (_, ex) => handshake.TrySetException(ex);
-            client.ApplicationDataReceived += (_, data) => received.TrySetResult(Encoding.UTF8.GetString(data));
+            client.ApplicationDataReceived += (_, data) => received.TrySetResult(Encoding.UTF8.GetString(data.ToArray()));
             var clock = Stopwatch.StartNew();
             transport.OnDataReceived += (_, d) => log.Enqueue($"{clock.ElapsedMilliseconds,6} ms client recv {d.Length} bytes type 0x{d[0]:X2}");
 
@@ -496,7 +496,7 @@ namespace SharpDTLS.Tests
             var (keyPair, certificate) = TestCredentials.For(suite);
 
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
-            var server = new Dtls12Server(transport, keyPair, certificate) { MinimumVersion = DtlsVersion.Dtls10, CipherSuites = new List<ushort> { id } };
+            var server = new Dtls12Server(transport, TestCertificates.Server(keyPair, certificate)) { MinimumVersion = DtlsVersion.Dtls10, CipherSuites = new List<ushort> { id } };
             var (fixedKeyPair, fixedCertificate) = TestCredentials.FixedClientFor(suite);
             if (suite.IsStaticKeyAgreement)
                 server.RequireClientCertificate = true;
@@ -507,7 +507,7 @@ namespace SharpDTLS.Tests
                 server.PskIdentityResolver = TestCredentials.ResolvePsk;
                 server.PskIdentityHint = TestCredentials.PskHint;
             }
-            server.ApplicationDataReceived += (_, e) => server.SendApplicationData(e.RemoteEndPoint, Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.Data)));
+            server.ApplicationDataReceived += (conn, e) => server.SendApplicationData(conn.RemoteEndPoint, Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.ToArray())));
 
             using var clientSocket = LoopbackSocket();
             clientSocket.Connect(new IPEndPoint(IPAddress.Loopback, transport.LocalEndpoint.Port));
@@ -528,7 +528,7 @@ namespace SharpDTLS.Tests
             Assert.AreEqual("pong:ping", bcClient.Result);
             Assert.AreEqual(id, server.Connections.Single().CipherSuite.Id);
             if (suite.IsStaticKeyAgreement)
-                Assert.AreEqual(fixedCertificate, server.Connections.Single().ClientCertificate, "fixed (EC)DH client authentication");
+                Assert.AreEqual(fixedCertificate, server.Connections.Single().ClientCertificate.Bc(), "fixed (EC)DH client authentication");
         }
     }
 }

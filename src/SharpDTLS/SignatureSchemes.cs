@@ -44,5 +44,11 @@ namespace SharpDTLS
         public const ushort RsaPssRsaeSha512 = 0x0806;
         public const ushort Ed25519 = 0x0807;
         public const ushort Ed448 = 0x0808;
+
+        /// <summary>
+        /// Not a code point: the RSA signature of TLS 1.0/1.1 and DTLS 1.0 (PKCS#1 v1.5 over MD5 || SHA-1, no DigestInfo),
+        /// as <see cref="ITlsCrypto.Sign"/> is asked for it. Their DSA and ECDSA signatures are <see cref="DsaSha1"/> and <see cref="EcdsaSha1"/>.
+        /// </summary>
+        public const ushort RsaPkcs1Md5Sha1 = 0xFF01;
     }
 }

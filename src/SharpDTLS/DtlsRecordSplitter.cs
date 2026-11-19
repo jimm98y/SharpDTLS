@@ -41,8 +41,23 @@ namespace SharpDTLS
         {
             var records = new List<byte[]>();
             int pos = 0;
+            int recordLength;
+            while ((recordLength = RecordLength(datagram, pos, connectionIdLength)) > 0)
+            {
+                records.Add(datagram.AsSpan(pos, recordLength).ToArray());
+                pos += recordLength;
+            }
+            return records;
+        }
 
-            while (pos < datagram.Length)
+        /// <summary>
+        /// The length of the record at <paramref name="pos"/>, or 0 at the end of the datagram and for a truncated or
+        /// malformed record, whose datagram's remainder is discarded (RFC 9147 §4.5.2).
+        /// </summary>
+        public static int RecordLength(ReadOnlySpan<byte> datagram, int pos, int connectionIdLength)
+        {
+            if (pos >= datagram.Length)
+                return 0;
             {
                 byte first = datagram[pos];
                 int recordLength;
@@ -56,7 +71,7 @@ namespace SharpDTLS
 
                     int headerLength = 1 + (hasCid ? connectionIdLength : 0) + (seq16 ? 2 : 1) + (hasLength ? 2 : 0);
                     if (pos + headerLength > datagram.Length)
-                        break; // truncated, drop the rest
+                        return 0; // truncated, drop the rest
 
                     if (hasLength)
                     {
@@ -73,20 +88,14 @@ namespace SharpDTLS
                 {
                     int cidLength = first == Tls12Cid ? connectionIdLength : 0;
                     if (pos + PlaintextHeaderLength + cidLength > datagram.Length)
-                        break;
+                        return 0;
                     recordLength = PlaintextHeaderLength + cidLength + ((datagram[pos + 11 + cidLength] << 8) | datagram[pos + 12 + cidLength]);
                 }
 
                 if (recordLength <= 0 || pos + recordLength > datagram.Length)
-                    break; // malformed: discard the remainder of the datagram (RFC 9147 §4.5.2)
-
-                byte[] record = new byte[recordLength];
-                Buffer.BlockCopy(datagram, pos, record, 0, recordLength);
-                records.Add(record);
-                pos += recordLength;
+                    return 0; // malformed: discard the remainder of the datagram (RFC 9147 §4.5.2)
+                return recordLength;
             }
-
-            return records;
         }
     }
 }

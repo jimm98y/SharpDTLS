@@ -26,16 +26,16 @@ namespace SharpDTLS.Tests
         private static TestPki A => _a.Value;
         private static TestPki B => _b.Value;
 
-        private static ServerCredentials ServerCredentialsFrom(TestPki pki)
+        private static TransportCertificate ServerCredentialsFrom(TestPki pki)
         {
             var (key, cert) = pki.Leaf(new[] { "server.test" });
-            return new ServerCredentials(key, cert, new[] { pki.Intermediate.Cert });
+            return new TransportCertificate(key, cert, new[] { pki.Intermediate.Cert });
         }
 
-        private static CertificateCredentials ClientCredentialsFrom(TestPki pki)
+        private static TransportCertificate ClientCredentialsFrom(TestPki pki)
         {
             var (key, cert) = pki.Leaf(commonName: "client", usage: KeyPurposeID.id_kp_clientAuth);
-            return new CertificateCredentials(key, cert, new[] { pki.Intermediate.Cert });
+            return new TransportCertificate(key, cert, new[] { pki.Intermediate.Cert });
         }
 
         private static Exception Handshake(TlsConnectionBase client, Action<Action> onFinished, Action begin)
@@ -63,12 +63,12 @@ namespace SharpDTLS.Tests
                 };
                 var client = new Dtls13Client(pair.Client)
                 {
-                    CertificateAuthorities = new[] { trusted.Root.Cert }, SignatureAlgorithmsCert = new ushort[] { 0x0403 },
-                    ServerCertificateValidator = new CertificateValidator(new[] { trusted.Root.Cert }).ForServer("server.test"),
+                    CertificateAuthorities = new[] { trusted.Root.Cert }.Net(), SignatureAlgorithmsCert = new ushort[] { 0x0403 },
+                    ServerCertificateValidator = new CertificateValidator(new[] { trusted.Root.Cert }.Net()).ForServer("server.test"),
                 };
                 var error = Handshake(client, s => client.HandshakeFinished += (_, _) => s(), client.BeginHandshake);
                 Assert.IsNull(error, error?.ToString());
-                Assert.AreEqual(expected.Certificate, client.ServerCertificate);
+                Assert.AreEqual(expected.BcCertificate, client.ServerCertificate.Bc());
                 Assert.HasCount(1, seen.CertificateAuthorities);
                 Assert.IsTrue(seen.CertificateAuthorities[0].Equivalent(trusted.Root.Cert.SubjectDN));
                 CollectionAssert.AreEqual(new ushort[] { 0x0403 }, seen.SignatureAlgorithmsCert.ToArray());
@@ -82,11 +82,11 @@ namespace SharpDTLS.Tests
             var pair = new ScriptedTransportPair();
             CertificateSelectionContext seen = null;
             var (key, cert) = TestCredentials.For(CertificateKeyType.Ecdsa);
-            _ = new Dtls12Server(pair.Server, key, cert) { CredentialsSelector = context => { seen = context; return null; } };
+            _ = new Dtls12Server(pair.Server, TestCertificates.Server(key, cert)) { CredentialsSelector = context => { seen = context; return null; } };
             var client = new Dtls12Client(pair.Client) { SignatureAlgorithmsCert = new ushort[] { 0x0403, 0x0804 }, ServerName = "server.test" };
             var error = Handshake(client, s => client.HandshakeFinished += (_, _) => s(), client.BeginHandshake);
             Assert.IsNull(error, error?.ToString());
-            Assert.AreEqual(cert, client.ServerCertificate, "null falls back to the default certificate");
+            Assert.AreEqual(cert, client.ServerCertificate.Bc(), "null falls back to the default certificate");
             Assert.AreEqual("server.test", seen.ServerName);
             CollectionAssert.AreEqual(new ushort[] { 0x0403, 0x0804 }, seen.SignatureAlgorithmsCert.ToArray());
             Assert.IsEmpty(seen.CertificateAuthorities);
@@ -101,33 +101,33 @@ namespace SharpDTLS.Tests
             var fromB = ClientCredentialsFrom(B);
             var pair = new ScriptedTransportPair();
             CertificateSelectionContext seen = null;
-            Func<CertificateSelectionContext, CertificateCredentials> selector = context => { seen = context; return new[] { fromA, fromB }.First(context.IsIssuedByAcceptedAuthority); };
-            var validator = new CertificateValidator(new[] { B.Root.Cert }).ForClient();
+            Func<CertificateSelectionContext, TransportCertificate> selector = context => { seen = context; return new[] { fromA, fromB }.First(context.IsIssuedByAcceptedAuthority); };
+            var validator = new CertificateValidator(new[] { B.Root.Cert }.Net()).ForClient();
             Func<Org.BouncyCastle.X509.X509Certificate> received;
             Exception error;
             if (version == 12)
             {
-                var server = new Dtls12Server(pair.Server, TestCredentials.For(CertificateKeyType.Ecdsa).Item1, TestCredentials.For(CertificateKeyType.Ecdsa).Item2)
+                var server = new Dtls12Server(pair.Server, TestCertificates.Server(TestCredentials.For(CertificateKeyType.Ecdsa).Item1, TestCredentials.For(CertificateKeyType.Ecdsa).Item2))
                 {
-                    RequireClientCertificate = true, ClientCertificateAuthorities = new[] { B.Root.Cert }, ClientCertificateValidator = validator,
+                    RequireClientCertificate = true, ClientCertificateAuthorities = new[] { B.Root.Cert }.Net(), ClientCertificateValidator = validator,
                 };
                 var c = new Dtls12Client(pair.Client) { ClientCredentialsSelector = selector };
                 error = Handshake(c, s => c.HandshakeFinished += (_, _) => s(), c.BeginHandshake);
-                received = () => server.Connections.Single().ClientCertificate;
+                received = () => server.Connections.Single().ClientCertificate.Bc();
             }
             else
             {
                 var server = new Dtls13Server(pair.Server)
                 {
-                    RequireClientCertificate = true, ClientCertificateAuthorities = new[] { B.Root.Cert }, ClientCertificateValidator = validator,
+                    RequireClientCertificate = true, ClientCertificateAuthorities = new[] { B.Root.Cert }.Net(), ClientCertificateValidator = validator,
                 };
                 var c = new Dtls13Client(pair.Client) { ClientCredentialsSelector = selector };
                 error = Handshake(c, s => c.HandshakeFinished += (_, _) => s(), c.BeginHandshake);
-                received = () => server.Connections.Single().ClientCertificate;
+                received = () => server.Connections.Single().ClientCertificate.Bc();
             }
             Assert.IsNull(error, error?.ToString());
             Assert.IsTrue(SpinWait.SpinUntil(() => received() != null, Timeout));
-            Assert.AreEqual(fromB.Certificate, received());
+            Assert.AreEqual(fromB.BcCertificate, received());
             Assert.IsTrue(seen.CertificateAuthorities.Single().Equivalent(B.Root.Cert.SubjectDN));
             Assert.IsNotNull(seen.SignatureAlgorithms);
         }
@@ -181,11 +181,11 @@ namespace SharpDTLS.Tests
             }
 
             // Our server naming CA B; OpenSSL's client lists it.
-            var (clientKey, clientCert) = (fromB.KeyPair, fromB.Certificate);
+            var (clientKey, clientCert) = (fromB.KeyPair, fromB.BcCertificate);
             string clientCertPath = OpenSsl.WritePem(dir, "client.pem", clientCert);
             string clientKeyPath = OpenSsl.WritePem(dir, "client-key.pem", clientKey.Private);
             using var serverTransport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
-            _ = new Dtls12Server(serverTransport, serverKey, serverCert) { RequireClientCertificate = true, ClientCertificateAuthorities = new[] { B.Root.Cert } };
+            _ = new Dtls12Server(serverTransport, TestCertificates.Server(serverKey, serverCert)) { RequireClientCertificate = true, ClientCertificateAuthorities = new[] { B.Root.Cert }.Net() };
             using var openSslClient = new OpenSslProcess($"s_client -dtls1_2 -connect 127.0.0.1:{serverTransport.LocalEndpoint.Port} -cert {clientCertPath} -key {clientKeyPath}", dir);
             Assert.IsTrue(openSslClient.WaitForOutput("Acceptable client certificate CA names", Timeout), openSslClient.Output);
             Assert.IsTrue(openSslClient.WaitForOutput("Selection B Root CA", Timeout), openSslClient.Output);
@@ -203,7 +203,7 @@ namespace SharpDTLS.Tests
             // wolfSSL server naming CA B in its CertificateRequest; our client names CA A in its ClientHello.
             var serverCredentials = ServerCredentialsFrom(A);
             string chainA = Path.Combine(dir, "chainA.pem");
-            File.WriteAllText(chainA, File.ReadAllText(OpenSsl.WritePem(dir, "leafA.pem", serverCredentials.Certificate)) + File.ReadAllText(OpenSsl.WritePem(dir, "intA.pem", A.Intermediate.Cert)));
+            File.WriteAllText(chainA, File.ReadAllText(OpenSsl.WritePem(dir, "leafA.pem", serverCredentials.BcCertificate)) + File.ReadAllText(OpenSsl.WritePem(dir, "intA.pem", A.Intermediate.Cert)));
             string keyA = OpenSsl.WritePem(dir, "keyA.pem", serverCredentials.KeyPair.Private);
             var fromA = ClientCredentialsFrom(A);
             var fromB = ClientCredentialsFrom(B);
@@ -214,7 +214,7 @@ namespace SharpDTLS.Tests
                 using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
                 var client = new Dtls13Client(transport)
                 {
-                    CertificateAuthorities = new[] { A.Root.Cert },
+                    CertificateAuthorities = new[] { A.Root.Cert }.Net(),
                     ClientCredentialsSelector = context => { seen = context; return new[] { fromA, fromB }.First(context.IsIssuedByAcceptedAuthority); },
                 };
                 var error = Handshake(client, s => client.HandshakeFinished += (_, _) => s(), client.BeginHandshake);

@@ -24,7 +24,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using BcX509Certificate = Org.BouncyCastle.X509.X509Certificate;
 
 namespace SharpDTLS
 {
@@ -49,13 +48,13 @@ namespace SharpDTLS
         /// <summary>
         /// Trusts only <paramref name="trustedRoots"/>; with null, the operating system's trust store.
         /// </summary>
-        public CertificateValidator(IEnumerable<BcX509Certificate> trustedRoots = null)
+        public CertificateValidator(IEnumerable<X509Certificate2> trustedRoots = null)
         {
             if (trustedRoots != null)
             {
                 _trustedRoots = new X509Certificate2Collection();
                 foreach (var root in trustedRoots)
-                    _trustedRoots.Add(Load(root.GetEncoded()));
+                    _trustedRoots.Add(Load(root.RawData));
             }
         }
 
@@ -73,7 +72,7 @@ namespace SharpDTLS
         /// Name): gets the server certificate and the expected host name, and returns whether they match. The chain is
         /// validated as usual either way.
         /// </summary>
-        public Func<BcX509Certificate, string, bool> HostNameValidator { get; set; }
+        public Func<X509Certificate2, string, bool> HostNameValidator { get; set; }
 
         /// <summary>
         /// Validates <paramref name="chain"/> (DER, end entity first, as received): it must lead to a trusted root and
@@ -140,7 +139,7 @@ namespace SharpDTLS
         private bool MatchesHostName(X509Certificate2 leaf, byte[] der, string hostName)
         {
             if (HostNameValidator != null)
-                return HostNameValidator(new BcX509Certificate(der), hostName);
+                return HostNameValidator(leaf, hostName);
 #if !NETCOREAPP
             return HostNameMatcher.Matches(der, hostName, AllowCommonNameFallback);
 #else
@@ -161,20 +160,6 @@ namespace SharpDTLS
             return AlertDescription.BadCertificate;
         }
 
-        private static X509Certificate2 Load(byte[] der)
-        {
-            try
-            {
-#if NET9_0_OR_GREATER
-                return X509CertificateLoader.LoadCertificate(der);
-#else
-                return new X509Certificate2(der);
-#endif
-            }
-            catch (CryptographicException ex)
-            {
-                throw new DtlsException(AlertDescription.BadCertificate, "Certificate could not be parsed.", ex);
-            }
-        }
+        private static X509Certificate2 Load(byte[] der) => Certificates.Load(der);
     }
 }

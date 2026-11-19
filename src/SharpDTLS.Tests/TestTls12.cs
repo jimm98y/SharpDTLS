@@ -38,16 +38,16 @@ namespace SharpDTLS.Tests
         {
             using var server = new Tls12Server();
             var serverReceived = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-            server.ApplicationDataReceived += (_, e) =>
+            server.ApplicationDataReceived += (conn, e) =>
             {
-                serverReceived.TrySetResult(Encoding.UTF8.GetString(e.Data));
-                e.Connection.SendApplicationData(Encoding.UTF8.GetBytes("pong"));
+                serverReceived.TrySetResult(Encoding.UTF8.GetString(e.ToArray()));
+                conn.SendApplicationData(Encoding.UTF8.GetBytes("pong"));
             };
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
 
             var client = Connect(server.LocalEndpoint);
             var clientReceived = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-            client.ApplicationDataReceived += (_, d) => clientReceived.TrySetResult(Encoding.UTF8.GetString(d));
+            client.ApplicationDataReceived += (_, d) => clientReceived.TrySetResult(Encoding.UTF8.GetString(d.ToArray()));
             client.SendApplicationData(Encoding.UTF8.GetBytes("ping"));
             Assert.IsTrue(serverReceived.Task.Wait(Timeout));
             Assert.AreEqual("ping", serverReceived.Task.Result);
@@ -77,7 +77,7 @@ namespace SharpDTLS.Tests
             client.SendApplicationData(Encoding.UTF8.GetBytes("hello over tls\n"));
             Assert.IsTrue(server.WaitForOutput("hello over tls", Timeout), server.Output);
             var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-            client.ApplicationDataReceived += (_, d) => received.TrySetResult(Encoding.UTF8.GetString(d));
+            client.ApplicationDataReceived += (_, d) => received.TrySetResult(Encoding.UTF8.GetString(d.ToArray()));
             server.WriteLine("reply from openssl");
             Assert.IsTrue(received.Task.Wait(Timeout), server.Output);
             StringAssert.Contains(received.Task.Result, "reply from openssl");
@@ -90,12 +90,12 @@ namespace SharpDTLS.Tests
             OpenSsl.RequireOpenSsl();
             string dir = OpenSsl.NewTempDirectory();
             var (key, cert) = TestCredentials.For(CertificateKeyType.Rsa);
-            using var server = new Tls12Server(key, cert);
+            using var server = new Tls12Server(TestCertificates.Server(key, cert));
             var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-            server.ApplicationDataReceived += (_, e) =>
+            server.ApplicationDataReceived += (conn, e) =>
             {
-                received.TrySetResult(Encoding.UTF8.GetString(e.Data));
-                e.Connection.SendApplicationData(Encoding.UTF8.GetBytes("reply from sharp\n"));
+                received.TrySetResult(Encoding.UTF8.GetString(e.ToArray()));
+                conn.SendApplicationData(Encoding.UTF8.GetBytes("reply from sharp\n"));
             };
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
 

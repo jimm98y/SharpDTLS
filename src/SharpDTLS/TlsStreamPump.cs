@@ -86,9 +86,22 @@ namespace SharpDTLS
             => _ = Task.Delay(CloseLinger).ContinueWith(_ => stream.Dispose(), TaskScheduler.Default);
 
         /// <summary>Writes a record; failures surface as a closed stream on the read side.</summary>
-        public static void Write(Stream stream, byte[] record)
+        public static void Write(Stream stream, ReadOnlySpan<byte> record)
         {
-            stream.Write(record, 0, record.Length);
+#if NETCOREAPP
+            stream.Write(record);
+#else
+            byte[] buffer = RecordBuffers.Pool.Rent(record.Length);
+            try
+            {
+                record.CopyTo(buffer);
+                stream.Write(buffer, 0, record.Length);
+            }
+            finally
+            {
+                RecordBuffers.Pool.Return(buffer, clearArray: true);
+            }
+#endif
             stream.Flush();
         }
     }

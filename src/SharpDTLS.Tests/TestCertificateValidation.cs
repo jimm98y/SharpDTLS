@@ -19,7 +19,7 @@ namespace SharpDTLS.Tests
         private static readonly Lazy<TestPki> _pki = new(() => new TestPki());
         private static TestPki Pki => _pki.Value;
 
-        private static CertificateValidator Validator() => new(new[] { Pki.Root.Cert });
+        private static CertificateValidator Validator() => new(new[] { Pki.Root.Cert }.Net());
 
         private static List<byte[]> Chain(Org.BouncyCastle.X509.X509Certificate leaf, bool withIntermediate = true)
             => withIntermediate ? new List<byte[]> { leaf.GetEncoded(), Pki.Intermediate.Cert.GetEncoded() } : new List<byte[]> { leaf.GetEncoded() };
@@ -60,7 +60,7 @@ namespace SharpDTLS.Tests
         {
             var leaf = Pki.Leaf(new[] { "server.test" }).Cert;
             string seen = null;
-            var validator = new CertificateValidator(new[] { Pki.Root.Cert })
+            var validator = new CertificateValidator(new[] { Pki.Root.Cert }.Net())
             {
                 HostNameValidator = (certificate, hostName) => { seen = hostName; return hostName == "pinned.example"; },
             };
@@ -75,7 +75,7 @@ namespace SharpDTLS.Tests
         {
             var leaf = Pki.Leaf(commonName: "legacy.test").Cert;
             AssertRejected(AlertDescription.BadCertificate, () => Validator().Validate(Chain(leaf), ServerAuth, "legacy.test"));
-            new CertificateValidator(new[] { Pki.Root.Cert }) { AllowCommonNameFallback = true }.Validate(Chain(leaf), ServerAuth, "legacy.test");
+            new CertificateValidator(new[] { Pki.Root.Cert }.Net()) { AllowCommonNameFallback = true }.Validate(Chain(leaf), ServerAuth, "legacy.test");
         }
 
         [TestMethod]
@@ -85,7 +85,7 @@ namespace SharpDTLS.Tests
             AssertRejected(AlertDescription.UnknownCa, () => Validator().Validate(Chain(leaf, withIntermediate: false), ServerAuth, "server.test"));
 
             var other = new TestPki("Other");
-            AssertRejected(AlertDescription.UnknownCa, () => new CertificateValidator(new[] { other.Root.Cert }).Validate(Chain(leaf), ServerAuth, "server.test"));
+            AssertRejected(AlertDescription.UnknownCa, () => new CertificateValidator(new[] { other.Root.Cert }.Net()).Validate(Chain(leaf), ServerAuth, "server.test"));
         }
 
         [TestMethod]
@@ -103,7 +103,7 @@ namespace SharpDTLS.Tests
         {
             var clientOnly = Pki.Leaf(new[] { "server.test" }, usage: KeyPurposeID.id_kp_clientAuth).Cert;
             AssertRejected(AlertDescription.UnsupportedCertificate, () => Validator().Validate(Chain(clientOnly), ServerAuth, "server.test"));
-            Validator().ForClient()(clientOnly, Chain(clientOnly));
+            Validator().ForClient()(clientOnly.Net(), Chain(clientOnly));
         }
 
         [TestMethod]
@@ -112,12 +112,12 @@ namespace SharpDTLS.Tests
             // RFC 5480 §2.1.1: explicit curve parameters are not allowed, and platform validators reject them.
             foreach (var certificate in new[]
             {
-                Dtls12CryptoUtils.GenerateSelfSignedEcCertificate().certificate,
-                Dtls13CryptoUtils.GenerateSelfSignedEcCertificate().certificate,
+                SelfSigned.Ec().certificate,
+                SelfSigned.Ec().certificate,
             })
                 Assert.IsTrue(Org.BouncyCastle.Asn1.X9.X962Parameters.GetInstance(certificate.CertificateStructure.SubjectPublicKeyInfo.Algorithm.Parameters).IsNamedCurve);
 
-            var protectionKey = (Org.BouncyCastle.Crypto.Parameters.ECPublicKeyParameters)PwdCredential.GenerateProtectionKeyPair().Public;
+            var protectionKey = PwdCredential.PublicKeyOf(PwdCredential.GenerateProtectionKeyPair());
             Assert.IsInstanceOfType<Org.BouncyCastle.Crypto.Parameters.ECNamedDomainParameters>(protectionKey.Parameters);
         }
 
@@ -128,18 +128,16 @@ namespace SharpDTLS.Tests
             var pair = new ScriptedTransportPair();
             var server = Pki.Leaf(new[] { "server.test" });
             var client = Pki.Leaf(usage: KeyPurposeID.id_kp_clientAuth, commonName: "client");
-            var dtlsServer = new Dtls12Server(pair.Server, server.Key, server.Cert)
+            var dtlsServer = new Dtls12Server(pair.Server, TestCertificates.Server(server.Key, server.Cert))
             {
-                IntermediateCertificates = sendIntermediate ? new[] { Pki.Intermediate.Cert } : null,
+                IntermediateCertificates = sendIntermediate ? new[] { Pki.Intermediate.Cert }.Net() : null,
                 RequireClientCertificate = clientAuth,
                 ClientCertificateValidator = clientAuth ? Validator().ForClient() : null,
             };
             var dtlsClient = new Dtls12Client(pair.Client) { ServerCertificateValidator = (serverValidator ?? Validator()).ForServer(hostName) };
             if (clientAuth)
             {
-                dtlsClient.ClientCertificate = client.Cert;
-                dtlsClient.ClientCertificateKeyPair = client.Key;
-                dtlsClient.ClientIntermediateCertificates = new[] { Pki.Intermediate.Cert };
+                dtlsClient.ClientCredentials = TestCertificates.Credentials(client.Key, client.Cert, new[] { Pki.Intermediate.Cert });
             }
             return Run(dtlsClient.BeginHandshake, h => dtlsClient.HandshakeFinished += (_, _) => h(null), f => dtlsClient.Failed += (_, ex) => f(ex));
         }
@@ -149,18 +147,16 @@ namespace SharpDTLS.Tests
             var pair = new ScriptedTransportPair();
             var server = Pki.Leaf(new[] { "server.test" });
             var client = Pki.Leaf(usage: KeyPurposeID.id_kp_clientAuth, commonName: "client");
-            var dtlsServer = new Dtls13Server(pair.Server, server.Key, server.Cert)
+            var dtlsServer = new Dtls13Server(pair.Server, TestCertificates.Server(server.Key, server.Cert))
             {
-                IntermediateCertificates = sendIntermediate ? new[] { Pki.Intermediate.Cert } : null,
+                IntermediateCertificates = sendIntermediate ? new[] { Pki.Intermediate.Cert }.Net() : null,
                 RequireClientCertificate = clientAuth,
                 ClientCertificateValidator = clientAuth ? Validator().ForClient() : null,
             };
             var dtlsClient = new Dtls13Client(pair.Client) { ServerCertificateValidator = (serverValidator ?? Validator()).ForServer(hostName) };
             if (clientAuth)
             {
-                dtlsClient.ClientCertificate = client.Cert;
-                dtlsClient.ClientCertificateKeyPair = client.Key;
-                dtlsClient.ClientIntermediateCertificates = new[] { Pki.Intermediate.Cert };
+                dtlsClient.ClientCredentials = TestCertificates.Credentials(client.Key, client.Cert, new[] { Pki.Intermediate.Cert });
             }
             Exception serverError = null;
             var result = Run(dtlsClient.BeginHandshake, h => dtlsClient.HandshakeFinished += (_, _) => h(null), f => dtlsClient.Failed += (_, ex) => f(ex));

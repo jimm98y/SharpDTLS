@@ -19,19 +19,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 // SOFTWARE.
 
-using Org.BouncyCastle.Asn1.X509;
-using Org.BouncyCastle.Asn1.X9;
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Crypto.Generators;
-using Org.BouncyCastle.Crypto.Macs;
-using Org.BouncyCastle.Crypto.Operators;
-using Org.BouncyCastle.Crypto.Parameters;
-using Org.BouncyCastle.Math;
-using Org.BouncyCastle.Security;
-using Org.BouncyCastle.Tls;
-using Org.BouncyCastle.Tls.Crypto;
-using Org.BouncyCastle.Tls.Crypto.Impl.BC;
-using Org.BouncyCastle.X509;
 using System;
 using System.Buffers.Binary;
 using System.Security.Cryptography;
@@ -42,7 +29,6 @@ namespace SharpDTLS.Protocol13
     internal static class Dtls13CryptoUtils
     {
         private static readonly byte[] _cookieKey;
-        private static readonly BcTlsCrypto _crypto = new BcTlsCrypto();
 
         private const byte CookieVersion = 2;
         private static readonly TimeSpan CookieLifetime = TimeSpan.FromMinutes(2);
@@ -50,7 +36,7 @@ namespace SharpDTLS.Protocol13
         static Dtls13CryptoUtils()
         {
             _cookieKey = new byte[32];
-            new SecureRandom().NextBytes(_cookieKey);
+            RandomNumberGenerator.Fill(_cookieKey);
         }
 
         // ── Stateless HelloRetryRequest cookie (RFC 8446 §4.2.2) ────────────────────────────────
@@ -117,71 +103,17 @@ namespace SharpDTLS.Protocol13
 
         // ── Certificates and key exchange ───────────────────────────────────────────────────────
 
-        public static (AsymmetricCipherKeyPair keyPair, X509Certificate certificate) GenerateSelfSignedCertificate()
-        {
-            var rsaGenerator = new RsaKeyPairGenerator();
-            rsaGenerator.Init(new KeyGenerationParameters(new SecureRandom(), 2048));
-            var keyPair = rsaGenerator.GenerateKeyPair();
-            return (keyPair, CreateSelfSigned(keyPair, "SHA256WITHRSA"));
-        }
 
-        public static (AsymmetricCipherKeyPair keyPair, X509Certificate certificate) GenerateSelfSignedEcCertificate()
-        {
-            // Named curve (OID) parameters: RFC 5480 §2.1.1 forbids explicit curve parameters in certificates,
-            // and platform validators (e.g. Apple's) reject them.
-            var ecGenerator = new ECKeyPairGenerator();
-            ecGenerator.Init(new ECKeyGenerationParameters(ECNamedCurveTable.GetOid("P-256"), new SecureRandom()));
-            var keyPair = ecGenerator.GenerateKeyPair();
-            return (keyPair, CreateSelfSigned(keyPair, "SHA256WITHECDSA"));
-        }
 
-        private static X509Certificate CreateSelfSigned(AsymmetricCipherKeyPair keyPair, string signatureAlgorithm)
-        {
-            var certGenerator = new X509V3CertificateGenerator();
-            certGenerator.SetSerialNumber(BigInteger.ValueOf(1));
-            certGenerator.SetIssuerDN(new X509Name("CN=SharpDTLS Server"));
-            certGenerator.SetSubjectDN(new X509Name("CN=SharpDTLS Server"));
-            certGenerator.SetNotBefore(DateTime.UtcNow.AddDays(-1));
-            certGenerator.SetNotAfter(DateTime.UtcNow.AddYears(10));
-            certGenerator.SetPublicKey(keyPair.Public);
-            return certGenerator.Generate(new Asn1SignatureFactory(signatureAlgorithm, keyPair.Private, new SecureRandom()));
-        }
 
-        public static (X25519PrivateKeyParameters privateX25519, X25519PublicKeyParameters publicX25519) CreateX25519KeyPair()
-        {
-            X25519KeyPairGenerator x25519KeyPairGenerator = new X25519KeyPairGenerator();
-            x25519KeyPairGenerator.Init(new X25519KeyGenerationParameters(new SecureRandom()));
-            AsymmetricCipherKeyPair keyPair = x25519KeyPairGenerator.GenerateKeyPair();
-            return (keyPair.Private as X25519PrivateKeyParameters, keyPair.Public as X25519PublicKeyParameters);
-        }
 
         public static byte[] GenerateRandom(int length)
         {
             var bytes = new byte[length];
-            new SecureRandom().NextBytes(bytes);
+            RandomNumberGenerator.Fill(bytes);
             return bytes;
         }
 
-        public static byte[] DeriveSharedSecretX25519(byte[] privateKey, byte[] publicKey)
-        {
-            if (privateKey == null) throw new ArgumentNullException(nameof(privateKey));
-            if (publicKey == null) throw new ArgumentNullException(nameof(publicKey));
-            if (privateKey.Length != 32) throw new ArgumentException("Private key must be 32 bytes.", nameof(privateKey));
-            if (publicKey.Length != 32) throw new DtlsException(AlertDescription.IllegalParameter, "X25519 public key must be 32 bytes.");
-
-            var priv = new X25519PrivateKeyParameters(privateKey, 0);
-            var pub = new X25519PublicKeyParameters(publicKey, 0);
-
-            var shared = new byte[32];
-            priv.GenerateSecret(pub, shared, 0);
-
-            // RFC 8446 §7.4.2: abort if the shared secret is all zeros (small-order point)
-            int acc = 0;
-            foreach (byte b in shared) acc |= b;
-            if (acc == 0) throw new DtlsException(AlertDescription.IllegalParameter, "X25519 shared secret is zero.");
-
-            return shared;
-        }
 
         // ── Key schedule (RFC 8446 §7.1 with the "dtls13" label prefix of RFC 9147 §5.9) ─────────
 
@@ -190,121 +122,111 @@ namespace SharpDTLS.Protocol13
         /// <paramref name="sharedSecret"/> the (EC)DHE secret (null for psk_ke, which has none).
         /// </summary>
         public static Dtls13CryptoContext CalculateHandshakeKeys(byte[] clientRandom, byte[] helloHash, byte[] sharedSecret, Dtls13CipherSuite suite,
-            byte[] psk = null)
+            byte[] psk = null, ITlsCrypto crypto = null)
         {
-            int hashAlg = suite.HashAlgorithm;
-            byte[] zeroKey = new byte[suite.HashLength];
+            crypto ??= BouncyCastleTlsCrypto.Default;
+            var earlySecret = CalculateEarlySecret(psk, suite, crypto);
+            var derivedSecret = HkdfExpandLabel(earlySecret, suite, "derived", EmptyHash(suite, crypto), suite.HashLength, crypto);
+            var handshakeSecret = TlsKdf.HkdfExtract(crypto, suite.HashAlgorithm, derivedSecret, sharedSecret ?? new byte[suite.HashLength]);
 
-            var earlySecret = CalculateEarlySecret(psk, suite);
-            var derivedSecret = HkdfExpandLabel(new BcTlsSecret(_crypto, earlySecret), suite, "derived", EmptyHash(suite), suite.HashLength).Extract();
-            var handshakeSecret = new BcTlsSecret(_crypto, derivedSecret).HkdfExtract(hashAlg, new BcTlsSecret(_crypto, sharedSecret ?? zeroKey)).Extract();
+            var clientSecret = HkdfExpandLabel(handshakeSecret, suite, "c hs traffic", helloHash, suite.HashLength, crypto);
+            var serverSecret = HkdfExpandLabel(handshakeSecret, suite, "s hs traffic", helloHash, suite.HashLength, crypto);
 
-            var clientSecret = HkdfExpandLabel(new BcTlsSecret(_crypto, handshakeSecret), suite, "c hs traffic", helloHash, suite.HashLength).Extract();
-            var serverSecret = HkdfExpandLabel(new BcTlsSecret(_crypto, handshakeSecret), suite, "s hs traffic", helloHash, suite.HashLength).Extract();
-
-            return CreateContext(clientRandom, handshakeSecret, clientSecret, serverSecret, suite, epoch: 2);
+            return CreateContext(clientRandom, handshakeSecret, clientSecret, serverSecret, suite, epoch: 2, crypto);
         }
 
-        public static Dtls13CryptoContext CalculateApplicationKeys(byte[] clientRandom, byte[] handshakeHash, byte[] handshakeSecret, Dtls13CipherSuite suite)
+        public static Dtls13CryptoContext CalculateApplicationKeys(byte[] clientRandom, byte[] handshakeHash, byte[] handshakeSecret, Dtls13CipherSuite suite,
+            ITlsCrypto crypto = null)
         {
-            int hashAlg = suite.HashAlgorithm;
-            byte[] zeroKey = new byte[suite.HashLength];
+            crypto ??= BouncyCastleTlsCrypto.Default;
+            var derivedSecret = HkdfExpandLabel(handshakeSecret, suite, "derived", EmptyHash(suite, crypto), suite.HashLength, crypto);
+            var masterSecret = TlsKdf.HkdfExtract(crypto, suite.HashAlgorithm, derivedSecret, new byte[suite.HashLength]);
 
-            var derivedSecret = HkdfExpandLabel(new BcTlsSecret(_crypto, handshakeSecret), suite, "derived", EmptyHash(suite), suite.HashLength).Extract();
-            var masterSecret = new BcTlsSecret(_crypto, derivedSecret).HkdfExtract(hashAlg, new BcTlsSecret(_crypto, zeroKey)).Extract();
+            var clientSecret = HkdfExpandLabel(masterSecret, suite, "c ap traffic", handshakeHash, suite.HashLength, crypto);
+            var serverSecret = HkdfExpandLabel(masterSecret, suite, "s ap traffic", handshakeHash, suite.HashLength, crypto);
 
-            var clientSecret = HkdfExpandLabel(new BcTlsSecret(_crypto, masterSecret), suite, "c ap traffic", handshakeHash, suite.HashLength).Extract();
-            var serverSecret = HkdfExpandLabel(new BcTlsSecret(_crypto, masterSecret), suite, "s ap traffic", handshakeHash, suite.HashLength).Extract();
-
-            return CreateContext(clientRandom, masterSecret, clientSecret, serverSecret, suite, epoch: 3);
+            return CreateContext(clientRandom, masterSecret, clientSecret, serverSecret, suite, epoch: 3, crypto);
         }
 
         /// <summary>early_secret = HKDF-Extract(0, PSK), with a zero PSK when there is none (RFC 8446 §7.1).</summary>
-        public static byte[] CalculateEarlySecret(byte[] psk, Dtls13CipherSuite suite)
-            => new BcTlsSecret(_crypto, new byte[suite.HashLength])
-                .HkdfExtract(suite.HashAlgorithm, new BcTlsSecret(_crypto, psk ?? new byte[suite.HashLength])).Extract();
+        public static byte[] CalculateEarlySecret(byte[] psk, Dtls13CipherSuite suite, ITlsCrypto crypto = null)
+            => TlsKdf.HkdfExtract(crypto ?? BouncyCastleTlsCrypto.Default, suite.HashAlgorithm, new byte[suite.HashLength], psk ?? new byte[suite.HashLength]);
 
         /// <summary>
         /// PSK binder (RFC 8446 §4.2.11.2): HMAC(finished_key(Derive-Secret(early_secret, "res binder" or
         /// "ext binder", "")), Transcript-Hash(truncated ClientHello)).
         /// </summary>
-        public static byte[] CalculateBinder(byte[] psk, byte[] truncatedTranscriptHash, Dtls13CipherSuite suite, bool external = false)
+        public static byte[] CalculateBinder(byte[] psk, byte[] truncatedTranscriptHash, Dtls13CipherSuite suite, bool external = false, ITlsCrypto crypto = null)
         {
-            byte[] earlySecret = CalculateEarlySecret(psk, suite);
-            byte[] binderKey = HkdfExpandLabel(new BcTlsSecret(_crypto, earlySecret), suite, external ? "ext binder" : "res binder",
-                EmptyHash(suite), suite.HashLength).Extract();
-            return CalculateFinished(binderKey, truncatedTranscriptHash, suite);
+            crypto ??= BouncyCastleTlsCrypto.Default;
+            byte[] earlySecret = CalculateEarlySecret(psk, suite, crypto);
+            byte[] binderKey = HkdfExpandLabel(earlySecret, suite, external ? "ext binder" : "res binder", EmptyHash(suite, crypto), suite.HashLength, crypto);
+            return CalculateFinished(binderKey, truncatedTranscriptHash, suite, crypto);
         }
 
         /// <summary>
         /// 0-RTT keys (epoch 1, client to server only): client_early_traffic_secret =
         /// Derive-Secret(early_secret, "c e traffic", ClientHello) (RFC 8446 §7.1, RFC 9147 §6.1).
         /// </summary>
-        public static Dtls13CryptoContext CalculateEarlyKeys(byte[] clientRandom, byte[] clientHelloHash, byte[] psk, Dtls13CipherSuite suite)
+        public static Dtls13CryptoContext CalculateEarlyKeys(byte[] clientRandom, byte[] clientHelloHash, byte[] psk, Dtls13CipherSuite suite, ITlsCrypto crypto = null)
         {
-            byte[] earlySecret = CalculateEarlySecret(psk, suite);
-            byte[] clientSecret = HkdfExpandLabel(new BcTlsSecret(_crypto, earlySecret), suite, "c e traffic", clientHelloHash, suite.HashLength).Extract();
-            return CreateContext(clientRandom, earlySecret, clientSecret, clientSecret, suite, epoch: 1);
+            crypto ??= BouncyCastleTlsCrypto.Default;
+            byte[] earlySecret = CalculateEarlySecret(psk, suite, crypto);
+            byte[] clientSecret = HkdfExpandLabel(earlySecret, suite, "c e traffic", clientHelloHash, suite.HashLength, crypto);
+            return CreateContext(clientRandom, earlySecret, clientSecret, clientSecret, suite, epoch: 1, crypto);
         }
 
         /// <summary>resumption_master_secret = Derive-Secret(master_secret, "res master", ClientHello..client Finished)</summary>
-        public static byte[] CalculateResumptionMasterSecret(byte[] masterSecret, byte[] clientFinishedHash, Dtls13CipherSuite suite)
-            => HkdfExpandLabel(new BcTlsSecret(_crypto, masterSecret), suite, "res master", clientFinishedHash, suite.HashLength).Extract();
+        public static byte[] CalculateResumptionMasterSecret(byte[] masterSecret, byte[] clientFinishedHash, Dtls13CipherSuite suite, ITlsCrypto crypto = null)
+            => HkdfExpandLabel(masterSecret, suite, "res master", clientFinishedHash, suite.HashLength, crypto);
 
         /// <summary>The PSK of one ticket: HKDF-Expand-Label(resumption_master_secret, "resumption", ticket_nonce, Hash.length).</summary>
-        public static byte[] CalculateResumptionPsk(byte[] resumptionMasterSecret, byte[] ticketNonce, Dtls13CipherSuite suite)
-            => HkdfExpandLabel(new BcTlsSecret(_crypto, resumptionMasterSecret), suite, "resumption", ticketNonce, suite.HashLength).Extract();
+        public static byte[] CalculateResumptionPsk(byte[] resumptionMasterSecret, byte[] ticketNonce, Dtls13CipherSuite suite, ITlsCrypto crypto = null)
+            => HkdfExpandLabel(resumptionMasterSecret, suite, "resumption", ticketNonce, suite.HashLength, crypto);
 
         /// <summary>exporter_master_secret = Derive-Secret(master_secret, "exp master", ClientHello..server Finished)</summary>
-        public static byte[] CalculateExporterMasterSecret(byte[] masterSecret, byte[] handshakeHash, Dtls13CipherSuite suite)
-        {
-            return HkdfExpandLabel(new BcTlsSecret(_crypto, masterSecret), suite, "exp master", handshakeHash, suite.HashLength).Extract();
-        }
+        public static byte[] CalculateExporterMasterSecret(byte[] masterSecret, byte[] handshakeHash, Dtls13CipherSuite suite, ITlsCrypto crypto = null)
+            => HkdfExpandLabel(masterSecret, suite, "exp master", handshakeHash, suite.HashLength, crypto);
 
         /// <summary>
         /// RFC 8446 §7.5: TLS-Exporter(label, context, length) =
         ///   HKDF-Expand-Label(Derive-Secret(exporter_master_secret, label, ""), "exporter", Hash(context), length)
         /// An absent context is treated as empty, as TLS 1.3 does not distinguish them.
         /// </summary>
-        public static byte[] ExportKeyingMaterial(byte[] exporterMasterSecret, string label, byte[] context, int length, Dtls13CipherSuite suite)
+        public static byte[] ExportKeyingMaterial(byte[] exporterMasterSecret, string label, byte[] context, int length, Dtls13CipherSuite suite,
+            ITlsCrypto crypto = null)
         {
-            byte[] derived = HkdfExpandLabel(new BcTlsSecret(_crypto, exporterMasterSecret), suite, label, EmptyHash(suite), suite.HashLength).Extract();
-
-            var digest = suite.CreateDigest();
-            context ??= Array.Empty<byte>();
-            digest.BlockUpdate(context, 0, context.Length);
-            byte[] contextHash = new byte[digest.GetDigestSize()];
-            digest.DoFinal(contextHash, 0);
-
-            return HkdfExpandLabel(new BcTlsSecret(_crypto, derived), suite, "exporter", contextHash, length).Extract();
+            crypto ??= BouncyCastleTlsCrypto.Default;
+            byte[] derived = HkdfExpandLabel(exporterMasterSecret, suite, label, EmptyHash(suite, crypto), suite.HashLength, crypto);
+            byte[] contextHash = TlsKdf.Hash(crypto, suite.HashAlgorithm, context ?? Array.Empty<byte>());
+            return HkdfExpandLabel(derived, suite, "exporter", contextHash, length, crypto);
         }
 
-        private static Dtls13CryptoContext CreateContext(byte[] clientRandom, byte[] secret, byte[] clientSecret, byte[] serverSecret, Dtls13CipherSuite suite, ulong epoch)
+        private static Dtls13CryptoContext CreateContext(byte[] clientRandom, byte[] secret, byte[] clientSecret, byte[] serverSecret, Dtls13CipherSuite suite,
+            ulong epoch, ITlsCrypto crypto)
         {
-            var (clientKey, clientIv, clientSnKey) = DeriveTrafficKeys(clientSecret, suite);
-            var (serverKey, serverIv, serverSnKey) = DeriveTrafficKeys(serverSecret, suite);
-            return new Dtls13CryptoContext(clientRandom, secret, clientSecret, serverSecret, clientKey, clientIv, serverKey, serverIv, clientSnKey, serverSnKey, suite, epoch);
+            var (clientKey, clientIv, clientSnKey) = DeriveTrafficKeys(clientSecret, suite, crypto);
+            var (serverKey, serverIv, serverSnKey) = DeriveTrafficKeys(serverSecret, suite, crypto);
+            return new Dtls13CryptoContext(clientRandom, secret, clientSecret, serverSecret, clientKey, clientIv, serverKey, serverIv, clientSnKey, serverSnKey, suite, epoch)
+            {
+                Crypto = crypto,
+            };
         }
 
-        private static (byte[] key, byte[] iv, byte[] snKey) DeriveTrafficKeys(byte[] trafficSecret, Dtls13CipherSuite suite)
+        private static (byte[] key, byte[] iv, byte[] snKey) DeriveTrafficKeys(byte[] trafficSecret, Dtls13CipherSuite suite, ITlsCrypto crypto)
         {
-            var secret = new BcTlsSecret(_crypto, trafficSecret);
-            byte[] key   = HkdfExpandLabel(secret, suite, "key", Array.Empty<byte>(), suite.KeyLength).Extract();
-            byte[] iv    = HkdfExpandLabel(new BcTlsSecret(_crypto, trafficSecret), suite, "iv", Array.Empty<byte>(), suite.IvLength).Extract();
-            byte[] snKey = HkdfExpandLabel(new BcTlsSecret(_crypto, trafficSecret), suite, "sn", Array.Empty<byte>(), suite.KeyLength).Extract();
+            byte[] key   = HkdfExpandLabel(trafficSecret, suite, "key", Array.Empty<byte>(), suite.KeyLength, crypto);
+            byte[] iv    = HkdfExpandLabel(trafficSecret, suite, "iv", Array.Empty<byte>(), suite.IvLength, crypto);
+            byte[] snKey = HkdfExpandLabel(trafficSecret, suite, "sn", Array.Empty<byte>(), suite.KeyLength, crypto);
             return (key, iv, snKey);
         }
 
         /// <summary>verify_data = HMAC(finished_key, transcript_hash), finished_key = HKDF-Expand-Label(base_key, "finished", "", Hash.length)</summary>
-        public static byte[] CalculateFinished(byte[] baseKey, byte[] transcriptHash, Dtls13CipherSuite suite)
+        public static byte[] CalculateFinished(byte[] baseKey, byte[] transcriptHash, Dtls13CipherSuite suite, ITlsCrypto crypto = null)
         {
-            byte[] finishedKey = HkdfExpandLabel(new BcTlsSecret(_crypto, baseKey), suite, "finished", Array.Empty<byte>(), suite.HashLength).Extract();
-            var hmac = new HMac(suite.CreateDigest());
-            hmac.Init(new KeyParameter(finishedKey));
-            hmac.BlockUpdate(transcriptHash, 0, transcriptHash.Length);
-            byte[] mac = new byte[hmac.GetMacSize()];
-            hmac.DoFinal(mac, 0);
-            return mac;
+            crypto ??= BouncyCastleTlsCrypto.Default;
+            byte[] finishedKey = HkdfExpandLabel(baseKey, suite, "finished", Array.Empty<byte>(), suite.HashLength, crypto);
+            return TlsKdf.Hmac(crypto, suite.HashAlgorithm, finishedKey, transcriptHash);
         }
 
         // RFC 8446 §7.2: application_traffic_secret_N+1 = HKDF-Expand-Label(application_traffic_secret_N, "traffic upd", "", Hash.length)
@@ -312,8 +234,9 @@ namespace SharpDTLS.Protocol13
         public static Dtls13CryptoContext UpdateClientTrafficSecret(Dtls13CryptoContext current)
         {
             var suite = current.Suite;
-            var newClientSecret = HkdfExpandLabel(new BcTlsSecret(_crypto, current.ClientSecret), suite, "traffic upd", Array.Empty<byte>(), suite.HashLength).Extract();
-            var (key, iv, snKey) = DeriveTrafficKeys(newClientSecret, suite);
+            var crypto = current.Crypto;
+            var newClientSecret = HkdfExpandLabel(current.ClientSecret, suite, "traffic upd", Array.Empty<byte>(), suite.HashLength, crypto);
+            var (key, iv, snKey) = DeriveTrafficKeys(newClientSecret, suite, crypto);
 
             return new Dtls13CryptoContext(
                 current.ClientRandom, current.Secret,
@@ -321,14 +244,18 @@ namespace SharpDTLS.Protocol13
                 key, iv,
                 current.ServerKey, current.ServerIv,
                 snKey, current.ServerSnKey,
-                suite, current.Epoch + 1);
+                suite, current.Epoch + 1)
+            {
+                Crypto = crypto,
+            };
         }
 
         public static Dtls13CryptoContext UpdateServerTrafficSecret(Dtls13CryptoContext current)
         {
             var suite = current.Suite;
-            var newServerSecret = HkdfExpandLabel(new BcTlsSecret(_crypto, current.ServerSecret), suite, "traffic upd", Array.Empty<byte>(), suite.HashLength).Extract();
-            var (key, iv, snKey) = DeriveTrafficKeys(newServerSecret, suite);
+            var crypto = current.Crypto;
+            var newServerSecret = HkdfExpandLabel(current.ServerSecret, suite, "traffic upd", Array.Empty<byte>(), suite.HashLength, crypto);
+            var (key, iv, snKey) = DeriveTrafficKeys(newServerSecret, suite, crypto);
 
             return new Dtls13CryptoContext(
                 current.ClientRandom, current.Secret,
@@ -336,66 +263,36 @@ namespace SharpDTLS.Protocol13
                 current.ClientKey, current.ClientIv,
                 key, iv,
                 current.ClientSnKey, snKey,
-                suite, current.Epoch + 1);
+                suite, current.Epoch + 1)
+            {
+                Crypto = crypto,
+            };
         }
 
-        private static byte[] EmptyHash(Dtls13CipherSuite suite)
+        private static byte[] EmptyHash(Dtls13CipherSuite suite, ITlsCrypto crypto) => TlsKdf.Hash(crypto, suite.HashAlgorithm, Array.Empty<byte>());
+
+        /// <summary>
+        /// HKDF-Expand-Label (RFC 8446 §7.1) with the suite's hash and label prefix: "dtls13" (RFC 9147 §5.9), or "tls13 "
+        /// for TLS.
+        /// </summary>
+        internal static byte[] HkdfExpandLabel(byte[] secret, Dtls13CipherSuite suite, string label, byte[] context, int length, ITlsCrypto crypto = null)
         {
-            var digest = suite.CreateDigest();
-            byte[] hash = new byte[digest.GetDigestSize()];
-            digest.DoFinal(hash, 0);
-            return hash;
-        }
+            byte[] prefix = suite.LabelPrefixBytes;
+            int expandedLabelLength = prefix.Length + label.Length;
+            if (label.Length < 1 || expandedLabelLength > 255 || context.Length > 255 || length > 0xFFFF)
+                throw new DtlsException(AlertDescription.InternalError, "HKDF-Expand-Label out of range.");
 
-        // BouncyCastle's HKDF-Expand-Label has the TLS prefix built in; DTLS 1.3 needs "dtls13" (RFC 9147 §5.9).
-        private readonly static byte[] Dtls13Prefix = Encoding.ASCII.GetBytes("dtls13");
-
-        /// <exception cref="System.IO.IOException"/>
-        public static TlsSecret HkdfExpandLabel(TlsSecret secret, int cryptoHashAlgorithm, string label,
-            byte[] context, int length)
-        {
-            return HkdfExpandLabel(secret, cryptoHashAlgorithm, label.AsSpan(), context.AsSpan(), length);
-        }
-
-        /// <summary>HKDF-Expand-Label with the suite's hash and label prefix ("dtls13", or "tls13 " for TLS).</summary>
-        internal static TlsSecret HkdfExpandLabel(TlsSecret secret, Dtls13CipherSuite suite, string label, byte[] context, int length)
-            => HkdfExpandLabel(secret, suite.HashAlgorithm, label.AsSpan(), context.AsSpan(), length, suite.LabelPrefixBytes);
-
-        /// <exception cref="System.IO.IOException"/>
-        public static TlsSecret HkdfExpandLabel(TlsSecret secret, int cryptoHashAlgorithm, ReadOnlySpan<char> label,
-            ReadOnlySpan<byte> context, int length)
-            => HkdfExpandLabel(secret, cryptoHashAlgorithm, label, context, length, Dtls13Prefix);
-
-        private static TlsSecret HkdfExpandLabel(TlsSecret secret, int cryptoHashAlgorithm, ReadOnlySpan<char> label,
-            ReadOnlySpan<byte> context, int length, byte[] prefix)
-        {
-            int labelLength = label.Length;
-            if (labelLength < 1)
-                throw new TlsFatalAlert(Org.BouncyCastle.Tls.AlertDescription.internal_error);
-
-            int contextLength = context.Length;
-            int expandedLabelLength = prefix.Length + labelLength;
-
-            byte[] hkdfLabel = new byte[2 + (1 + expandedLabelLength) + (1 + contextLength)];
-
-            // uint16 length
-            TlsUtilities.CheckUint16(length);
-            TlsUtilities.WriteUint16(length, hkdfLabel, 0);
-
-            // opaque label<7..255>
-            TlsUtilities.CheckUint8(expandedLabelLength);
-            TlsUtilities.WriteUint8(expandedLabelLength, hkdfLabel, 2);
+            // uint16 length || opaque label<7..255> || opaque context<0..255>
+            byte[] hkdfLabel = new byte[2 + 1 + expandedLabelLength + 1 + context.Length];
+            BinaryPrimitives.WriteUInt16BigEndian(hkdfLabel, (ushort)length);
+            hkdfLabel[2] = (byte)expandedLabelLength;
             prefix.CopyTo(hkdfLabel, 3);
-            int labelPos = 2 + (1 + prefix.Length);
-            for (int i = 0; i < labelLength; ++i)
-                hkdfLabel[labelPos + i] = (byte)label[i];
+            for (int i = 0; i < label.Length; ++i)
+                hkdfLabel[3 + prefix.Length + i] = (byte)label[i];
+            hkdfLabel[3 + expandedLabelLength] = (byte)context.Length;
+            context.CopyTo(hkdfLabel, 4 + expandedLabelLength);
 
-            // context
-            TlsUtilities.CheckUint8(contextLength);
-            hkdfLabel[2 + (1 + expandedLabelLength)] = (byte)contextLength;
-            context.CopyTo(hkdfLabel.AsSpan(2 + (1 + expandedLabelLength) + 1));
-
-            return secret.HkdfExpand(cryptoHashAlgorithm, hkdfLabel, length);
+            return TlsKdf.HkdfExpand(crypto ?? BouncyCastleTlsCrypto.Default, suite.HashAlgorithm, secret, hkdfLabel, length);
         }
     }
 }

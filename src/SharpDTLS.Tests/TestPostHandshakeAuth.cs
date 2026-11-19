@@ -35,17 +35,16 @@ namespace SharpDTLS.Tests
             public readonly TaskCompletionSource<Exception> ClientFailed = new(TaskCreationOptions.RunContinuationsAsynchronously);
         }
 
-        private static Setup Connect(bool allow = true, bool withCertificate = true, Func<X509Certificate, IReadOnlyList<byte[]>, bool> validator = null,
+        private static Setup Connect(bool allow = true, bool withCertificate = true, Func<System.Security.Cryptography.X509Certificates.X509Certificate2, IReadOnlyList<byte[]>, bool> validator = null,
             Action<Dtls13Server, Dtls13Client> configure = null)
         {
             var s = new Setup();
-            s.Server = new Dtls13Server(s.Pair.Server) { ClientCertificateValidator = validator ?? new CertificateValidator(new[] { Pki.Root.Cert }).ForClient() };
-            s.Server.ApplicationDataReceived += (_, e) => { lock (s.ServerReceived) s.ServerReceived.Add(Encoding.UTF8.GetString(e.Data)); };
+            s.Server = new Dtls13Server(s.Pair.Server) { ClientCertificateValidator = validator ?? new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForClient() };
+            s.Server.ApplicationDataReceived += (_, e) => { lock (s.ServerReceived) s.ServerReceived.Add(Encoding.UTF8.GetString(e.ToArray())); };
             s.Client = new Dtls13Client(s.Pair.Client) { AllowPostHandshakeAuthentication = allow };
             if (withCertificate)
             {
-                (s.Client.ClientCertificateKeyPair, s.Client.ClientCertificate) = Pki.Leaf(commonName: "pha client", usage: KeyPurposeID.id_kp_clientAuth);
-                s.Client.ClientIntermediateCertificates = new[] { Pki.Intermediate.Cert };
+                s.Client.ClientCredentials = TestCertificates.Credentials(Pki.Leaf(commonName: "pha client", usage: KeyPurposeID.id_kp_clientAuth), new[] { Pki.Intermediate.Cert });
             }
             configure?.Invoke(s.Server, s.Client);
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -83,7 +82,7 @@ namespace SharpDTLS.Tests
             Assert.IsTrue(s.Connection.AllowsPostHandshakeAuthentication);
             Assert.IsNull(s.Connection.ClientCertificate);
             Assert.IsTrue(Authenticate(s), s.ServerFailed.Task.IsCompleted ? s.ServerFailed.Task.Result.ToString() : "no answer");
-            Assert.AreEqual(s.Client.ClientCertificate, s.Connection.ClientCertificate);
+            Assert.AreEqual(s.Client.ClientCredentials.BcCertificate, s.Connection.ClientCertificate.Bc());
             AssertDataFlows(s, "after authentication");
         }
 
@@ -155,7 +154,7 @@ namespace SharpDTLS.Tests
                 server.ClientCertificateTypes = new[] { CertificateType.RawPublicKey };
                 server.ClientRawPublicKeyValidator = k => k.AsSpan().SequenceEqual(spki);
                 client.ClientCertificateTypes = new[] { CertificateType.RawPublicKey };
-                client.ClientCertificateKeyPair = key;
+                client.ClientCredentials = TestCertificates.Credentials(key, null);
             });
             Assert.IsTrue(Authenticate(s), s.ServerFailed.Task.IsCompleted ? s.ServerFailed.Task.Result.ToString() : "no answer");
             CollectionAssert.AreEqual(spki, s.Connection.ClientRawPublicKey);
@@ -180,7 +179,7 @@ namespace SharpDTLS.Tests
             System.IO.File.AppendAllText(certPath, System.IO.File.ReadAllText(OpenSsl.WritePem(dir, "intermediate.pem", Pki.Intermediate.Cert)));
 
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
-            var server = new Dtls13Server(transport) { ClientCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }).ForClient() };
+            var server = new Dtls13Server(transport) { ClientCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForClient() };
             using var client = new OpenSslProcess($"client {transport.LocalEndpoint.Port} -pha -cert {certPath} -key {keyPath}", dir, WolfSsl.Harness);
             Assert.IsTrue(client.WaitForOutput("CONNECTED", Timeout), client.Output);
             Assert.IsTrue(SpinWait.SpinUntil(() => server.Connections.Any(c => c.IsHandshakeComplete), Timeout));
@@ -191,7 +190,7 @@ namespace SharpDTLS.Tests
             connection.PostHandshakeAuthenticationCompleted += (_, _) => completed.TrySetResult(true);
             connection.RequestClientCertificate();
             Assert.IsTrue(completed.Task.Wait(Timeout), client.Output);
-            Assert.AreEqual(cert, connection.ClientCertificate);
+            Assert.AreEqual(cert, connection.ClientCertificate.Bc());
         }
 
         [TestCategory("Interop")]
@@ -200,7 +199,7 @@ namespace SharpDTLS.Tests
         {
             WolfSsl.RequireWolfSsl();
             string dir = OpenSsl.NewTempDirectory();
-            var (serverKey, serverCert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
+            var (serverKey, serverCert) = SelfSigned.Ec();
             string certPath = OpenSsl.WritePem(dir, "cert.pem", serverCert);
             string keyPath = OpenSsl.WritePem(dir, "key.pem", serverKey.Private);
             string root = OpenSsl.WritePem(dir, "root.pem", Pki.Root.Cert);
@@ -209,8 +208,7 @@ namespace SharpDTLS.Tests
 
             using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
             var client = new Dtls13Client(transport) { AllowPostHandshakeAuthentication = true };
-            (client.ClientCertificateKeyPair, client.ClientCertificate) = Pki.Leaf(commonName: "sharp client", usage: KeyPurposeID.id_kp_clientAuth);
-            client.ClientIntermediateCertificates = new[] { Pki.Intermediate.Cert };
+            client.ClientCredentials = TestCertificates.Credentials(Pki.Leaf(commonName: "sharp client", usage: KeyPurposeID.id_kp_clientAuth), new[] { Pki.Intermediate.Cert });
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var requested = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.HandshakeFinished += (_, _) => done.TrySetResult(true);

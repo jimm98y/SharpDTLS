@@ -77,8 +77,8 @@ namespace SharpDTLS.Protocol12
             {
                 // T = Sn xorend D
                 t = (byte[])plaintext.Clone();
-                for (int i = 0; i < BlockSize; i++)
-                    t[t.Length - BlockSize + i] ^= d[i];
+                var end = t.AsSpan(t.Length - BlockSize);
+                ByteSpans.Xor(end, d, end);
             }
             else
             {
@@ -136,8 +136,7 @@ namespace SharpDTLS.Protocol12
         private static byte[] Xor(byte[] a, byte[] b)
         {
             byte[] result = new byte[a.Length];
-            for (int i = 0; i < a.Length; i++)
-                result[i] = (byte)(a[i] ^ b[i]);
+            ByteSpans.Xor(a, b, result);
             return result;
         }
     }

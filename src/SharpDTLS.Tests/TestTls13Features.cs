@@ -51,11 +51,11 @@ namespace SharpDTLS.Tests
             using var server = new Tls13Server();
             var received = new System.Collections.Concurrent.ConcurrentQueue<string>();
             Tls13ServerConnection connection = null;
-            server.ApplicationDataReceived += (_, e) => { connection = e.Connection; received.Enqueue(Encoding.UTF8.GetString(e.Data)); };
+            server.ApplicationDataReceived += (conn, e) => { connection = (Protocol13.Tls13ServerConnection)conn; received.Enqueue(Encoding.UTF8.GetString(e.ToArray())); };
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
             var client = TestTls13.Connect(server.LocalEndpoint);
             var clientReceived = new System.Collections.Concurrent.ConcurrentQueue<string>();
-            client.ApplicationDataReceived += (_, d) => clientReceived.Enqueue(Encoding.UTF8.GetString(d));
+            client.ApplicationDataReceived += (_, d) => clientReceived.Enqueue(Encoding.UTF8.GetString(d.ToArray()));
 
             client.SendApplicationData(Encoding.UTF8.GetBytes("before"));
             Assert.IsTrue(SpinWait.SpinUntil(() => received.Contains("before"), Timeout));
@@ -77,7 +77,7 @@ namespace SharpDTLS.Tests
             var requests = new System.Collections.Concurrent.ConcurrentQueue<byte>();
             var received = new System.Collections.Concurrent.ConcurrentQueue<string>();
             server.KeyUpdateReceived += (_, k) => requests.Enqueue(k.UpdateRequest);
-            server.ApplicationDataReceived += (_, e) => received.Enqueue(Encoding.UTF8.GetString(e.Data));
+            server.ApplicationDataReceived += (_, e) => received.Enqueue(Encoding.UTF8.GetString(e.ToArray()));
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
             var client = TestTls13.Connect(server.LocalEndpoint);
 
@@ -104,21 +104,20 @@ namespace SharpDTLS.Tests
         public void ClientAuthentication_InHandshakeAndPostHandshake()
         {
             var (key, cert) = Pki.Leaf(commonName: "tls13 client", usage: KeyPurposeID.id_kp_clientAuth);
-            using var server = new Tls13Server { RequireClientCertificate = true, ClientCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }).ForClient() };
+            using var server = new Tls13Server { RequireClientCertificate = true, ClientCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForClient() };
             var established = new TaskCompletionSource<Tls13ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
             server.HandshakeFinished += (_, c) => established.TrySetResult(c);
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
-            TestTls13.Connect(server.LocalEndpoint, c => { (c.ClientCertificateKeyPair, c.ClientCertificate) = (key, cert); c.ClientIntermediateCertificates = new[] { Pki.Intermediate.Cert }; });
+            TestTls13.Connect(server.LocalEndpoint, c => { c.ClientCredentials = TestCertificates.Credentials((key, cert), new[] { Pki.Intermediate.Cert }); });
             Assert.IsTrue(established.Task.Wait(Timeout));
-            Assert.AreEqual(cert, established.Task.Result.ClientCertificate);
+            Assert.AreEqual(cert, established.Task.Result.ClientCertificate.Bc());
 
             server.RequireClientCertificate = false;
             var later = new TaskCompletionSource<Tls13ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
             server.HandshakeFinished += (_, c) => later.TrySetResult(c);
             TestTls13.Connect(server.LocalEndpoint, c =>
             {
-                (c.ClientCertificateKeyPair, c.ClientCertificate) = (key, cert);
-                c.ClientIntermediateCertificates = new[] { Pki.Intermediate.Cert };
+                c.ClientCredentials = TestCertificates.Credentials((key, cert), new[] { Pki.Intermediate.Cert });
                 c.AllowPostHandshakeAuthentication = true;
             });
             Assert.IsTrue(SpinWait.SpinUntil(() => later.Task.IsCompleted && later.Task.Result != established.Task.Result, Timeout));
@@ -127,7 +126,7 @@ namespace SharpDTLS.Tests
             connection.PostHandshakeAuthenticationCompleted += (_, _) => done.TrySetResult(true);
             connection.RequestClientCertificate();
             Assert.IsTrue(done.Task.Wait(Timeout));
-            Assert.AreEqual(cert, connection.ClientCertificate);
+            Assert.AreEqual(cert, connection.ClientCertificate.Bc());
         }
 
         // ── OpenSSL ──────────────────────────────────────────────────────────────────────────
@@ -161,7 +160,7 @@ namespace SharpDTLS.Tests
                 c.SupportedGroups = new[] { Dtls13Groups.X25519, Dtls13Groups.Secp384r1 };
                 c.ApplicationProtocols = new[] { "h2" };
                 c.ServerName = "server.test";
-                c.ServerCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }).ForServer("server.test");
+                c.ServerCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForServer("server.test");
             });
             Assert.AreEqual(Dtls13Groups.Secp384r1, client.NegotiatedGroup);
             Assert.AreEqual("h2", client.ApplicationProtocol);
@@ -188,7 +187,7 @@ namespace SharpDTLS.Tests
             OpenSsl.RequireOpenSsl();
             var f = Files();
             var (key, cert) = Pki.Leaf(new[] { "server.test" });
-            using var server = new Tls13Server(key, cert) { IntermediateCertificates = new[] { Pki.Intermediate.Cert }, ApplicationProtocols = new[] { "h2" } };
+            using var server = new Tls13Server(TestCertificates.Server(key, cert)) { IntermediateCertificates = new[] { Pki.Intermediate.Cert }.Net(), ApplicationProtocols = new[] { "h2" } };
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
 
             string session = Path.Combine(f.Dir, "session.pem");
@@ -204,7 +203,7 @@ namespace SharpDTLS.Tests
 
             // s_client's "keyup:req" sends a KeyUpdate asking for ours; data keeps flowing both ways under the new keys.
             var received = new System.Collections.Concurrent.ConcurrentQueue<(Tls13ServerConnection, string)>();
-            server.ApplicationDataReceived += (_, e) => received.Enqueue((e.Connection, Encoding.UTF8.GetString(e.Data)));
+            server.ApplicationDataReceived += (conn, e) => received.Enqueue(((Protocol13.Tls13ServerConnection)conn, Encoding.UTF8.GetString(e.ToArray())));
             second.WriteLine("keyup:req");
             Assert.IsTrue(second.WaitForOutput("KEYUPDATE", Timeout), second.Output);
             second.WriteLine("after key update");
@@ -222,20 +221,20 @@ namespace SharpDTLS.Tests
             var (clientKey, clientCert) = Pki.Leaf(commonName: "openssl client", usage: KeyPurposeID.id_kp_clientAuth);
             string clientCertPath = OpenSsl.WritePem(f.Dir, "client.pem", clientCert);
             string clientKeyPath = OpenSsl.WritePem(f.Dir, "client-key.pem", clientKey.Private);
-            using var server = new Tls13Server { RequireClientCertificate = true, ClientCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }).ForClient() };
+            using var server = new Tls13Server { RequireClientCertificate = true, ClientCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForClient() };
             var established = new TaskCompletionSource<Tls13ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
             server.HandshakeFinished += (_, c) => established.TrySetResult(c);
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
             using (var client = new OpenSslProcess($"s_client -tls1_3 -connect 127.0.0.1:{server.LocalEndpoint.Port} -cert {clientCertPath} -key {clientKeyPath} -cert_chain {Path.Combine(f.Dir, "int.pem")}", f.Dir))
             {
                 Assert.IsTrue(established.Task.Wait(Timeout), client.Output);
-                Assert.AreEqual(clientCert, established.Task.Result.ClientCertificate);
+                Assert.AreEqual(clientCert, established.Task.Result.ClientCertificate.Bc());
             }
 
             // OpenSSL resuming with 0-RTT data: we decline early data and must skip its records.
             server.RequireClientCertificate = false;
             var received = new System.Collections.Concurrent.ConcurrentQueue<string>();
-            server.ApplicationDataReceived += (_, e) => received.Enqueue(Encoding.UTF8.GetString(e.Data));
+            server.ApplicationDataReceived += (_, e) => received.Enqueue(Encoding.UTF8.GetString(e.ToArray()));
             string session = Path.Combine(f.Dir, "session.pem");
             string early = Path.Combine(f.Dir, "early.txt");
             File.WriteAllText(early, "early data\n");

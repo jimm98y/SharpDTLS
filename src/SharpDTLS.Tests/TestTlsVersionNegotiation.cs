@@ -21,7 +21,7 @@ namespace SharpDTLS.Tests
         {
             var server = new TlsServer();
             configure?.Invoke(server);
-            server.ApplicationDataReceived += (_, e) => e.Connection.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.Data)));
+            server.ApplicationDataReceived += (conn, e) => conn.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.ToArray())));
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
             return server;
         }
@@ -127,7 +127,7 @@ namespace SharpDTLS.Tests
         {
             var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             var text = new StringBuilder();
-            client.ApplicationDataReceived += (_, d) => { lock (text) { text.Append(Encoding.UTF8.GetString(d)); if (text.ToString().Contains("ping")) received.TrySetResult(text.ToString()); } };
+            client.ApplicationDataReceived += (_, d) => { lock (text) { text.Append(Encoding.UTF8.GetString(d.ToArray())); if (text.ToString().Contains("ping")) received.TrySetResult(text.ToString()); } };
             client.SendApplicationData(Encoding.UTF8.GetBytes("ping"));
             Assert.IsTrue(received.Task.Wait(Timeout), "no reply");
             StringAssert.Contains(received.Task.Result, "pong:ping");
@@ -137,7 +137,7 @@ namespace SharpDTLS.Tests
         {
             var server = new TlsServer();
             configure?.Invoke(server);
-            server.ApplicationDataReceived += (_, e) => e.Connection.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.Data)));
+            server.ApplicationDataReceived += (conn, e) => conn.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.ToArray())));
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
             return server;
         }
@@ -162,7 +162,7 @@ namespace SharpDTLS.Tests
                 AssertEcho(client);
             }
             using var plain = new Tls12Server();
-            plain.ApplicationDataReceived += (_, e) => e.Connection.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.Data)));
+            plain.ApplicationDataReceived += (conn, e) => conn.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + Encoding.UTF8.GetString(e.ToArray())));
             plain.Start(new IPEndPoint(IPAddress.Loopback, 0));
             var (c12, e12) = Connect(plain.LocalEndpoint);
             Assert.IsNull(e12, e12?.ToString());

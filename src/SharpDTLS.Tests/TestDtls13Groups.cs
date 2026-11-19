@@ -26,7 +26,7 @@ namespace SharpDTLS.Tests
             var pair = new ScriptedTransportPair();
             var server = new Dtls13Server(pair.Server) { SupportedGroups = serverSupported, ShouldSendHelloRetry = helloRetry };
             var received = new List<string>();
-            server.ApplicationDataReceived += (_, e) => { lock (received) received.Add(Encoding.UTF8.GetString(e.Data)); };
+            server.ApplicationDataReceived += (_, e) => { lock (received) received.Add(Encoding.UTF8.GetString(e.ToArray())); };
             var client = new Dtls13Client(pair.Client) { KeyShareGroups = clientShares, SupportedGroups = clientSupported };
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.HandshakeFinished += (_, _) => done.TrySetResult(true);
@@ -150,7 +150,7 @@ namespace SharpDTLS.Tests
         {
             WolfSsl.RequireWolfSsl();
             string dir = OpenSsl.NewTempDirectory();
-            var (key, cert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
+            var (key, cert) = SelfSigned.Ec();
             string certPath = OpenSsl.WritePem(dir, "cert.pem", cert);
             string keyPath = OpenSsl.WritePem(dir, "key.pem", key.Private);
             using var server = OpenSslProcess.StartServer(p => $"server {p} {certPath} {keyPath} -group {group}", dir, Timeout, out int port, WolfSsl.Harness);

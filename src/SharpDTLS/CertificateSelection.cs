@@ -21,10 +21,10 @@
 
 using Org.BouncyCastle.Asn1;
 using Org.BouncyCastle.Asn1.X509;
-using Org.BouncyCastle.X509;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography.X509Certificates;
 
 namespace SharpDTLS
 {
@@ -39,7 +39,8 @@ namespace SharpDTLS
             IReadOnlyList<ushort> signatureAlgorithms, IReadOnlyList<ushort> signatureAlgorithmsCert)
         {
             ServerName = serverName;
-            CertificateAuthorities = certificateAuthorities?.ToList() ?? new List<X509Name>();
+            _authorities = certificateAuthorities?.ToList() ?? new List<X509Name>();
+            CertificateAuthorities = _authorities.Select(n => new X500DistinguishedName(n.GetEncoded())).ToList();
             SignatureAlgorithms = signatureAlgorithms;
             SignatureAlgorithmsCert = signatureAlgorithmsCert;
         }
@@ -48,7 +49,9 @@ namespace SharpDTLS
         public string ServerName { get; }
 
         /// <summary>Distinguished names of the CAs the peer trusts; empty when it named none.</summary>
-        public IReadOnlyList<X509Name> CertificateAuthorities { get; }
+        public IReadOnlyList<X500DistinguishedName> CertificateAuthorities { get; }
+
+        private readonly List<X509Name> _authorities;
 
         /// <summary>Signature schemes the peer accepts in CertificateVerify, or null when it did not say.</summary>
         public IReadOnlyList<ushort> SignatureAlgorithms { get; }
@@ -60,12 +63,13 @@ namespace SharpDTLS
         /// Whether <paramref name="credentials"/> chain up to a CA the peer named: some certificate in it is issued by, or
         /// is, one of <see cref="CertificateAuthorities"/>. True when the peer named none.
         /// </summary>
-        public bool IsIssuedByAcceptedAuthority(CertificateCredentials credentials)
+        public bool IsIssuedByAcceptedAuthority(TransportCertificate credentials)
         {
-            if (CertificateAuthorities.Count == 0)
+            if (_authorities.Count == 0)
                 return true;
-            var chain = new[] { credentials.Certificate }.Concat(credentials.IntermediateCertificates ?? Array.Empty<X509Certificate>());
-            return chain.Any(c => CertificateAuthorities.Any(n => n.Equivalent(c.IssuerDN) || n.Equivalent(c.SubjectDN)));
+            var chain = new[] { credentials.Certificate }.Concat(credentials.IntermediateCertificates ?? Array.Empty<X509Certificate2>()).Where(c => c != null);
+            return chain.Select(c => X509CertificateStructure.GetInstance(c.RawData))
+                .Any(c => _authorities.Any(n => n.Equivalent(c.Issuer) || n.Equivalent(c.Subject)));
         }
 
         internal static X509Name ParseName(byte[] der)
@@ -82,8 +86,8 @@ namespace SharpDTLS
 
         internal static IEnumerable<X509Name> ParseNames(IEnumerable<byte[]> names) => names?.Select(ParseName) ?? Enumerable.Empty<X509Name>();
 
-        internal static List<byte[]> Encode(IEnumerable<X509Certificate> authorities)
-            => authorities?.Select(c => c.SubjectDN.GetEncoded()).ToList() ?? new List<byte[]>();
+        internal static List<byte[]> Encode(IEnumerable<X509Certificate2> authorities)
+            => authorities?.Select(c => c.SubjectName.RawData).ToList() ?? new List<byte[]>();
     }
 
     /// <summary>certificate_authorities (RFC 8446 §4.2.4): DER distinguished names of the CAs the sender trusts.</summary>

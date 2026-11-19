@@ -78,6 +78,37 @@ namespace SharpDTLS
             _count += count;
         }
 
+        public void AddRange(ReadOnlySpan<byte> data)
+        {
+            if (_start + _count + data.Length > _buffer.Length)
+            {
+                if (_count + data.Length <= _buffer.Length / 2)
+                {
+                    Buffer.BlockCopy(_buffer, _start, _buffer, 0, _count);
+                }
+                else
+                {
+                    var grown = new byte[Math.Max(_buffer.Length * 2, _count + data.Length)];
+                    Buffer.BlockCopy(_buffer, _start, grown, 0, _count);
+                    _buffer = grown;
+                }
+                _start = 0;
+            }
+            data.CopyTo(_buffer.AsSpan(_start + _count));
+            _count += data.Length;
+        }
+
+        /// <summary>
+        /// <paramref name="count"/> bytes from <paramref name="index"/>, not copied: valid until the next AddRange, as
+        /// RemoveRange leaves the bytes where they are.
+        /// </summary>
+        public ReadOnlySpan<byte> Slice(int index, int count)
+        {
+            if (index < 0 || count < 0 || index + count > _count)
+                throw new ArgumentOutOfRangeException(nameof(count));
+            return _buffer.AsSpan(_start + index, count);
+        }
+
         /// <summary>A copy of <paramref name="count"/> bytes from <paramref name="index"/>.</summary>
         public byte[] GetRange(int index, int count)
         {
@@ -96,14 +127,20 @@ namespace SharpDTLS
             _start += count;
             _count -= count;
             if (_count == 0)
+            {
                 _start = 0;
+                // a burst's array is not kept for the connection's life (a span taken before keeps the old one)
+                if (_buffer.Length > MaxIdleCapacity)
+                    _buffer = new byte[256];
+            }
         }
 
-        public void Clear()
-        {
-            _start = 0;
-            _count = 0;
-        }
+        /// <summary>The largest array kept once emptied: a record and a read, so a steady stream reuses its own.</summary>
+        internal const int MaxIdleCapacity = 64 * 1024;
+
+        internal int Capacity => _buffer.Length;
+
+        public void Clear() => RemoveRange(0, _count);
 
         public byte[] ToArray() => GetRange(0, _count);
 

@@ -19,11 +19,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 // SOFTWARE.
 
-using Org.BouncyCastle.X509;
 using SharpDTLS.Protocol12;
 using SharpDTLS.Protocol13;
 using System;
 using System.Collections.Generic;
+using System.Security.Cryptography.X509Certificates;
 
 namespace SharpDTLS
 {
@@ -74,24 +74,26 @@ namespace SharpDTLS
         /// Client certificate validation; return false to abort with bad_certificate. When null, the chain is validated
         /// against the platform's trust store for clientAuth; set (c, chain) => true to accept any certificate.
         /// </summary>
-        public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ClientCertificateValidator
+        public Func<X509Certificate2, IReadOnlyList<byte[]>, bool> ClientCertificateValidator
         {
             get => Engine13.ClientCertificateValidator;
             set { Engine12.ClientCertificateValidator = value; Engine13.ClientCertificateValidator = value; }
         }
 
         /// <summary>Intermediate CA certificates sent after the server certificate, issuer of the previous one first.</summary>
-        public IList<X509Certificate> IntermediateCertificates
+        public IList<X509Certificate2> IntermediateCertificates
         {
-            get => Engine13.IntermediateCertificates;
-            set { Engine12.IntermediateCertificates = value; Engine13.IntermediateCertificates = value; }
+            get => _intermediateCertificates;
+            set { _intermediateCertificates = value; Engine12.IntermediateCertificates = Engine13.IntermediateCertificates = value == null ? null : new List<X509Certificate2>(value); }
         }
+
+        private IList<X509Certificate2> _intermediateCertificates;
 
         /// <summary>
         /// Chooses the credentials for the client's server_name (RFC 6066), which is null when the client sent none.
         /// Returning null uses the default certificate.
         /// </summary>
-        public Func<string, ServerCredentials> CertificateSelector
+        public Func<string, TransportCertificate> CertificateSelector
         {
             get => Engine13.CertificateSelector;
             set { Engine12.CertificateSelector = value; Engine13.CertificateSelector = value; }
@@ -101,10 +103,22 @@ namespace SharpDTLS
         /// Chooses credentials from what the client said (server name, trusted CAs, signature schemes); returning null
         /// falls back to <see cref="CertificateSelector"/> and then the default certificate.
         /// </summary>
-        public Func<CertificateSelectionContext, ServerCredentials> CredentialsSelector
+        public Func<CertificateSelectionContext, TransportCertificate> CredentialsSelector
         {
             get => Engine13.CredentialsSelector;
             set { Engine12.CredentialsSelector = value; Engine13.CredentialsSelector = value; }
+        }
+
+        /// <summary>
+        /// The cryptography of every connection: the private key's operations, the records' protection, the hashes and
+        /// key schedule, the key exchange and the peer's signatures. <see cref="BouncyCastleTlsCrypto.Default"/> unless
+        /// set (null restores it); <see cref="NetTlsCrypto"/> uses .NET's own types, and BouncyCastle where they fall short.
+        /// Set it before the handshake.
+        /// </summary>
+        public ITlsCrypto Crypto
+        {
+            get => Engine13.Crypto;
+            set { Engine12.Crypto = value ?? BouncyCastleTlsCrypto.Default; Engine13.Crypto = value ?? BouncyCastleTlsCrypto.Default; }
         }
 
         /// <summary>Application protocols (ALPN, RFC 7301) in server preference order; null to ignore ALPN.</summary>
@@ -143,11 +157,13 @@ namespace SharpDTLS
         }
 
         /// <summary>CAs named in our CertificateRequests (certificate_authorities), to guide the client's choice; null names none.</summary>
-        public IList<X509Certificate> ClientCertificateAuthorities
+        public IList<X509Certificate2> ClientCertificateAuthorities
         {
-            get => Engine13.ClientCertificateAuthorities;
-            set { Engine12.ClientCertificateAuthorities = value; Engine13.ClientCertificateAuthorities = value; }
+            get => _clientCertificateAuthorities;
+            set { _clientCertificateAuthorities = value; Engine12.ClientCertificateAuthorities = Engine13.ClientCertificateAuthorities = value == null ? null : new List<X509Certificate2>(value); }
         }
+
+        private IList<X509Certificate2> _clientCertificateAuthorities;
 
         /// <summary>Checks a client's raw public key (DER SubjectPublicKeyInfo); false aborts with bad_certificate. When null, one is refused.</summary>
         public Func<byte[], bool> ClientRawPublicKeyValidator
@@ -158,7 +174,7 @@ namespace SharpDTLS
 
         /// <summary>
         /// A DER OCSP response for the server certificate to staple for clients that ask (RFC 8446 §4.4.2.1); null for
-        /// none. Certificates from the CertificateSelector staple their own <see cref="ServerCredentials.OcspResponse"/>.
+        /// none. Certificates from the CertificateSelector staple their own <see cref="TransportCertificate.OcspResponse"/>.
         /// </summary>
         public byte[] OcspResponse
         {
@@ -202,9 +218,15 @@ namespace SharpDTLS
         /// <remarks>Used when 1.0-1.2 is negotiated.</remarks>
         public Func<string, PwdCredential> PwdCredentialProvider { get => Engine12.PwdCredentialProvider; set => Engine12.PwdCredentialProvider = value; }
 
-        /// <summary>Private key for recovering pwd_protect usernames (RFC 8492 §4.3.2); null accepts only pwd_clear.</summary>
+        /// <summary>Private key (D, on a named curve) for recovering pwd_protect usernames (RFC 8492 §4.3.2); null accepts only pwd_clear.</summary>
         /// <remarks>Used when 1.0-1.2 is negotiated.</remarks>
-        public Org.BouncyCastle.Crypto.Parameters.ECPrivateKeyParameters PwdProtectionKey { get => Engine12.PwdProtectionKey; set => Engine12.PwdProtectionKey = value; }
+        public System.Security.Cryptography.ECParameters? PwdProtectionKey
+        {
+            get => _pwdProtectionKey;
+            set { Engine12.PwdProtectionKey = value; _pwdProtectionKey = value; }
+        }
+
+        private System.Security.Cryptography.ECParameters? _pwdProtectionKey;
 
         /// <summary>Resumable sessions by session ID; null disables session ID resumption.</summary>
         /// <remarks>Used when 1.0-1.2 is negotiated.</remarks>

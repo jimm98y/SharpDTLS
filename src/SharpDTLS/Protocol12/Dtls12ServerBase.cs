@@ -19,8 +19,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 // SOFTWARE.
 
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.X509;
 using SharpDTLS.UDP;
 using System;
 using System.Collections.Concurrent;
@@ -37,12 +35,13 @@ namespace SharpDTLS.Protocol12
     /// </summary>
     internal abstract class Dtls12ServerBase : Tls12ServerBase
     {
-        private readonly ConcurrentDictionary<string, Tls12ServerConnection> _connections = new();
-        private readonly ConcurrentDictionary<string, Tls12ServerConnection> _connectionsById = new();
+        // by endpoint and by connection ID: looked up of every datagram, so of keys that need no string
+        private readonly ConcurrentDictionary<EndPoint, Tls12ServerConnection> _connections = new();
+        private readonly ConcurrentDictionary<ConnectionIdKey, Tls12ServerConnection> _connectionsById = new();
         private readonly ClientHelloReassembler _clientHelloReassembler = new();
 
-        protected Dtls12ServerBase(IServerTransport serverTransport, AsymmetricCipherKeyPair keyPair, X509Certificate certificate, ushort version)
-            : base(keyPair, certificate, version)
+        protected Dtls12ServerBase(IServerTransport serverTransport, TransportCertificate credentials, ushort version)
+            : base(credentials, version)
         {
             ServerTransport = serverTransport;
             ServerTransport.OnDataReceived += OnDataReceived;
@@ -85,13 +84,13 @@ namespace SharpDTLS.Protocol12
         internal Func<EndPoint, bool> AcceptsConnection { get; set; }
 
         public Tls12ServerConnection GetConnection(EndPoint endpoint)
-            => _connections.TryGetValue(endpoint.ToString(), out var connection) ? connection : null;
+            => _connections.TryGetValue(endpoint, out var connection) ? connection : null;
 
         protected Tls12ServerConnection RequireConnection(EndPoint endpoint)
             => GetConnection(endpoint) ?? throw new InvalidOperationException($"No DTLS connection for {endpoint}.");
 
         /// <summary>Sends application data to a peer whose handshake has completed.</summary>
-        public void SendApplicationData(EndPoint endpoint, byte[] data) => RequireConnection(endpoint).SendApplicationData(data);
+        public void SendApplicationData(EndPoint endpoint, ReadOnlySpan<byte> data) => RequireConnection(endpoint).SendApplicationData(data);
 
         /// <summary>RFC 5705 keying material exporter for an established session.</summary>
         public byte[] ExportKeyingMaterial(EndPoint endpoint, string label, byte[] context, int length)
@@ -105,31 +104,29 @@ namespace SharpDTLS.Protocol12
         // ── Hooks for the version-specific facades ───────────────────────────────────────────
 
         protected virtual void OnConnectionEstablished(Tls12ServerConnection connection) { }
-        protected virtual void OnApplicationData(Tls12ServerConnection connection, byte[] data) { }
+        protected virtual void OnApplicationData(Tls12ServerConnection connection, ReadOnlySpan<byte> data) { }
         protected virtual void OnAlert(Tls12ServerConnection connection, AlertDescription description) { }
         protected virtual void OnConnectionClosed(Tls12ServerConnection connection) { }
 
         // The same, with the connection, for DtlsServer.
         internal event Action<Tls12ServerConnection> ConnectionEstablished;
-        internal event Action<Tls12ServerConnection, byte[]> ConnectionDataReceived;
+        internal event TlsDataHandler ConnectionDataReceived;
         internal event Action<Tls12ServerConnection> ConnectionEnded;
 
         // ── Stateless ClientHello processing ─────────────────────────────────────────────────
 
-        private void OnDataReceived(object sender, byte[] datagram)
+        private void OnDataReceived(EndPoint endpoint, ReadOnlySpan<byte> datagram)
         {
-            var endpoint = (EndPoint)sender;
-
             // tls12_cid records name their connection, whatever address they come from (RFC 9146 §3).
             int cidLength = Settings.ConnectionIdLength;
             if (Settings.UseConnectionIds && datagram.Length >= 13 + cidLength && datagram[0] == 25
-                && _connectionsById.TryGetValue(Convert.ToHexString(datagram, 11, cidLength), out var byId))
+                && _connectionsById.TryGetValue(new ConnectionIdKey(datagram.Slice(11, cidLength)), out var byId))
             {
                 byId.ProcessDatagram(datagram, endpoint);
                 return;
             }
 
-            if (_connections.TryGetValue(endpoint.ToString(), out var connection))
+            if (_connections.TryGetValue(endpoint, out var connection))
             {
                 connection.ProcessDatagram(datagram, endpoint);
                 return;
@@ -137,7 +134,7 @@ namespace SharpDTLS.Protocol12
 
             try
             {
-                foreach (var record in DtlsRecordSplitter.Split(datagram))
+                foreach (var record in DtlsRecordSplitter.Split(datagram.ToArray()))
                 {
                     if (record.Length < 25 || record[0] != 0x16 || record[3] != 0 || record[4] != 0 || record[13] != HandshakeType.ClientHello)
                         continue; // only a ClientHello can start an association
@@ -168,7 +165,7 @@ namespace SharpDTLS.Protocol12
             // Replies go to the connection's current address, which moves with connection IDs.
             Tls12ServerConnection connection = null;
             connection = new Tls12ServerConnection(Settings, endpoint, data => ServerTransport.Send(connection.RemoteEndPoint, data));
-            if (!_connections.TryAdd(endpoint.ToString(), connection))
+            if (!_connections.TryAdd(endpoint, connection))
                 return;
 
             connection.HandshakeFinished += (_, _) =>
@@ -185,21 +182,21 @@ namespace SharpDTLS.Protocol12
             OnConnectionCreated(connection);
             connection.PeerAddressConfirmed += (_, change) =>
             {
-                _connections.TryRemove(new KeyValuePair<string, Tls12ServerConnection>(change.Old.ToString(), connection));
-                _connections[change.New.ToString()] = connection;
+                _connections.TryRemove(new KeyValuePair<EndPoint, Tls12ServerConnection>(change.Old, connection));
+                _connections[change.New] = connection;
             };
             connection.Closed += (_, _) =>
             {
-                _connections.TryRemove(new KeyValuePair<string, Tls12ServerConnection>(connection.RemoteEndPoint.ToString(), connection));
+                _connections.TryRemove(new KeyValuePair<EndPoint, Tls12ServerConnection>(connection.RemoteEndPoint, connection));
                 if (connection.ConnectionId != null)
-                    _connectionsById.TryRemove(new KeyValuePair<string, Tls12ServerConnection>(Convert.ToHexString(connection.ConnectionId), connection));
+                    _connectionsById.TryRemove(new KeyValuePair<ConnectionIdKey, Tls12ServerConnection>(new ConnectionIdKey(connection.ConnectionId), connection));
                 OnConnectionClosed(connection);
                 ConnectionEnded?.Invoke(connection);
             };
 
             connection.Start(clientHello, message, recordSeq + 1);
             if (connection.ConnectionId != null && !connection.IsClosed)
-                _connectionsById[Convert.ToHexString(connection.ConnectionId)] = connection;
+                _connectionsById[new ConnectionIdKey(connection.ConnectionId)] = connection;
         }
 
         /// <summary>

@@ -19,8 +19,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 // SOFTWARE.
 
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Crypto.Digests;
 using SharpDTLS.Protocol10;
 using System;
 using System.Collections.Generic;
@@ -42,13 +40,13 @@ namespace SharpDTLS.Protocol12
         /// <summary>Handshake messages as hashed: in DTLS with the full 12-byte header (RFC 6347 §4.2.6).</summary>
         private readonly List<byte[]> _transcript = new();
 
-        protected Tls12Connection(bool isClient, Action<byte[]> send)
+        protected Tls12Connection(bool isClient, DatagramSink send)
             : this(isClient, send, stream: false)
         {
         }
 
         /// <param name="stream">TLS over a reliable byte stream instead of DTLS over datagrams.</param>
-        protected Tls12Connection(bool isClient, Action<byte[]> send, bool stream)
+        protected Tls12Connection(bool isClient, DatagramSink send, bool stream)
             : base(isClient, send, stream ? "TLS12" : "DTLS12")
         {
             _framing = stream ? new StreamFraming(this) : new DatagramFraming(this);
@@ -70,10 +68,10 @@ namespace SharpDTLS.Protocol12
         });
 
         /// <summary>Processes bytes received from a TLS stream (any amount: partial or several records).</summary>
-        public void ProcessStreamData(byte[] data, int offset, int count) => Run(() =>
+        public void ProcessStreamData(byte[] data, int offset, int count) => Run((this, data, offset, count), static s =>
         {
-            if (!IsClosed)
-                _framing.ProcessInput(data, offset, count);
+            if (!s.Item1.IsClosed)
+                s.Item1._framing.ProcessInput(s.data, s.offset, s.count);
         });
 
         /// <summary>Oldest protocol version this endpoint accepts.</summary>
@@ -141,7 +139,7 @@ namespace SharpDTLS.Protocol12
 
         // ── Record layer and handshake transport (delegated to the framing) ──────────────────
 
-        protected override void ProcessRecord(byte[] record) => _framing.ProcessRecord(record);
+        protected override void ProcessRecord(ReadOnlySpan<byte> record) => _framing.ProcessRecord(record);
 
         /// <summary>Epoch-0 record sequence numbers continue from here (a stateless server continues after HelloVerifyRequest).</summary>
         protected void SetInitialRecordSequence(ulong next) => _framing.SetInitialRecordSequence(next);
@@ -191,7 +189,7 @@ namespace SharpDTLS.Protocol12
         }
 
         /// <summary>Reports the content of a protected record to the inspector, if there is one.</summary>
-        private void InspectRecord(bool sent, byte contentType, ulong epoch, ulong sequenceNumber, byte[] content)
+        private void InspectRecord(bool sent, byte contentType, ulong epoch, ulong sequenceNumber, ReadOnlySpan<byte> content)
             => TlsInspector.Current?.OnProtectedRecord(this, IsClient, sent, contentType, epoch, sequenceNumber, content);
 
         /// <summary>Sends ChangeCipherSpec (in the current epoch) and switches writes to the pending cipher.</summary>
@@ -202,7 +200,7 @@ namespace SharpDTLS.Protocol12
 
         public override int MaxApplicationDataSize => PeerRecordLimit - _framing.RecordOverhead;
 
-        protected override void WriteApplicationData(byte[] data) => _framing.WriteApplicationData(data);
+        protected override void WriteApplicationData(ReadOnlySpan<byte> data) => _framing.WriteApplicationData(data);
 
         protected override void SendAlert(AlertDescription description, bool fatal) => _framing.SendAlert(fatal ? (byte)2 : (byte)1, description);
 
@@ -219,28 +217,14 @@ namespace SharpDTLS.Protocol12
         protected byte[] TranscriptHash()
         {
             if (!IsDtls12)
-            {
-                var md5 = new MD5Digest();
-                var sha1 = new Sha1Digest();
-                foreach (var m in _transcript) { md5.BlockUpdate(m, 0, m.Length); sha1.BlockUpdate(m, 0, m.Length); }
-                byte[] result = new byte[36];
-                md5.DoFinal(result, 0);
-                sha1.DoFinal(result, 16);
-                return result;
-            }
-
-            IDigest digest = CipherSuite.Prf == PrfHashAlgorithm.Sha384 ? new Sha384Digest() : new Sha256Digest();
-            foreach (var m in _transcript)
-                digest.BlockUpdate(m, 0, m.Length);
-            byte[] hash = new byte[digest.GetDigestSize()];
-            digest.DoFinal(hash, 0);
-            return hash;
+                return Concat(TlsKdf.Hash(Crypto, TlsHashAlgorithm.Md5, _transcript), TlsKdf.Hash(Crypto, TlsHashAlgorithm.Sha1, _transcript));
+            return TlsKdf.Hash(Crypto, CipherSuite.Prf == PrfHashAlgorithm.Sha384 ? TlsHashAlgorithm.Sha384 : TlsHashAlgorithm.Sha256, _transcript);
         }
 
         protected byte[] Prf(byte[] secret, string label, byte[] seed, int length)
             => IsDtls12
-                ? Dtls12CryptoUtils.PRF(secret, label, seed, length, CipherSuite.Prf == PrfHashAlgorithm.Sha384)
-                : Tls10Prf.PRF(secret, label, seed, length);
+                ? Dtls12CryptoUtils.PRF(secret, label, seed, length, CipherSuite.Prf == PrfHashAlgorithm.Sha384, Crypto)
+                : Tls10Prf.PRF(secret, label, seed, length, Crypto);
 
         /// <summary>
         /// Computes the master secret (with RFC 7627 when negotiated; call after ClientKeyExchange is in the
@@ -264,6 +248,9 @@ namespace SharpDTLS.Protocol12
         /// The pending ciphers from an existing master secret: a resumed session's keys come from its master
         /// secret and the new hello randoms (RFC 5246 §7.3).
         /// </summary>
+        // .NET's ciphers hold native resources: released when the connection closes, not by their finalizers
+        protected override void OnClosed() => _framing.DisposeCiphers();
+
         protected void DeriveKeysFromMasterSecret(byte[] masterSecret)
         {
             MasterSecret = masterSecret;
@@ -275,7 +262,7 @@ namespace SharpDTLS.Protocol12
                 inspector.OnSecret(this, IsClient, TlsInspector.MasterSecret, MasterSecret);
                 inspector.OnSecret(this, IsClient, TlsInspector.KeyBlock, keyBlock);
             }
-            var (clientWrite, serverWrite) = RecordCiphers.Create(CipherSuite, keyBlock, UseEncryptThenMac && CipherSuite.IsCbc, implicitIv);
+            var (clientWrite, serverWrite) = RecordCiphers.Create(CipherSuite, keyBlock, UseEncryptThenMac && CipherSuite.IsCbc, implicitIv, Crypto);
             _framing.SetPendingCiphers(read: IsClient ? serverWrite : clientWrite, write: IsClient ? clientWrite : serverWrite);
 
             KeyLogWriter?.Invoke($"CLIENT_RANDOM {Convert.ToHexString(ClientRandom).ToLowerInvariant()} {Convert.ToHexString(MasterSecret).ToLowerInvariant()}");
@@ -294,27 +281,29 @@ namespace SharpDTLS.Protocol12
         /// Signs <paramref name="content"/>. In DTLS 1.2 the scheme is the first supported one the peer
         /// accepts; DTLS 1.0 uses the fixed TLS 1.1 algorithms and returns a null scheme.
         /// </summary>
-        protected byte[] Sign(AsymmetricKeyParameter privateKey, byte[] content, IEnumerable<ushort> peerSchemes, out ushort? scheme)
+        protected byte[] Sign(ITlsCrypto crypto, TransportCertificate credentials, byte[] content, IEnumerable<ushort> peerSchemes, out ushort? scheme)
         {
+            var key = credentials.PublicKey;
             if (!IsDtls12)
             {
                 scheme = null;
-                return Tls10Signatures.Sign(privateKey, content);
+                ushort fixedScheme = Tls10Signatures.FixedScheme(key);
+                return crypto.Sign(credentials, fixedScheme, content);
             }
 
-            scheme = Dtls12Signatures.SelectScheme(privateKey, peerSchemes)
+            scheme = Dtls12Signatures.SelectScheme(key, peerSchemes)
                 ?? throw new DtlsException(AlertDescription.HandshakeFailure, "No signature algorithm in common.");
-            return Dtls12Signatures.Sign(scheme.Value, privateKey, content);
+            return crypto.Sign(credentials, scheme.Value, content);
         }
 
-        protected bool Verify(AsymmetricKeyParameter publicKey, byte[] content, ushort? scheme, byte[] signature, IEnumerable<ushort> acceptedSchemes)
+        protected bool Verify(TlsPublicKey publicKey, byte[] content, ushort? scheme, byte[] signature, IEnumerable<ushort> acceptedSchemes)
         {
             if (!IsDtls12)
-                return Tls10Signatures.Verify(publicKey, content, signature);
+                return Tls10Signatures.Verify(publicKey, content, signature, Crypto);
 
             if (scheme == null || !acceptedSchemes.Contains(scheme.Value))
                 throw new DtlsException(AlertDescription.IllegalParameter, $"Signature scheme 0x{scheme:X4} was not offered.");
-            return Dtls12Signatures.Verify(scheme.Value, publicKey, content, signature);
+            return Dtls12Signatures.Verify(scheme.Value, publicKey, content, signature, Crypto);
         }
 
         protected static byte[] Concat(byte[] a, byte[] b)

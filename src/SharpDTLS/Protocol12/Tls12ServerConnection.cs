@@ -19,9 +19,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 // SOFTWARE.
 
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Crypto.Parameters;
-using Org.BouncyCastle.X509;
 using SharpDTLS.Protocol12.Messages;
 using System;
 using System.Collections.Generic;
@@ -30,13 +27,15 @@ using System.Linq;
 using System.Net;
 using System.Security.Cryptography;
 
+using X509Certificate2 = System.Security.Cryptography.X509Certificates.X509Certificate2;
 namespace SharpDTLS.Protocol12
 {
     /// <summary>Configuration shared by all connections of a (D)TLS 1.0-1.2 server.</summary>
     internal sealed class Tls12ServerSettings
     {
-        public AsymmetricCipherKeyPair KeyPair { get; set; }
-        public X509Certificate Certificate { get; set; }
+        /// <summary>The default key and certificate; null for a server of PSK, SRP or PWD alone.</summary>
+        public TransportCertificate Credentials { get; set; }
+        public ITlsCrypto Crypto { get; set; } = BouncyCastleTlsCrypto.Default;
         public ushort MinimumVersion { get; set; } = DtlsVersion.Dtls12;
         public ushort MaximumVersion { get; set; } = DtlsVersion.Dtls12;
 
@@ -44,7 +43,7 @@ namespace SharpDTLS.Protocol12
         public IList<ushort> CipherSuites { get; set; }
 
         public bool RequireClientCertificate { get; set; }
-        public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ClientCertificateValidator { get; set; }
+        public Func<System.Security.Cryptography.X509Certificates.X509Certificate2, IReadOnlyList<byte[]>, bool> ClientCertificateValidator { get; set; }
 
         /// <summary>Certificate types we authenticate with, in preference order (RFC 7250); null for X.509 only.</summary>
         public IList<CertificateType> ServerCertificateTypes { get; set; }
@@ -53,10 +52,10 @@ namespace SharpDTLS.Protocol12
         /// Chooses credentials from what the client said (server name, signature schemes); returning null falls back to
         /// <see cref="CertificateSelector"/> and then the default certificate.
         /// </summary>
-        public Func<CertificateSelectionContext, ServerCredentials> CredentialsSelector { get; set; }
+        public Func<CertificateSelectionContext, TransportCertificate> CredentialsSelector { get; set; }
 
         /// <summary>CAs whose names a CertificateRequest lists, to guide the client's choice; null lists none.</summary>
-        public IList<X509Certificate> ClientCertificateAuthorities { get; set; }
+        public IList<System.Security.Cryptography.X509Certificates.X509Certificate2> ClientCertificateAuthorities { get; set; }
 
         /// <summary>Certificate types accepted from clients, in preference order (RFC 7250); null for X.509 only.</summary>
         public IList<CertificateType> ClientCertificateTypes { get; set; }
@@ -90,19 +89,19 @@ namespace SharpDTLS.Protocol12
         public Func<string, PwdCredential> PwdCredentialProvider { get; set; }
 
         /// <summary>Private key for recovering pwd_protect usernames (RFC 8492 §4.3.2); null accepts only pwd_clear.</summary>
-        public ECPrivateKeyParameters PwdProtectionKey { get; set; }
+        public System.Security.Cryptography.ECParameters? PwdProtectionKey { get; set; }
 
         /// <summary>Resumable sessions by session ID; null disables session ID resumption.</summary>
         public ITlsSessionCache SessionCache { get; set; } = new TlsSessionCache();
 
         /// <summary>Intermediate CA certificates sent after the server certificate, issuer of the previous one first.</summary>
-        public IList<X509Certificate> IntermediateCertificates { get; set; }
+        public IList<System.Security.Cryptography.X509Certificates.X509Certificate2> IntermediateCertificates { get; set; }
 
         /// <summary>
         /// Chooses the credentials for the client's server_name (RFC 6066), which is null when the client sent none.
         /// Returning null uses the default certificate.
         /// </summary>
-        public Func<string, ServerCredentials> CertificateSelector { get; set; }
+        public Func<string, TransportCertificate> CertificateSelector { get; set; }
 
         /// <summary>Application protocols (ALPN, RFC 7301) in server preference order; null to ignore ALPN.</summary>
         public IList<string> ApplicationProtocols { get; set; }
@@ -115,7 +114,7 @@ namespace SharpDTLS.Protocol12
 
         /// <summary>
         /// A DER OCSP response for <see cref="Certificate"/> to staple for clients that ask (RFC 6066 §8); null for none.
-        /// Certificates from the CertificateSelector staple their own <see cref="ServerCredentials.OcspResponse"/>.
+        /// Certificates from the CertificateSelector staple their own <see cref="TransportCertificate.OcspResponse"/>.
         /// </summary>
         public byte[] OcspResponse { get; set; }
 
@@ -158,33 +157,35 @@ namespace SharpDTLS.Protocol12
         }
 
         private readonly Tls12ServerSettings _settings;
+
+        internal override ITlsCrypto Crypto => _settings.Crypto;
         private ITlsExtension _recordSizeResponse;
         private State _state = State.Start;
         private ClientHelloMessage _clientHello;
         private CertificateRequestMessage _certificateRequest;
         private IServerKeyExchange _keyExchange;
-        private X509Certificate _clientCertificate;
-        private AsymmetricKeyParameter _clientPublicKey;
+        private X509Certificate2 _clientCertificate;
+        private TlsPublicKey _clientPublicKey;
         private CertificateType? _serverCertificateType;
         private CertificateType? _clientCertificateType;
         private Dtls12SessionState _resumedSession;
         private byte[] _sessionId = Array.Empty<byte>();
         private bool _issueTicket;
-        private AsymmetricCipherKeyPair _keyPair;
-        private X509Certificate _certificate;
-        private IList<X509Certificate> _intermediates;
+        private TransportCertificate _credentials;
+        private X509Certificate2 _certificate;
+        private IEnumerable<byte[]> _intermediates;
         private byte[] _ocspResponse;
         private bool _serverNameUsed;
 
         public event EventHandler<EventArgs> HandshakeFinished;
 
-        public Tls12ServerConnection(Tls12ServerSettings settings, EndPoint remoteEndPoint, Action<byte[]> send)
+        public Tls12ServerConnection(Tls12ServerSettings settings, EndPoint remoteEndPoint, DatagramSink send)
             : this(settings, remoteEndPoint, send, stream: false)
         {
         }
 
         /// <param name="stream">TLS over a reliable byte stream: the ClientHello arrives on it (no cookie exchange).</param>
-        internal Tls12ServerConnection(Tls12ServerSettings settings, EndPoint remoteEndPoint, Action<byte[]> send, bool stream)
+        internal Tls12ServerConnection(Tls12ServerSettings settings, EndPoint remoteEndPoint, DatagramSink send, bool stream)
             : base(isClient: false, send, stream)
         {
             _settings = settings;
@@ -216,8 +217,13 @@ namespace SharpDTLS.Protocol12
 
         protected override void OnRecordAuthenticated(ushort epoch, ulong sequenceNumber, bool withConnectionId)
         {
-            if (!_address.Observe(epoch, sequenceNumber, withConnectionId, DatagramSource, _settings.AutoUpdatePeerAddress, out var old))
-                return;
+            if (_address.Observe(epoch, sequenceNumber, withConnectionId, DatagramSource, _settings.AutoUpdatePeerAddress, out var old))
+                OnPeerAddressChange(old);
+        }
+
+        // apart: its closure would otherwise be allocated for every record
+        private void OnPeerAddressChange(EndPoint old)
+        {
             var change = (old, DatagramSource);
             Debug.WriteLine($"{LogPrefix} Peer address {(_settings.AutoUpdatePeerAddress ? "changed" : "pending")}: {old} -> {DatagramSource}");
             RaisePeerAddressChanged(change);
@@ -226,9 +232,9 @@ namespace SharpDTLS.Protocol12
         }
 
         /// <summary>The client's certificate, when one was sent.</summary>
-        public X509Certificate ClientCertificate => _clientCertificate;
+        public X509Certificate2 ClientCertificate => _clientCertificate;
 
-        public override X509Certificate PeerCertificate => _clientCertificate;
+        internal override X509Certificate2 PeerX509Certificate => _clientCertificate;
 
         /// <summary>The client's raw public key (DER SubjectPublicKeyInfo, RFC 7250), when it authenticated with one.</summary>
         public byte[] ClientRawPublicKey { get; private set; }
@@ -320,16 +326,18 @@ namespace SharpDTLS.Protocol12
                     ch.Extension<SignatureAlgorithmsExtension>()?.Algorithms, ch.Extension<SignatureAlgorithmsCertExtension>()?.Schemes))
                 ?? _settings.CertificateSelector?.Invoke(ServerName);
             _serverNameUsed = selected != null && ServerName != null;
-            (_keyPair, _certificate, _intermediates, _ocspResponse) = selected != null
-                ? (selected.KeyPair, selected.Certificate, selected.IntermediateCertificates, selected.OcspResponse)
-                : (_settings.KeyPair, _settings.Certificate, _settings.IntermediateCertificates, _settings.OcspResponse);
+            (_credentials, _intermediates, _ocspResponse) = selected != null
+                ? (selected, selected.IntermediateChain, selected.OcspResponse)
+                : (_settings.Credentials, _settings.IntermediateCertificates?.Select(c => c.RawData) ?? _settings.Credentials?.IntermediateChain,
+                   _settings.OcspResponse ?? _settings.Credentials?.OcspResponse);
+            _certificate = _credentials?.Certificate;
             if (ch.Extension<StatusRequestExtension>()?.StatusType != StatusRequestExtension.Ocsp)
                 _ocspResponse = null;
 
             // Certificate types (RFC 7250): without one in common that side cannot use a certificate-based suite.
             _serverCertificateType = RawPublicKeys.Choose(_settings.ServerCertificateTypes,
                 RawPublicKeys.Find(ch.Extensions, CertificateTypeExtension.ServerType),
-                t => t == CertificateType.RawPublicKey ? _keyPair != null : _certificate != null);
+                t => t == CertificateType.RawPublicKey ? _credentials != null : _certificate != null);
             _clientCertificateType = RawPublicKeys.Choose(_settings.ClientCertificateTypes,
                 RawPublicKeys.Find(ch.Extensions, CertificateTypeExtension.ClientType), _ => true);
             if (_serverCertificateType == CertificateType.RawPublicKey)
@@ -354,7 +362,7 @@ namespace SharpDTLS.Protocol12
             if (TryResume(ch, version))
                 return;
 
-            var serverKey = _keyPair?.Private;
+            var serverKey = _credentials?.PublicKey;
             // Without explicit configuration weak suites (export, DES, NULL, anonymous...) are never selected, nor legacy
             // ones (CBC, static RSA) unless a version below 1.2 is allowed.
             var preference = _settings.CipherSuites
@@ -370,7 +378,7 @@ namespace SharpDTLS.Protocol12
                         || (_serverCertificateType == CertificateType.X509 && Tls12ClientConnection.SignedWith(_certificate, s.RequiredCertificateSigner)))
                     && (!s.RequiresPsk || _settings.PskIdentityResolver != null)
                     && (!s.RequiresSrp || (_settings.SrpVerifierProvider != null && ch.Extension<SrpExtension>() != null))
-                    && (!s.RequiresPwd || (_settings.PwdCredentialProvider != null && EccPwd.HasUsername(ch, _settings.PwdProtectionKey)
+                    && (!s.RequiresPwd || (_settings.PwdCredentialProvider != null && EccPwd.HasUsername(ch, PwdCredential.PrivateKeyOf(_settings.PwdProtectionKey))
                                            && EccPwd.SelectGroup(ch) != 0)))
                 ?? throw (_serverCertificateType == null && serverKey != null
                     ? new DtlsException(AlertDescription.UnsupportedCertificate, "No certificate type in common.")
@@ -378,8 +386,11 @@ namespace SharpDTLS.Protocol12
 
             _keyExchange = KeyExchanges.CreateServer(CipherSuite, new ServerKeyExchangeContext
             {
+                Crypto = Crypto,
                 ClientHello = ch,
-                ServerPrivateKey = serverKey,
+                ServerPublicKey = serverKey,
+                DecryptPreMasterSecret = encrypted => _settings.Crypto.DecryptPreMasterSecret(_credentials, encrypted),
+                Agree = peer => _settings.Crypto.Agree(_credentials, peer),
                 PskIdentityHint = _settings.PskIdentityHint,
                 PskResolver = _settings.PskIdentityResolver,
                 SrpVerifierProvider = _settings.SrpVerifierProvider,
@@ -534,15 +545,15 @@ namespace SharpDTLS.Protocol12
             {
                 if (_serverCertificateType == CertificateType.RawPublicKey)
                 {
-                    SendHandshake(HandshakeType.Certificate, RawPublicKeys.EncodeCertificate(RawPublicKeys.Encode(_keyPair.Public)));
+                    SendHandshake(HandshakeType.Certificate, RawPublicKeys.EncodeCertificate(RawPublicKeys.Encode(_credentials.PublicKey)));
                 }
                 else
                 {
                     var certificate = new CertificateMessage();
-                    certificate.Chain.Add(_certificate.GetEncoded());
-                    LocalCertificate = _certificate;
-                    foreach (var intermediate in _intermediates ?? Array.Empty<X509Certificate>())
-                        certificate.Chain.Add(intermediate.GetEncoded());
+                    certificate.Chain.Add(_certificate.RawData);
+                    LocalCertificate = _credentials.Certificate;
+                    foreach (var intermediate in _intermediates ?? Array.Empty<byte[]>())
+                        certificate.Chain.Add(intermediate);
                     SendHandshake(HandshakeType.Certificate, certificate.Encode());
                 }
                 if (_ocspResponse != null)
@@ -556,7 +567,7 @@ namespace SharpDTLS.Protocol12
                 if (_keyExchange.SignsParams)
                 {
                     byte[] signed = Concat(Concat(ClientRandom, ServerRandom), serverParams);
-                    byte[] signature = Sign(_keyPair.Private, signed, ch.Extension<SignatureAlgorithmsExtension>()?.Algorithms, out ushort? scheme);
+                    byte[] signature = Sign(_settings.Crypto, _credentials, signed, ch.Extension<SignatureAlgorithmsExtension>()?.Algorithms, out ushort? scheme);
                     if (scheme.HasValue)
                         ske.WriteUInt16(scheme.Value);
                     ske.WriteOpaque16(signature);
@@ -614,7 +625,7 @@ namespace SharpDTLS.Protocol12
                     // authentication: no CertificateVerify follows (RFC 5246 §7.4.8, RFC 8422 §3).
                     bool fixedKeyAgreement = body.Length == 0 && _clientCertificate != null && _keyExchange is IFixedDhServerKeyExchange;
                     DeriveKeys(fixedKeyAgreement
-                        ? ((IFixedDhServerKeyExchange)_keyExchange).ProcessFixedClientKeyExchange(_clientCertificate.GetPublicKey())
+                        ? ((IFixedDhServerKeyExchange)_keyExchange).ProcessFixedClientKeyExchange(Tls12ClientConnection.PeerKey(_clientCertificate))
                         : _keyExchange.ProcessClientKeyExchange(body));
                     _state = _clientPublicKey != null && !fixedKeyAgreement ? State.WaitCertificateVerify : State.WaitFinished;
                     break;
@@ -653,12 +664,12 @@ namespace SharpDTLS.Protocol12
             else
             {
                 _clientCertificate = Tls12ClientConnection.ParseCertificate(certificate.Chain[0]);
-                if (!Tls12ClientConnection.CertificateTypeAccepted(_certificateRequest, _clientCertificate.GetPublicKey())
+                if (!Tls12ClientConnection.CertificateTypeAccepted(_certificateRequest, Tls12ClientConnection.PeerKey(_clientCertificate))
                     && !(CipherSuite.IsStaticKeyAgreement && Tls12ClientConnection.FixedTypeAccepted(_certificateRequest, _clientCertificate)))
                     throw new DtlsException(AlertDescription.UnsupportedCertificate, "Client certificate type was not requested.");
-                if (!(_settings.ClientCertificateValidator ?? CertificateValidatorDefaults.Client)(_clientCertificate, certificate.Chain))
+                if (!(_settings.ClientCertificateValidator ?? CertificateValidatorDefaults.Client)(Certificates.Load(certificate.Chain[0]), certificate.Chain))
                     throw new DtlsException(AlertDescription.BadCertificate, "Client certificate was rejected.");
-                _clientPublicKey = _clientCertificate.GetPublicKey();
+                _clientPublicKey = Tls12ClientConnection.PeerKey(_clientCertificate);
             }
 
             AddToTranscript(message);
@@ -706,13 +717,13 @@ namespace SharpDTLS.Protocol12
                 BeginFlight();
                 if (_issueTicket)
                     SendNewSessionTicket(new Dtls12SessionState(Array.Empty<byte>(), NegotiatedVersion, CipherSuite.Id, MasterSecret,
-                        UseEncryptThenMac, _clientCertificate?.GetEncoded(), serverName: ServerName));
+                        UseEncryptThenMac, _clientCertificate?.RawData, serverName: ServerName));
                 SendChangeCipherSpec();
                 SendHandshake(HandshakeType.Finished, ComputeVerifyData(fromClient: false));
 
                 if (_sessionId.Length != 0)
                     _settings.SessionCache.Store(_sessionId, new Dtls12SessionState(_sessionId, NegotiatedVersion, CipherSuite.Id, MasterSecret,
-                        UseEncryptThenMac, _clientCertificate?.GetEncoded(), serverName: ServerName));
+                        UseEncryptThenMac, _clientCertificate?.RawData, serverName: ServerName));
             }
 
             _state = State.Connected;

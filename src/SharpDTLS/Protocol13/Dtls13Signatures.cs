@@ -19,9 +19,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 // SOFTWARE.
 
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Crypto.Parameters;
-using Org.BouncyCastle.Security;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -64,7 +61,7 @@ namespace SharpDTLS.Protocol13
         }
 
         /// <summary>Picks the first scheme from <see cref="Supported"/> that fits the key and that the peer offered.</summary>
-        public static ushort? SelectScheme(AsymmetricKeyParameter privateKey, IEnumerable<ushort> peerSchemes)
+        public static ushort? SelectScheme(TlsPublicKey privateKey, IEnumerable<ushort> peerSchemes)
         {
             var offered = new HashSet<ushort>(peerSchemes ?? Enumerable.Empty<ushort>());
             foreach (ushort scheme in Supported)
@@ -75,52 +72,26 @@ namespace SharpDTLS.Protocol13
             return null;
         }
 
-        public static bool IsCompatible(ushort scheme, AsymmetricKeyParameter key)
+        public static bool IsCompatible(ushort scheme, TlsPublicKey key)
         {
             switch (scheme)
             {
-                case EcdsaSecp256r1Sha256: return key is ECKeyParameters ec && ec.Parameters.Curve.FieldSize == 256;
-                case EcdsaSecp384r1Sha384: return key is ECKeyParameters ec2 && ec2.Parameters.Curve.FieldSize == 384;
-                case EcdsaSecp521r1Sha512: return key is ECKeyParameters ec3 && ec3.Parameters.Curve.FieldSize == 521;
+                case EcdsaSecp256r1Sha256: return key.Kind == TlsKeyKind.Ec && key.CurveBits == 256;
+                case EcdsaSecp384r1Sha384: return key.Kind == TlsKeyKind.Ec && key.CurveBits == 384;
+                case EcdsaSecp521r1Sha512: return key.Kind == TlsKeyKind.Ec && key.CurveBits == 521;
                 case RsaPssRsaeSha256:
                 case RsaPssRsaeSha384:
-                case RsaPssRsaeSha512:     return key is RsaKeyParameters;
-                case Ed25519:              return key is Ed25519PrivateKeyParameters || key is Ed25519PublicKeyParameters;
-                case Ed448:                return key is Ed448PrivateKeyParameters || key is Ed448PublicKeyParameters;
+                case RsaPssRsaeSha512:     return key.Kind == TlsKeyKind.Rsa;
+                case Ed25519:              return key.Kind == TlsKeyKind.Ed25519;
+                case Ed448:                return key.Kind == TlsKeyKind.Ed448;
                 default:                   return false;
             }
         }
 
-        public static byte[] Sign(ushort scheme, AsymmetricKeyParameter privateKey, byte[] content)
-        {
-            ISigner signer = CreateSigner(scheme);
-            signer.Init(true, privateKey);
-            signer.BlockUpdate(content, 0, content.Length);
-            return signer.GenerateSignature();
-        }
 
-        public static bool Verify(ushort scheme, AsymmetricKeyParameter publicKey, byte[] content, byte[] signature)
-        {
-            if (!IsCompatible(scheme, publicKey))
-                return false;
+        public static bool Verify(ushort scheme, TlsPublicKey publicKey, byte[] content, byte[] signature, ITlsCrypto crypto = null)
+            => IsCompatible(scheme, publicKey) && (crypto ?? BouncyCastleTlsCrypto.Default).Verify(scheme, publicKey.Spki, content, signature);
 
-            ISigner signer = CreateSigner(scheme);
-            signer.Init(false, publicKey);
-            signer.BlockUpdate(content, 0, content.Length);
-            return signer.VerifySignature(signature);
-        }
 
-        private static ISigner CreateSigner(ushort scheme) => scheme switch
-        {
-            EcdsaSecp256r1Sha256 => SignerUtilities.GetSigner("SHA256WITHECDSA"),
-            EcdsaSecp384r1Sha384 => SignerUtilities.GetSigner("SHA384WITHECDSA"),
-            EcdsaSecp521r1Sha512 => SignerUtilities.GetSigner("SHA512WITHECDSA"),
-            RsaPssRsaeSha256     => SignerUtilities.GetSigner("SHA256WITHRSAANDMGF1"),
-            RsaPssRsaeSha384     => SignerUtilities.GetSigner("SHA384WITHRSAANDMGF1"),
-            RsaPssRsaeSha512     => SignerUtilities.GetSigner("SHA512WITHRSAANDMGF1"),
-            Ed25519              => SignerUtilities.GetSigner("Ed25519"),
-            Ed448                => SignerUtilities.GetSigner("Ed448"),
-            _ => throw new DtlsException(AlertDescription.IllegalParameter, $"Unsupported signature scheme 0x{scheme:X4}")
-        };
     }
 }

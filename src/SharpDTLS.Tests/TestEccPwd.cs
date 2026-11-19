@@ -160,8 +160,8 @@ namespace SharpDTLS.Tests
         public void ProtectedUsername_RoundTripsAndHidesTheName(string curve)
         {
             var keyPair = PwdCredential.GenerateProtectionKeyPair(curve);
-            var serverKey = (Org.BouncyCastle.Crypto.Parameters.ECPrivateKeyParameters)keyPair.Private;
-            byte[] name = EccPwd.ProtectUsername("fred", (Org.BouncyCastle.Crypto.Parameters.ECPublicKeyParameters)keyPair.Public, new SecureRandom());
+            var serverKey = PwdCredential.PrivateKeyOf(keyPair);
+            byte[] name = EccPwd.ProtectUsername("fred", PwdCredential.PublicKeyOf(keyPair), new SecureRandom());
 
             Assert.AreEqual("fred", EccPwd.RecoverUsername(name, serverKey));
             Assert.IsGreaterThanOrEqualTo(128 + 16, name.Length, "usernames are padded to 128 octets");
@@ -170,7 +170,7 @@ namespace SharpDTLS.Tests
             byte[] tampered = (byte[])name.Clone();
             tampered[^1] ^= 1;
             Assert.IsNull(EccPwd.RecoverUsername(tampered, serverKey));
-            var otherKey = (Org.BouncyCastle.Crypto.Parameters.ECPrivateKeyParameters)PwdCredential.GenerateProtectionKeyPair(curve).Private;
+            var otherKey = PwdCredential.PrivateKeyOf(PwdCredential.GenerateProtectionKeyPair(curve));
             Assert.IsNull(EccPwd.RecoverUsername(name, otherKey));
         }
 
@@ -179,8 +179,8 @@ namespace SharpDTLS.Tests
         {
             var keyPair = PwdCredential.GenerateProtectionKeyPair();
             var (client, server) = Pair(0xC0B0, TestCredentials.PwdUsername, TestCredentials.PwdPassword);
-            server.PwdProtectionKey = (Org.BouncyCastle.Crypto.Parameters.ECPrivateKeyParameters)keyPair.Private;
-            client.PwdProtectionKey = (Org.BouncyCastle.Crypto.Parameters.ECPublicKeyParameters)keyPair.Public;
+            server.PwdProtectionKey = keyPair;
+            client.PwdProtectionKey = new System.Security.Cryptography.ECParameters { Curve = keyPair.Curve, Q = keyPair.Q };
             Assert.IsNull(Run(client));
         }
 
@@ -188,9 +188,17 @@ namespace SharpDTLS.Tests
         public void ProtectedUsername_UnderTheWrongKey_FailsLikeAnUnknownUser()
         {
             var (client, server) = Pair(0xC0B0, TestCredentials.PwdUsername, TestCredentials.PwdPassword);
-            server.PwdProtectionKey = (Org.BouncyCastle.Crypto.Parameters.ECPrivateKeyParameters)PwdCredential.GenerateProtectionKeyPair().Private;
-            client.PwdProtectionKey = (Org.BouncyCastle.Crypto.Parameters.ECPublicKeyParameters)PwdCredential.GenerateProtectionKeyPair().Public;
+            server.PwdProtectionKey = PwdCredential.GenerateProtectionKeyPair();
+            var other = PwdCredential.GenerateProtectionKeyPair();
+            client.PwdProtectionKey = new System.Security.Cryptography.ECParameters { Curve = other.Curve, Q = other.Q };
             Assert.IsInstanceOfType<TimeoutException>(Run(client));
+        }
+
+        [TestMethod]
+        public void ProtectedUsername_ClientRefusesThePrivateKey()
+        {
+            var (client, _) = Pair(0xC0B0, TestCredentials.PwdUsername, TestCredentials.PwdPassword);
+            Assert.ThrowsExactly<ArgumentException>(() => client.PwdProtectionKey = PwdCredential.GenerateProtectionKeyPair());
         }
 
         [TestMethod]

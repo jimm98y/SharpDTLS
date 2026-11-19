@@ -94,7 +94,7 @@ namespace SharpDTLS.Tests
             var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
             client.Failed += (_, ex) => handshake.TrySetException(ex);
-            client.ApplicationDataReceived += (_, data) => received.TrySetResult(Encoding.UTF8.GetString(data));
+            client.ApplicationDataReceived += (_, data) => received.TrySetResult(Encoding.UTF8.GetString(data.ToArray()));
 
             client.BeginHandshake();
             Assert.IsTrue(handshake.Task.Wait(Timeout), $"{name}: handshake did not complete:\n" + server.Output);
@@ -115,7 +115,7 @@ namespace SharpDTLS.Tests
             var (keyPair, certificate) = TestCredentials.For(suite);
 
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
-            var server = new Dtls12Server(transport, keyPair, certificate)
+            var server = new Dtls12Server(transport, TestCertificates.Server(keyPair, certificate))
             {
                 MinimumVersion = DtlsVersion.Dtls10,
                 CipherSuites = new List<ushort> { id },
@@ -128,7 +128,7 @@ namespace SharpDTLS.Tests
                 psk = $" -psk {Convert.ToHexString(TestCredentials.PskKey)} -psk_identity {Encoding.ASCII.GetString(TestCredentials.PskIdentity)}";
             }
             var received = new TaskCompletionSource<(EndPoint, string)>(TaskCreationOptions.RunContinuationsAsynchronously);
-            server.ApplicationDataReceived += (_, e) => received.TrySetResult((e.RemoteEndPoint, Encoding.UTF8.GetString(e.Data)));
+            server.ApplicationDataReceived += (conn, e) => received.TrySetResult((conn.RemoteEndPoint, Encoding.UTF8.GetString(e.ToArray())));
 
             using var client = new OpenSslProcess(
                 $"s_client {versionFlag} {_openSsl.Value.Providers} -connect 127.0.0.1:{transport.LocalEndpoint.Port} -cipher {openSslName}@SECLEVEL=0{psk} -quiet", dir);

@@ -34,12 +34,12 @@ namespace SharpDTLS.Tests
             bool certificate = true)
         {
             var r = new Run();
-            r.Server = certificate ? new Dtls13Server(r.Pair.Server) : new Dtls13Server(r.Pair.Server, null, null);
-            r.Server.InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50);
+            r.Server = certificate ? new Dtls13Server(r.Pair.Server) : new Dtls13Server(r.Pair.Server, TestCertificates.Server(null, null));
+            r.Server.InitialRetransmitTimeout = TimeSpan.FromSeconds(2);
             r.Server.ExternalPskResolver = Resolve;
             configureServer?.Invoke(r.Server);
-            r.Server.ApplicationDataReceived += (_, e) => { lock (r.ServerReceived) r.ServerReceived.Add(Encoding.UTF8.GetString(e.Data)); };
-            r.Client = new Dtls13Client(r.Pair.Client) { ExternalPsk = new TlsExternalPsk(Identity, Key), InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50) };
+            r.Server.ApplicationDataReceived += (_, e) => { lock (r.ServerReceived) r.ServerReceived.Add(Encoding.UTF8.GetString(e.ToArray())); };
+            r.Client = new Dtls13Client(r.Pair.Client) { ExternalPsk = new TlsExternalPsk(Identity, Key), InitialRetransmitTimeout = TimeSpan.FromSeconds(2) };
             configureClient?.Invoke(r.Client);
 
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -153,10 +153,10 @@ namespace SharpDTLS.Tests
         [TestMethod]
         public void ClientCertificateRequired_IgnoresExternalPsks()
         {
-            var (key, cert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
-            var r = Connect(s => s.RequireClientCertificate = true, c => { c.ClientCertificate = cert; c.ClientCertificateKeyPair = key; });
+            var (key, cert) = SelfSigned.Ec();
+            var r = Connect(s => s.RequireClientCertificate = true, c => { c.ClientCredentials = TestCertificates.Credentials(key, cert); });
             Assert.IsFalse(r.Client.IsExternalPsk);
-            Assert.AreEqual(cert, r.ServerConnection.ClientCertificate);
+            Assert.AreEqual(cert, r.ServerConnection.ClientCertificate.Bc());
         }
 
         // Extensions of a plaintext hello record (13-byte record header, 12-byte handshake header).

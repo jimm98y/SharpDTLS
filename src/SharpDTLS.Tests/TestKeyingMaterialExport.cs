@@ -42,7 +42,7 @@ namespace SharpDTLS.Tests
         {
             OpenSsl.RequireOpenSsl();
             string dir = OpenSsl.NewTempDirectory();
-            var (kp, cert) = Dtls12CryptoUtils.GenerateSelfSignedCertificate();
+            var (kp, cert) = SelfSigned.Rsa();
             string certPath = OpenSsl.WritePem(dir, "cert.pem", cert);
             string keyPath = OpenSsl.WritePem(dir, "key.pem", kp.Private);
             int length = DtlsSrtp.KeyingMaterialLength(profile);
@@ -99,13 +99,13 @@ namespace SharpDTLS.Tests
             if (version == "-dtls1")
             {
                 var server = new Dtls12Server(transport) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10 };
-                server.ApplicationDataReceived += (_, e) => received.TrySetResult(e.RemoteEndPoint);
+                server.ApplicationDataReceived += (conn, e) => received.TrySetResult(conn.RemoteEndPoint);
                 getKeys = server.GetSrtpKeys;
             }
             else
             {
                 var server = new Dtls12Server(transport);
-                server.ApplicationDataReceived += (_, e) => received.TrySetResult(e.RemoteEndPoint);
+                server.ApplicationDataReceived += (conn, e) => received.TrySetResult(conn.RemoteEndPoint);
                 getKeys = server.GetSrtpKeys;
             }
 
@@ -129,7 +129,7 @@ namespace SharpDTLS.Tests
         {
             WolfSsl.RequireWolfSsl();
             string dir = OpenSsl.NewTempDirectory();
-            var (kp, cert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
+            var (kp, cert) = SelfSigned.Ec();
             string certPath = OpenSsl.WritePem(dir, "cert.pem", cert);
             string keyPath = OpenSsl.WritePem(dir, "key.pem", kp.Private);
             using var server = OpenSslProcess.StartServer(p => $"server {p} {certPath} {keyPath} -cipher {cipher} -srtp {profileName} -export EXPORTER-sharpdtls-test 48", dir, Timeout, out int port, WolfSsl.Harness);

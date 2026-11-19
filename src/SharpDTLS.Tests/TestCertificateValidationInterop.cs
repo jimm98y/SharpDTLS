@@ -58,7 +58,7 @@ namespace SharpDTLS.Tests
             Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), server.Output);
 
             using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
-            var client = new Dtls12Client(transport) { ServerCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }).ForServer(hostName) };
+            var client = new Dtls12Client(transport) { ServerCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForServer(hostName) };
             var error = Wait(client.BeginHandshake, s => client.HandshakeFinished += (_, _) => s(), f => client.Failed += (_, ex) => f(ex), server.Output);
             Assert.AreEqual(expected, (error as DtlsException)?.Alert ?? (error == null ? null : AlertDescription.InternalError), error?.ToString());
         }
@@ -74,9 +74,9 @@ namespace SharpDTLS.Tests
             var leaf = Pki.Leaf(new[] { "server.test" });
             string root = OpenSsl.WritePem(dir, "root.pem", Pki.Root.Cert);
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
-            var server = new Dtls12Server(transport, leaf.Key, leaf.Cert)
+            var server = new Dtls12Server(transport, TestCertificates.Server(leaf.Key, leaf.Cert))
             {
-                IntermediateCertificates = sendIntermediate ? new[] { Pki.Intermediate.Cert } : null,
+                IntermediateCertificates = sendIntermediate ? new[] { Pki.Intermediate.Cert }.Net() : null,
             };
 
             using var client = new OpenSslProcess(
@@ -99,7 +99,7 @@ namespace SharpDTLS.Tests
             Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), server.Output);
 
             using var transport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
-            var client = new Dtls13Client(transport) { ServerCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }).ForServer(hostName) };
+            var client = new Dtls13Client(transport) { ServerCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForServer(hostName) };
             var error = Wait(client.BeginHandshake, s => client.HandshakeFinished += (_, _) => s(), f => client.Failed += (_, ex) => f(ex), server.Output);
             Assert.AreEqual(expected, (error as DtlsException)?.Alert ?? (error == null ? null : AlertDescription.InternalError), error?.ToString());
         }
@@ -115,9 +115,9 @@ namespace SharpDTLS.Tests
             var leaf = Pki.Leaf(new[] { "server.test" });
             string root = OpenSsl.WritePem(dir, "root.pem", Pki.Root.Cert);
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
-            var server = new Dtls13Server(transport, leaf.Key, leaf.Cert)
+            var server = new Dtls13Server(transport, TestCertificates.Server(leaf.Key, leaf.Cert))
             {
-                IntermediateCertificates = sendIntermediate ? new[] { Pki.Intermediate.Cert } : null,
+                IntermediateCertificates = sendIntermediate ? new[] { Pki.Intermediate.Cert }.Net() : null,
             };
 
             using var client = new OpenSslProcess($"client {transport.LocalEndpoint.Port} -verify {root} -host {hostName}", dir, WolfSsl.Harness);

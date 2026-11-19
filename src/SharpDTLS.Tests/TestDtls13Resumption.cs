@@ -31,12 +31,12 @@ namespace SharpDTLS.Tests
             bool expectSuccess = true)
         {
             var r = new Run();
-            r.Server = new Dtls13Server(r.Pair.Server) { TicketKeys = keys, ShouldSendHelloRetry = helloRetry, InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50) };
+            r.Server = new Dtls13Server(r.Pair.Server) { TicketKeys = keys, ShouldSendHelloRetry = helloRetry, InitialRetransmitTimeout = TimeSpan.FromSeconds(2) };
             if (serverSuites != null)
                 r.Server.CipherSuites = serverSuites;
             configureServer?.Invoke(r.Server);
-            r.Server.ApplicationDataReceived += (_, e) => { lock (r.ServerReceived) r.ServerReceived.Add(Encoding.UTF8.GetString(e.Data)); };
-            r.Client = new Dtls13Client(r.Pair.Client) { ResumptionTicket = resume, InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50) };
+            r.Server.ApplicationDataReceived += (_, e) => { lock (r.ServerReceived) r.ServerReceived.Add(Encoding.UTF8.GetString(e.ToArray())); };
+            r.Client = new Dtls13Client(r.Pair.Client) { ResumptionTicket = resume, InitialRetransmitTimeout = TimeSpan.FromSeconds(2) };
             configureClient?.Invoke(r.Client);
 
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -129,14 +129,14 @@ namespace SharpDTLS.Tests
         public void ClientCertificate_CarriesOverToTheResumedSession()
         {
             var keys = new SessionTicketKeys();
-            var (clientKey, clientCert) = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
+            var (clientKey, clientCert) = SelfSigned.Ec();
             Action<Dtls13Server> requireCert = s => s.RequireClientCertificate = true;
-            Action<Dtls13Client> withCert = c => { c.ClientCertificate = clientCert; c.ClientCertificateKeyPair = clientKey; };
+            Action<Dtls13Client> withCert = c => { c.ClientCredentials = TestCertificates.Credentials(clientKey, clientCert); };
 
             var ticket = WaitForTicket(Connect(keys, null, configureServer: requireCert, configureClient: withCert));
             var r = Connect(keys, ticket, configureServer: requireCert);
             Assert.IsTrue(r.Client.IsResumed);
-            Assert.AreEqual(clientCert, r.ServerConnection.ClientCertificate);
+            Assert.AreEqual(clientCert, r.ServerConnection.ClientCertificate.Bc());
         }
 
         [TestMethod]

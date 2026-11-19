@@ -35,18 +35,18 @@ namespace SharpDTLS.Tests
             if (version == DtlsVersion.Dtls12)
             {
                 var server = new Dtls12Server(r.Pair.Server) { SessionCache = cache, TicketKeys = ticketKeys, InitialRetransmitTimeout = timeout, CipherSuites = suites };
-                server.ApplicationDataReceived += (_, e) => { lock (r.ServerReceived) r.ServerReceived.Add(Encoding.UTF8.GetString(e.Data)); };
+                server.ApplicationDataReceived += (_, e) => { lock (r.ServerReceived) r.ServerReceived.Add(Encoding.UTF8.GetString(e.ToArray())); };
                 r.Server = server;
                 r.Client = new Dtls12Client(r.Pair.Client) { ResumptionSession = resume, InitialRetransmitTimeout = timeout, CipherSuites = suites, UseSessionTickets = ticketKeys != null };
             }
             else
             {
                 var server = new Dtls12Server(r.Pair.Server) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10, SessionCache = cache, TicketKeys = ticketKeys, InitialRetransmitTimeout = timeout, CipherSuites = suites };
-                server.ApplicationDataReceived += (_, e) => { lock (r.ServerReceived) r.ServerReceived.Add(Encoding.UTF8.GetString(e.Data)); };
+                server.ApplicationDataReceived += (_, e) => { lock (r.ServerReceived) r.ServerReceived.Add(Encoding.UTF8.GetString(e.ToArray())); };
                 r.Server = server;
                 r.Client = new Dtls12Client(r.Pair.Client) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10, ResumptionSession = resume, InitialRetransmitTimeout = timeout, CipherSuites = suites, UseSessionTickets = ticketKeys != null };
             }
-            r.Client.ApplicationDataReceived += (_, data) => { lock (r.ClientReceived) r.ClientReceived.Add(Encoding.UTF8.GetString(data)); };
+            r.Client.ApplicationDataReceived += (_, data) => { lock (r.ClientReceived) r.ClientReceived.Add(Encoding.UTF8.GetString(data.ToArray())); };
 
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             r.Client.HandshakeFinished += (_, _) => done.TrySetResult(true);

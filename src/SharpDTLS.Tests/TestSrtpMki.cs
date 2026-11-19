@@ -34,7 +34,7 @@ namespace SharpDTLS.Tests
                 var server = new Dtls12Server(r.Pair.Server) { SrtpProtectionProfiles = srtpProfiles, SrtpDisableMki = disableMki, RequireClientCertificate = clientCredentials != null };
                 var client = new Dtls12Client(r.Pair.Client) { SrtpProtectionProfiles = srtpProfiles, SrtpMasterKeyIdentifier = clientMki };
                 if (clientCredentials != null)
-                    (client.ClientCertificateKeyPair, client.ClientCertificate) = clientCredentials.Value;
+                    client.ClientCredentials = TestCertificates.Credentials(clientCredentials.Value);
                 client.HandshakeFinished += (_, _) => done.TrySetResult(null);
                 r.Client = client;
                 r.ServerConnection = () => server.Connections.SingleOrDefault();
@@ -45,7 +45,7 @@ namespace SharpDTLS.Tests
                 var server = new Dtls13Server(r.Pair.Server) { SrtpProtectionProfiles = srtpProfiles, SrtpDisableMki = disableMki, RequireClientCertificate = clientCredentials != null };
                 var client = new Dtls13Client(r.Pair.Client) { SrtpProtectionProfiles = srtpProfiles, SrtpMasterKeyIdentifier = clientMki };
                 if (clientCredentials != null)
-                    (client.ClientCertificateKeyPair, client.ClientCertificate) = clientCredentials.Value;
+                    client.ClientCredentials = TestCertificates.Credentials(clientCredentials.Value);
                 client.HandshakeFinished += (_, _) => done.TrySetResult(null);
                 r.Client = client;
                 r.ServerConnection = () => server.Connections.SingleOrDefault();
@@ -171,7 +171,7 @@ namespace SharpDTLS.Tests
         [TestMethod]
         public void BothSides_ReportTheSameParameters(int version)
         {
-            var clientCredentials = Dtls13CryptoUtils.GenerateSelfSignedEcCertificate();
+            var clientCredentials = SelfSigned.Ec();
             var r = EngineRun.Connect(version, clientCredentials: clientCredentials);
             Assert.IsNull(r.Error, r.Error?.ToString());
             var client = r.Client;
@@ -194,8 +194,8 @@ namespace SharpDTLS.Tests
             Assert.IsFalse(client.IsResumed);
             Assert.IsFalse(server.IsResumed);
 
-            Assert.AreEqual(clientCredentials.certificate, client.LocalCertificate);
-            Assert.AreEqual(clientCredentials.certificate, server.PeerCertificate);
+            Assert.AreEqual(clientCredentials.certificate.Net(), client.LocalCertificate);
+            Assert.AreEqual(clientCredentials.certificate.Net(), server.PeerCertificate);
             Assert.IsNotNull(server.LocalCertificate);
             Assert.AreEqual(server.LocalCertificate, client.PeerCertificate);
         }

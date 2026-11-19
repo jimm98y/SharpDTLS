@@ -17,9 +17,9 @@ namespace SharpDTLS.Tests
                 : 1;
 
         /// <summary>A wait within this process: a handshake or a reply between our own peers or BouncyCastle's.</summary>
-        public static readonly TimeSpan InProcess = TimeSpan.FromSeconds(30 * Scale);
+        public static readonly TimeSpan InProcess = TimeSpan.FromSeconds(60 * Scale);
 
         /// <summary>A wait involving an external process (OpenSSL, wolfSSL): its start, its handshake, its output.</summary>
-        public static readonly TimeSpan Interop = TimeSpan.FromSeconds(60 * Scale);
+        public static readonly TimeSpan Interop = TimeSpan.FromSeconds(120 * Scale);
     }
 }

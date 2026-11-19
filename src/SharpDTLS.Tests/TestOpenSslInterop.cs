@@ -188,7 +188,7 @@ namespace SharpDTLS.Tests
         private static readonly TimeSpan Timeout = TestTimeouts.Interop;
 
         private static (AsymmetricCipherKeyPair, X509Certificate) Credentials(bool ec)
-            => ec ? SharpDTLS.Protocol13.Dtls13CryptoUtils.GenerateSelfSignedEcCertificate() : Dtls12CryptoUtils.GenerateSelfSignedCertificate();
+            => ec ? SelfSigned.Ec() : SelfSigned.Rsa();
 
         [DataRow("ECDHE-RSA-AES128-GCM-SHA256", false, "X25519")]
         [DataRow("ECDHE-RSA-AES256-GCM-SHA384", false, "P-256")]
@@ -213,7 +213,7 @@ namespace SharpDTLS.Tests
             var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
             client.Failed += (_, ex) => handshake.TrySetException(ex);
-            client.ApplicationDataReceived += (_, data) => received.TrySetResult(Encoding.UTF8.GetString(data));
+            client.ApplicationDataReceived += (_, data) => received.TrySetResult(Encoding.UTF8.GetString(data.ToArray()));
 
             client.BeginHandshake();
             Assert.IsTrue(handshake.Task.Wait(Timeout), "Handshake did not complete:\n" + server.Output);
@@ -241,12 +241,12 @@ namespace SharpDTLS.Tests
 
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
             int port = transport.LocalEndpoint.Port;
-            var server = new Dtls12Server(transport, kp, cert);
+            var server = new Dtls12Server(transport, TestCertificates.Server(kp, cert));
 
             var handshake = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var received = new TaskCompletionSource<(EndPoint, string)>(TaskCreationOptions.RunContinuationsAsynchronously);
             server.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
-            server.ApplicationDataReceived += (_, e) => received.TrySetResult((e.RemoteEndPoint, Encoding.UTF8.GetString(e.Data)));
+            server.ApplicationDataReceived += (conn, e) => received.TrySetResult((conn.RemoteEndPoint, Encoding.UTF8.GetString(e.ToArray())));
 
             using var client = new OpenSslProcess(
                 $"s_client -dtls1_2 -connect 127.0.0.1:{port} -cipher {cipher} -groups {groups} -quiet", dir);
@@ -297,9 +297,9 @@ namespace SharpDTLS.Tests
 
             // OpenSSL client -> SharpDTLS server
             using var serverTransport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
-            var sharpServer = new Dtls12Server(serverTransport, kp, cert) { CipherSuites = AllButWeak() };
+            var sharpServer = new Dtls12Server(serverTransport, TestCertificates.Server(kp, cert)) { CipherSuites = AllButWeak() };
             var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-            sharpServer.ApplicationDataReceived += (_, e) => received.TrySetResult(Encoding.UTF8.GetString(e.Data));
+            sharpServer.ApplicationDataReceived += (_, e) => received.TrySetResult(Encoding.UTF8.GetString(e.ToArray()));
             using var openSslClient = new OpenSslProcess($"s_client -dtls1_2 -connect 127.0.0.1:{serverTransport.LocalEndpoint.Port} -cipher {cipher}{etm} -quiet", dir);
             openSslClient.WriteLine("cbc-from-openssl");
             Assert.IsTrue(received.Task.Wait(Timeout), "Server did not receive data:\n" + openSslClient.Output);
@@ -450,8 +450,7 @@ namespace SharpDTLS.Tests
             using var clientTransport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, port));
             var client = new Dtls12Client(clientTransport)
             {
-                ClientCertificate = clientCert,
-                ClientCertificateKeyPair = clientKp,
+                ClientCredentials = TestCertificates.Credentials(clientKp, clientCert),
             };
             var handshake = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
@@ -472,7 +471,7 @@ namespace SharpDTLS.Tests
         private static readonly TimeSpan Timeout = TestTimeouts.Interop;
 
         private static (AsymmetricCipherKeyPair, X509Certificate) Credentials(bool ec)
-            => ec ? SharpDTLS.Protocol13.Dtls13CryptoUtils.GenerateSelfSignedEcCertificate() : SharpDTLS.Protocol12.Dtls12CryptoUtils.GenerateSelfSignedCertificate();
+            => ec ? SelfSigned.Ec() : SelfSigned.Rsa();
 
         // OpenSSL 3 only allows DTLS 1.0 (SHA-1 / MD5 based) at security level 0.
         [DataRow("ECDHE-RSA-AES128-SHA", false, "X25519")]
@@ -496,7 +495,7 @@ namespace SharpDTLS.Tests
             var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
             client.Failed += (_, ex) => handshake.TrySetException(ex);
-            client.ApplicationDataReceived += (_, data) => received.TrySetResult(Encoding.UTF8.GetString(data));
+            client.ApplicationDataReceived += (_, data) => received.TrySetResult(Encoding.UTF8.GetString(data.ToArray()));
 
             client.BeginHandshake();
             Assert.IsTrue(handshake.Task.Wait(Timeout), "Handshake did not complete:\n" + server.Output);
@@ -522,12 +521,12 @@ namespace SharpDTLS.Tests
 
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
             int port = transport.LocalEndpoint.Port;
-            var server = new Dtls12Server(transport, kp, cert) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10 };
+            var server = new Dtls12Server(transport, TestCertificates.Server(kp, cert)) { MinimumVersion = DtlsVersion.Dtls10, MaximumVersion = DtlsVersion.Dtls10 };
 
             var handshake = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var received = new TaskCompletionSource<(EndPoint, string)>(TaskCreationOptions.RunContinuationsAsynchronously);
             server.HandshakeFinished += (_, _) => handshake.TrySetResult(true);
-            server.ApplicationDataReceived += (_, e) => received.TrySetResult((e.RemoteEndPoint, Encoding.UTF8.GetString(e.Data)));
+            server.ApplicationDataReceived += (conn, e) => received.TrySetResult((conn.RemoteEndPoint, Encoding.UTF8.GetString(e.ToArray())));
 
             using var client = new OpenSslProcess(
                 $"s_client -dtls1 -connect 127.0.0.1:{port} -cipher {cipher}@SECLEVEL=0 -groups {groups} -quiet", dir);

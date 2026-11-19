@@ -28,13 +28,14 @@ Create the server. Without a key pair and a certificate it generates a self-sign
 ```cs
 var serverTransport = new ServerTransport(new IPEndPoint(IPAddress.Any, 8888));
 var server = new DtlsServer(serverTransport);
-server.ApplicationDataReceived += (sender, e) =>
+server.ApplicationDataReceived += (connection, data) =>
 {
-    Console.WriteLine($"Server received: {Encoding.UTF8.GetString(e.Data)}");
-    e.Connection.SendApplicationData(Encoding.UTF8.GetBytes("Hello from server!"));
+    Console.WriteLine($"Server received: {Encoding.UTF8.GetString(data)}");
+    connection.SendApplicationData(Encoding.UTF8.GetBytes("Hello from server!"));
 };
 ```
-To use your own certificate, pass it with its key pair: `new DtlsServer(serverTransport, keyPair, certificate)`. A server keeps at most `MaxConnections` connections (10,000 by default) and creates one only for a client that passed the cookie exchange.
+`data` is a `ReadOnlySpan<byte>` that is valid only during the call: the buffer is reused for the next record, so copy it (`data.ToArray()`) to keep it.
+To use your own certificate, pass it with its private key: `new DtlsServer(serverTransport, new TransportCertificate(certificate))`, where `certificate` is an `X509Certificate2` that has its key (see [doc/migration-0.0.2.md](doc/migration-0.0.2.md) for keys .NET cannot hold). A server keeps at most `MaxConnections` connections (10,000 by default) and creates one only for a client that passed the cookie exchange.
 
 Create the client and start the handshake. The handshake runs in the background and `HandshakeFinished` is raised when it completes, or `Failed` when it does not:
 ```cs
@@ -47,7 +48,7 @@ client.HandshakeFinished += (sender, e) =>
     Console.WriteLine($"Handshake finished: version 0x{client.NegotiatedVersion:X4}");
     client.SendApplicationData(Encoding.UTF8.GetBytes("Hello from client!"));
 };
-client.ApplicationDataReceived += (sender, data) => Console.WriteLine($"Client received: {Encoding.UTF8.GetString(data)}");
+client.ApplicationDataReceived += (connection, data) => Console.WriteLine($"Client received: {Encoding.UTF8.GetString(data)}");
 client.Failed += (sender, ex) => Console.WriteLine($"Handshake failed: {ex.Message}");
 client.BeginHandshake();
 ```

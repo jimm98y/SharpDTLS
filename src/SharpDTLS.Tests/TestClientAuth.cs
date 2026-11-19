@@ -18,7 +18,7 @@ namespace SharpDTLS.Tests
     file static class CertHelper
     {
         public static (AsymmetricCipherKeyPair kp, X509Certificate cert) GenerateEc()
-            => SharpDTLS.Protocol12.Dtls12CryptoUtils.GenerateSelfSignedCertificate();
+            => SelfSigned.Rsa();
     }
 
     // ── DTLS 1.2 message round-trip ────────────────────────────────────────
@@ -115,8 +115,7 @@ namespace SharpDTLS.Tests
             {
                 MinimumVersion = DtlsVersion.Dtls10,
                 MaximumVersion = DtlsVersion.Dtls10,
-                ClientCertificateKeyPair = clientKp,
-                ClientCertificate        = clientCert,
+                ClientCredentials = TestCertificates.Credentials(clientKp, clientCert),
             };
 
             bool serverDone = false, clientDone = false;
@@ -167,8 +166,7 @@ namespace SharpDTLS.Tests
             {
                 MinimumVersion = DtlsVersion.Dtls10,
                 MaximumVersion = DtlsVersion.Dtls10,
-                ClientCertificateKeyPair = clientKp,
-                ClientCertificate        = clientCert,
+                ClientCredentials = TestCertificates.Credentials(clientKp, clientCert),
             };
 
             var tcs = new TaskCompletionSource<bool>();
@@ -200,8 +198,7 @@ namespace SharpDTLS.Tests
             };
             var client = new Dtls12Client(clientTransport)
             {
-                ClientCertificateKeyPair = clientKp,
-                ClientCertificate        = clientCert,
+                ClientCredentials = TestCertificates.Credentials(clientKp, clientCert),
             };
 
             bool serverDone = false, clientDone = false;
@@ -284,8 +281,7 @@ namespace SharpDTLS.Tests
             };
             var client = new Dtls13Client(clientTransport)
             {
-                ClientCertificateKeyPair = clientKp,
-                ClientCertificate        = clientCert,
+                ClientCredentials = TestCertificates.Credentials(clientKp, clientCert),
             };
 
             bool serverDone = false, clientDone = false;

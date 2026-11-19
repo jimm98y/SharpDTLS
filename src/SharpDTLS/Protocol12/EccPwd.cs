@@ -358,7 +358,7 @@ namespace SharpDTLS.Protocol12
 
         public EccPwdServerKeyExchange(ServerKeyExchangeContext context, CipherSuiteInfo suite)
         {
-            string username = EccPwd.ResolveUsername(context.ClientHello, context.PwdProtectionKey);
+            string username = EccPwd.ResolveUsername(context.ClientHello, PwdCredential.PrivateKeyOf(context.PwdProtectionKey));
             Group = EccPwd.SelectGroup(context.ClientHello);
             if (Group == 0)
                 throw new DtlsException(AlertDescription.HandshakeFailure, "No TLS-PWD group in common.");

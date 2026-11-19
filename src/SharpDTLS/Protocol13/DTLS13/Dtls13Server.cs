@@ -19,8 +19,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 // SOFTWARE.
 
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.X509;
 using SharpDTLS.Protocol13.Messages;
 using SharpDTLS.UDP;
 using System;
@@ -44,24 +42,14 @@ namespace SharpDTLS.Protocol13.DTLS13
         public Tls13ServerConnection Connection { get; }
     }
 
-    internal class Dtls13DataReceivedEventArgs : Dtls13ConnectionEventArgs
-    {
-        public Dtls13DataReceivedEventArgs(EndPoint remoteEndPoint, Tls13ServerConnection connection, byte[] data)
-            : base(remoteEndPoint, connection)
-        {
-            Data = data;
-        }
-
-        public byte[] Data { get; }
-    }
-
     /// <summary>
     /// DTLS 1.3 server. Answers new clients statelessly (HelloRetryRequest with cookie) and keeps
     /// one <see cref="Tls13ServerConnection"/> per remote endpoint once the cookie has been verified.
     /// </summary>
     internal class Dtls13Server : Tls13ServerBase
     {
-        private readonly ConcurrentDictionary<string, Tls13ServerConnection> _connections = new();
+        // by endpoint and by connection ID: looked up of every datagram, so of keys that need no string
+        private readonly ConcurrentDictionary<EndPoint, Tls13ServerConnection> _connections = new();
 
         internal int ConnectionCount => _connections.Count;
 
@@ -97,45 +85,42 @@ namespace SharpDTLS.Protocol13.DTLS13
         /// </summary>
         public bool AutoUpdatePeerAddress { get; set; }
 
-        private readonly ConcurrentDictionary<string, Tls13ServerConnection> _connectionsById = new();
+        private readonly ConcurrentDictionary<ConnectionIdKey, Tls13ServerConnection> _connectionsById = new();
 
         public TimeSpan InitialRetransmitTimeout { get; set; } = TimeSpan.FromSeconds(1);
 
         /// <summary>0-RTT data accepted before the handshake completes; it may be a replay.</summary>
-        public event EventHandler<Dtls13DataReceivedEventArgs> EarlyDataReceived;
+        public event TlsDataHandler EarlyDataReceived;
 
         internal override void OnEarlyData(Tls13ServerConnection connection, byte[] data)
-            => EarlyDataReceived?.Invoke(this, new Dtls13DataReceivedEventArgs(connection.RemoteEndPoint, connection, data));
+            => EarlyDataReceived?.Invoke(connection, data);
 
         public event EventHandler<EventArgs> HandshakeFinished;
         public event EventHandler<KeyUpdateDatagram> KeyUpdateReceived;
-        public event EventHandler<Dtls13DataReceivedEventArgs> ApplicationDataReceived;
+        public event TlsDataHandler ApplicationDataReceived;
         public event EventHandler<Dtls13ConnectionEventArgs> ConnectionClosed;
 
         public Dtls13Server(IServerTransport serverTransport)
-            : this(serverTransport, Dtls13CryptoUtils.GenerateSelfSignedCertificate())
+            : this(serverTransport, SelfSigned.Credentials())
         {
         }
 
-        /// <param name="keyPair">The certificate key, or null with <paramref name="certificate"/> for a PSK-only server.</param>
-        public Dtls13Server(IServerTransport serverTransport, AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
-            : base(keyPair, certificate)
+
+        /// <param name="credentials">The default key and certificate; null for a PSK-only server.</param>
+        public Dtls13Server(IServerTransport serverTransport, TransportCertificate credentials)
+            : base(credentials)
         {
             ServerTransport = serverTransport;
             ServerTransport.OnDataReceived += ServerTransport_OnDataReceived;
         }
 
-        private Dtls13Server(IServerTransport serverTransport, (AsymmetricCipherKeyPair keyPair, X509Certificate certificate) credentials)
-            : this(serverTransport, credentials.keyPair, credentials.certificate)
-        {
-        }
 
         public IReadOnlyCollection<Tls13ServerConnection> Connections => _connections.Values.ToList();
 
         public Tls13ServerConnection GetConnection(EndPoint endpoint)
-            => _connections.TryGetValue(endpoint.ToString(), out var connection) ? connection : null;
+            => _connections.TryGetValue(endpoint, out var connection) ? connection : null;
 
-        public void SendApplicationData(EndPoint endpoint, byte[] data)
+        public void SendApplicationData(EndPoint endpoint, ReadOnlySpan<byte> data)
             => RequireConnection(endpoint).SendApplicationData(data);
 
         public void SendKeyUpdate(EndPoint endpoint, bool requestUpdate = false)
@@ -147,19 +132,17 @@ namespace SharpDTLS.Protocol13.DTLS13
         private Tls13ServerConnection RequireConnection(EndPoint endpoint)
             => GetConnection(endpoint) ?? throw new InvalidOperationException($"No DTLS connection for {endpoint}.");
 
-        private void ServerTransport_OnDataReceived(object sender, byte[] data)
+        private void ServerTransport_OnDataReceived(EndPoint endpoint, ReadOnlySpan<byte> data)
         {
-            var endpoint = (EndPoint)sender;
-
             // A unified header with the C bit names its connection, whatever address it comes from.
             if (UseConnectionIds && data.Length > 1 + ConnectionIdLength && (data[0] & 0xF0) == 0x30
-                && _connectionsById.TryGetValue(Convert.ToHexString(data, 1, ConnectionIdLength), out var byId))
+                && _connectionsById.TryGetValue(new ConnectionIdKey(data.Slice(1, ConnectionIdLength)), out var byId))
             {
                 byId.ProcessDatagram(data, endpoint);
                 return;
             }
 
-            if (_connections.TryGetValue(endpoint.ToString(), out var connection))
+            if (_connections.TryGetValue(endpoint, out var connection))
             {
                 connection.ProcessDatagram(data, endpoint);
                 return;
@@ -167,7 +150,7 @@ namespace SharpDTLS.Protocol13.DTLS13
 
             try
             {
-                HandleNewClient(endpoint, data);
+                HandleNewClient(endpoint, data.ToArray());
             }
             catch (DtlsException ex)
             {
@@ -204,20 +187,20 @@ namespace SharpDTLS.Protocol13.DTLS13
             if (!CheckCookie(endpoint, record, out ClientHelloDatagram clientHello, out ClientHelloDecision decision))
                 return;
 
-            if (!_connections.ContainsKey(endpoint.ToString()) && AcceptsConnection != null && !AcceptsConnection(endpoint))
+            if (!_connections.ContainsKey(endpoint) && AcceptsConnection != null && !AcceptsConnection(endpoint))
                 return;
 
             var connection = new Tls13ServerConnection(this, endpoint);
-            if (!_connections.TryAdd(endpoint.ToString(), connection))
+            if (!_connections.TryAdd(endpoint, connection))
             {
-                _connections[endpoint.ToString()].ProcessDatagram(datagram);
+                _connections[endpoint].ProcessDatagram(datagram);
                 return;
             }
 
             OnConnectionCreated(connection);
             connection.Start(record, clientHello, Dtls13CipherSuite.Get(decision.SuiteId), decision.Retry, decision.ShareGroup);
             if (connection.ConnectionId != null && !connection.IsClosed)
-                _connectionsById[Convert.ToHexString(connection.ConnectionId)] = connection;
+                _connectionsById[new ConnectionIdKey(connection.ConnectionId)] = connection;
         }
 
         /// <summary>
@@ -264,12 +247,12 @@ namespace SharpDTLS.Protocol13.DTLS13
         }
 
         internal void RegisterConnectionId(Tls13ServerConnection connection, byte[] connectionId)
-            => _connectionsById[Convert.ToHexString(connectionId)] = connection;
+            => _connectionsById[new ConnectionIdKey(connectionId)] = connection;
 
         internal void OnPeerAddressConfirmed(Tls13ServerConnection connection, EndPoint old)
         {
-            _connections.TryRemove(new KeyValuePair<string, Tls13ServerConnection>(old.ToString(), connection));
-            _connections[connection.RemoteEndPoint.ToString()] = connection;
+            _connections.TryRemove(new KeyValuePair<EndPoint, Tls13ServerConnection>(old, connection));
+            _connections[connection.RemoteEndPoint] = connection;
         }
 
         private void SendPlaintextAlert(EndPoint endpoint, AlertDescription alert)
@@ -284,15 +267,15 @@ namespace SharpDTLS.Protocol13.DTLS13
         internal override void OnConnectionEstablished(Tls13ServerConnection connection)
             => HandshakeFinished?.Invoke(this, new Dtls13ConnectionEventArgs(connection.RemoteEndPoint, connection));
 
-        internal override void OnApplicationData(Tls13ServerConnection connection, byte[] data)
-            => ApplicationDataReceived?.Invoke(this, new Dtls13DataReceivedEventArgs(connection.RemoteEndPoint, connection, data));
+        internal override void OnApplicationData(Tls13ServerConnection connection, ReadOnlySpan<byte> data)
+            => ApplicationDataReceived?.Invoke(connection, data);
 
         internal override void OnKeyUpdate(KeyUpdateDatagram keyUpdate)
             => KeyUpdateReceived?.Invoke(this, keyUpdate);
 
         internal override void OnConnectionClosed(Tls13ServerConnection connection)
         {
-            _connections.TryRemove(new KeyValuePair<string, Tls13ServerConnection>(connection.RemoteEndPoint.ToString(), connection));
+            _connections.TryRemove(new KeyValuePair<EndPoint, Tls13ServerConnection>(connection.RemoteEndPoint, connection));
             foreach (var entry in _connectionsById.Where(e => e.Value == connection).ToList())
                 _connectionsById.TryRemove(entry);
             ConnectionClosed?.Invoke(this, new Dtls13ConnectionEventArgs(connection.RemoteEndPoint, connection));

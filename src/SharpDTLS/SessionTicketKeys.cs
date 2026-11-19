@@ -19,10 +19,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 // SOFTWARE.
 
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Crypto.Engines;
-using Org.BouncyCastle.Crypto.Modes;
-using Org.BouncyCastle.Crypto.Parameters;
 using System;
 using System.Linq;
 using System.Security.Cryptography;
@@ -82,10 +78,9 @@ namespace SharpDTLS
                 (name, key) = _current;
             }
             byte[] nonce = RandomNumberGenerator.GetBytes(12);
-            var gcm = new GcmBlockCipher(new AesEngine());
-            gcm.Init(true, new AeadParameters(new KeyParameter(key), 128, nonce, name));
-            byte[] sealedState = new byte[gcm.GetOutputSize(state.Length)];
-            gcm.DoFinal(sealedState, gcm.ProcessBytes(state, 0, state.Length, sealedState, 0));
+            var gcm = BouncyCastleTlsCrypto.Default.CreateAead(TlsAeadAlgorithm.AesGcm, key);
+            byte[] sealedState = new byte[state.Length + gcm.TagLength];
+            gcm.Seal(nonce, name, state, sealedState);
             CryptographicOperations.ZeroMemory(state);
             return name.Concat(nonce).Concat(sealedState).ToArray();
         }
@@ -108,18 +103,9 @@ namespace SharpDTLS
             else
                 return null;
 
-            try
-            {
-                var gcm = new GcmBlockCipher(new AesEngine());
-                gcm.Init(false, new AeadParameters(new KeyParameter(key), 128, ticket.AsSpan(16, 12).ToArray(), ticket.AsSpan(0, 16).ToArray()));
-                byte[] state = new byte[gcm.GetOutputSize(ticket.Length - 28)];
-                gcm.DoFinal(state, gcm.ProcessBytes(ticket, 28, ticket.Length - 28, state, 0));
-                return state;
-            }
-            catch (InvalidCipherTextException)
-            {
-                return null;
-            }
+            var gcm = BouncyCastleTlsCrypto.Default.CreateAead(TlsAeadAlgorithm.AesGcm, key);
+            byte[] state = new byte[ticket.Length - 28 - gcm.TagLength];
+            return gcm.Open(ticket.AsSpan(16, 12), ticket.AsSpan(0, 16), ticket.AsSpan(28), state) ? state : null;
         }
     }
 }

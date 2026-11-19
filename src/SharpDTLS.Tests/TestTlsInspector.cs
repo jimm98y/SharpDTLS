@@ -26,19 +26,39 @@ namespace SharpDTLS.Tests
             public int Records;
             public Func<bool, byte[], byte[]> Edit;
 
+            // The inspector sees every connection of the process: other tests' may still be retransmitting. Once the
+            // helpers name this test's connections, only theirs (and the stateless server's, of no connection) count.
+            public readonly HashSet<TlsConnectionBase> Ours = new();
+
+            public void Own(TlsConnectionBase connection)
+            {
+                lock (this) Ours.Add(connection);
+            }
+
+            private bool Mine(TlsConnectionBase connection)
+            {
+                lock (this) return connection == null || Ours.Count == 0 || Ours.Contains(connection);
+            }
+
             public override byte[] OnHandshakeSending(TlsConnectionBase connection, bool isClient, int messageSeq, byte[] message)
             {
+                if (!Mine(connection))
+                    return message;
                 lock (this) Messages.Add((isClient, true, message[0], messageSeq));
                 return Edit?.Invoke(isClient, message) ?? message;
             }
 
             public override void OnHandshakeReceived(TlsConnectionBase connection, bool isClient, int messageSeq, ReadOnlySpan<byte> message)
             {
+                if (!Mine(connection))
+                    return;
                 lock (this) Messages.Add((isClient, false, message[0], messageSeq));
             }
 
             public override void OnSecret(TlsConnectionBase connection, bool isClient, string name, ReadOnlySpan<byte> value)
             {
+                if (!Mine(connection))
+                    return;
                 Assert.IsGreaterThan(0, value.Length, name);
                 lock (this)
                 {
@@ -49,6 +69,8 @@ namespace SharpDTLS.Tests
 
             public override void OnKeyExchange(TlsConnectionBase connection, bool isClient, ushort group, ReadOnlySpan<byte> privateKey, ReadOnlySpan<byte> publicKey)
             {
+                if (!Mine(connection))
+                    return;
                 lock (this) KeyPairs.Add((isClient, group, privateKey.ToArray(), publicKey.ToArray()));
             }
 
@@ -58,7 +80,10 @@ namespace SharpDTLS.Tests
             }
 
             public override void OnProtectedRecord(TlsConnectionBase connection, bool isClient, bool sent, byte contentType, ulong epoch, ulong sequenceNumber, ReadOnlySpan<byte> content)
-                => Interlocked.Increment(ref Records);
+            {
+                if (Mine(connection))
+                    Interlocked.Increment(ref Records);
+            }
 
             public byte[] Types(bool isClient, bool sent)
             {
@@ -105,12 +130,24 @@ namespace SharpDTLS.Tests
             var server = new DtlsServer(serverTransport);
             using var clientTransport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, serverTransport.LocalEndpoint.Port));
             var client = new DtlsClient(clientTransport) { MinimumVersion = version, MaximumVersion = version };
-            return Wait(done =>
+            Own(client.Dtls12, client.Dtls13);
+            server.ConnectionCreated += (_, connection) => Own(connection);
+            var error = Wait(done =>
             {
                 client.HandshakeFinished += (_, _) => done(null);
                 client.Failed += (_, ex) => done(ex);
                 client.BeginHandshake();
             });
+            // In DTLS 1.3 the client is done before the server has its Finished: the transports stay until it has.
+            SpinWait.SpinUntil(() => server.Connections.Any(c => c.IsHandshakeComplete), Timeout);
+            return error;
+        }
+
+        private static void Own(params TlsConnectionBase[] connections)
+        {
+            if (TlsInspector.Current is Recorder recorder)
+                foreach (var connection in connections)
+                    recorder.Own(connection);
         }
 
         private static Exception TlsHandshake(ushort version) => TlsHandshake(version, null, out _);
@@ -123,6 +160,8 @@ namespace SharpDTLS.Tests
             using var tcp = new TcpClient();
             tcp.Connect(server.LocalEndpoint);
             var client = new TlsClient(tcp.GetStream()) { MinimumVersion = version, MaximumVersion = version };
+            Own(client.Tls12, client.Tls13);
+            server.ConnectionCreated += (_, connection) => Own(connection);
             clientConnection = null;
             var error = Wait(done =>
             {

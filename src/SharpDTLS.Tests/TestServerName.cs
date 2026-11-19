@@ -21,17 +21,17 @@ namespace SharpDTLS.Tests
         private static readonly TimeSpan Timeout = TestTimeouts.Interop;
         private static readonly Lazy<TestPki> _pki = new(() => new TestPki("SNI"));
         private static TestPki Pki => _pki.Value;
-        private static readonly Lazy<ServerCredentials> _a = new(() => Credentials("a.test"));
-        private static readonly Lazy<ServerCredentials> _b = new(() => Credentials("b.test"));
-        private static readonly Lazy<ServerCredentials> _default = new(() => Credentials("default.test"));
+        private static readonly Lazy<TransportCertificate> _a = new(() => Credentials("a.test"));
+        private static readonly Lazy<TransportCertificate> _b = new(() => Credentials("b.test"));
+        private static readonly Lazy<TransportCertificate> _default = new(() => Credentials("default.test"));
 
-        private static ServerCredentials Credentials(string name)
+        private static TransportCertificate Credentials(string name)
         {
             var leaf = Pki.Leaf(new[] { name });
-            return new ServerCredentials(leaf.Key, leaf.Cert, new[] { Pki.Intermediate.Cert });
+            return new TransportCertificate(leaf.Key, leaf.Cert, new[] { Pki.Intermediate.Cert });
         }
 
-        private static ServerCredentials Select(string name) => name switch { "a.test" => _a.Value, "b.test" => _b.Value, _ => null };
+        private static TransportCertificate Select(string name) => name switch { "a.test" => _a.Value, "b.test" => _b.Value, _ => null };
 
         private static Exception Wait(Action begin, Action<Action> onSuccess, Action<Action<Exception>> onFailure)
         {
@@ -48,7 +48,7 @@ namespace SharpDTLS.Tests
         {
             var pair = new ScriptedTransportPair();
             var asked = new List<string>();
-            var server = new Dtls12Server(pair.Server, _default.Value.KeyPair, _default.Value.Certificate)
+            var server = new Dtls12Server(pair.Server, TestCertificates.Server(_default.Value.KeyPair, _default.Value.BcCertificate))
             {
                 IntermediateCertificates = _default.Value.IntermediateCertificates,
                 CertificateSelector = name => { lock (asked) asked.Add(name); return Select(name); },
@@ -58,7 +58,7 @@ namespace SharpDTLS.Tests
             {
                 ServerName = serverName,
                 ResumptionSession = resume,
-                ServerCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }).ForServer(expectedCertificateName),
+                ServerCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForServer(expectedCertificateName),
             };
             var error = Wait(client.BeginHandshake, s => client.HandshakeFinished += (_, _) => s(), f => client.Failed += (_, ex) => f(ex));
             Assert.IsNull(error, error?.ToString());
@@ -69,18 +69,18 @@ namespace SharpDTLS.Tests
             Dtls13SessionTicket resume = null, SessionTicketKeys keys = null)
         {
             var pair = new ScriptedTransportPair();
-            var server = new Dtls13Server(pair.Server, _default.Value.KeyPair, _default.Value.Certificate)
+            var server = new Dtls13Server(pair.Server, TestCertificates.Server(_default.Value.KeyPair, _default.Value.BcCertificate))
             {
                 IntermediateCertificates = _default.Value.IntermediateCertificates,
                 CertificateSelector = Select,
                 TicketKeys = keys,
-                InitialRetransmitTimeout = TimeSpan.FromMilliseconds(50),
+                InitialRetransmitTimeout = TimeSpan.FromSeconds(2),
             };
             var client = new Dtls13Client(pair.Client)
             {
                 ServerName = serverName,
                 ResumptionTicket = resume,
-                ServerCertificateValidator = expectedCertificateName == null ? null : new CertificateValidator(new[] { Pki.Root.Cert }).ForServer(expectedCertificateName),
+                ServerCertificateValidator = expectedCertificateName == null ? null : new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForServer(expectedCertificateName),
             };
             var error = Wait(client.BeginHandshake, s => client.HandshakeFinished += (_, _) => s(), f => client.Failed += (_, ex) => f(ex));
             Assert.IsNull(error, error?.ToString());
@@ -166,7 +166,7 @@ namespace SharpDTLS.Tests
             var client = new Dtls12Client(transport)
             {
                 ServerName = "b.test",
-                ServerCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }).ForServer("b.test"),
+                ServerCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForServer("b.test"),
             };
             var error = Wait(client.BeginHandshake, s => client.HandshakeFinished += (_, _) => s(), f => client.Failed += (_, ex) => f(ex));
             Assert.IsNull(error, error + "\n" + server.Output);
@@ -180,7 +180,7 @@ namespace SharpDTLS.Tests
             string dir = OpenSsl.NewTempDirectory();
             string root = OpenSsl.WritePem(dir, "root.pem", Pki.Root.Cert);
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
-            var server = new Dtls12Server(transport, _default.Value.KeyPair, _default.Value.Certificate)
+            var server = new Dtls12Server(transport, TestCertificates.Server(_default.Value.KeyPair, _default.Value.BcCertificate))
             {
                 IntermediateCertificates = _default.Value.IntermediateCertificates,
                 CertificateSelector = Select,
@@ -199,7 +199,7 @@ namespace SharpDTLS.Tests
             string dir = OpenSsl.NewTempDirectory();
             string root = OpenSsl.WritePem(dir, "root.pem", Pki.Root.Cert);
             using var transport = new ServerTransport(new IPEndPoint(IPAddress.Loopback, 0));
-            var server = new Dtls13Server(transport, _default.Value.KeyPair, _default.Value.Certificate)
+            var server = new Dtls13Server(transport, TestCertificates.Server(_default.Value.KeyPair, _default.Value.BcCertificate))
             {
                 IntermediateCertificates = _default.Value.IntermediateCertificates,
                 CertificateSelector = Select,

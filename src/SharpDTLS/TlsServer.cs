@@ -19,8 +19,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 // SOFTWARE.
 
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.X509;
 using SharpDTLS.Protocol12;
 using SharpDTLS.Protocol12.TLS12;
 using SharpDTLS.Protocol13;
@@ -38,19 +36,6 @@ using System.Threading.Tasks;
 
 namespace SharpDTLS
 {
-    public class TlsDataReceivedEventArgs : EventArgs
-    {
-        public TlsDataReceivedEventArgs(TlsConnectionBase connection, byte[] data)
-        {
-            Connection = connection;
-            Data = data;
-        }
-
-        /// <summary>A <see cref="Tls12ServerConnection"/> (TLS 1.0-1.2) or <see cref="Tls13ServerConnection"/> (TLS 1.3).</summary>
-        public TlsConnectionBase Connection { get; }
-        public byte[] Data { get; }
-    }
-
     /// <summary>
     /// A TLS server for every version: each connection's ClientHello decides between TLS 1.3 and TLS 1.0-1.2. A TLS 1.2
     /// handshake carries the RFC 8446 downgrade sentinel while TLS 1.3 is enabled.
@@ -62,28 +47,27 @@ namespace SharpDTLS
         private readonly ConcurrentDictionary<TlsConnectionBase, TaskCompletionSource<bool>> _handshakes = new();
 
         public TlsServer()
-            : this(Dtls13CryptoUtils.GenerateSelfSignedCertificate())
+            : this(SelfSigned.Credentials())
         {
         }
 
-        public TlsServer(AsymmetricCipherKeyPair keyPair, X509Certificate certificate)
-            : base(new Tls12Server(keyPair, certificate), new Tls13Server(keyPair, certificate))
+        /// <param name="credentials">
+        /// The certificate and key, with the intermediates and OCSP staple to send; null for a server of PSK, SRP or PWD alone.
+        /// </param>
+        public TlsServer(TransportCertificate credentials)
+            : base(new Tls12Server(credentials), new Tls13Server(credentials))
         {
             Tls12.HandshakeFinished += (_, c) => OnHandshakeFinished(c);
             Tls13.HandshakeFinished += (_, c) => OnHandshakeFinished(c);
-            Tls12.ApplicationDataReceived += (_, e) => ApplicationDataReceived?.Invoke(this, new TlsDataReceivedEventArgs(e.Connection, e.Data));
-            Tls13.ApplicationDataReceived += (_, e) => ApplicationDataReceived?.Invoke(this, new TlsDataReceivedEventArgs(e.Connection, e.Data));
+            Tls12.ApplicationDataReceived += (c, data) => ApplicationDataReceived?.Invoke(c, data);
+            Tls13.ApplicationDataReceived += (c, data) => ApplicationDataReceived?.Invoke(c, data);
             Tls12.ConnectionClosed += (_, c) => ConnectionClosed?.Invoke(this, c);
             Tls13.ConnectionClosed += (_, c) => ConnectionClosed?.Invoke(this, c);
-            Tls13.EarlyDataReceived += (_, e) => EarlyDataReceived?.Invoke(this, new TlsDataReceivedEventArgs(e.Connection, e.Data));
+            Tls13.EarlyDataReceived += (c, data) => EarlyDataReceived?.Invoke(c, data);
             Tls12.ConnectionCreated += OnConnectionCreated;
             Tls13.ConnectionCreated += OnConnectionCreated;
         }
 
-        private TlsServer((AsymmetricCipherKeyPair keyPair, X509Certificate certificate) credentials)
-            : this(credentials.keyPair, credentials.certificate)
-        {
-        }
 
         /// <summary>The TLS 1.0-1.2 engine.</summary>
         internal Tls12Server Tls12 => (Tls12Server)Engine12;
@@ -110,10 +94,14 @@ namespace SharpDTLS
         public ushort MaximumVersion { get; set; } = TlsVersion.Tls13;
 
         public event EventHandler<TlsConnectionBase> HandshakeFinished;
-        public event EventHandler<TlsDataReceivedEventArgs> ApplicationDataReceived;
+        /// <summary>
+        /// Application data of a client: the connection is a <see cref="Tls12ServerConnection"/> (TLS 1.0-1.2) or a
+        /// <see cref="Tls13ServerConnection"/> (TLS 1.3); the data is valid only during the call.
+        /// </summary>
+        public event TlsDataHandler ApplicationDataReceived;
 
         /// <summary>0-RTT data a TLS 1.3 client sent with its ClientHello (see <see cref="TlsServerBase.MaxEarlyDataSize"/>).</summary>
-        public event EventHandler<TlsDataReceivedEventArgs> EarlyDataReceived;
+        public event TlsDataHandler EarlyDataReceived;
 
         public event EventHandler<TlsConnectionBase> ConnectionClosed;
         public event EventHandler<TlsAlertEventArgs> AlertReceived;

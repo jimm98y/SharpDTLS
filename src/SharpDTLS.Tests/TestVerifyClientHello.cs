@@ -21,16 +21,20 @@ namespace SharpDTLS.Tests
         {
             public Action<byte[]> ToClient = _ => { };
             public readonly List<byte[]> Sent = new();
-            public event EventHandler<byte[]> OnDataReceived;
-            public void Send(EndPoint endpoint, byte[] buf) { lock (Sent) Sent.Add(buf); ToClient(buf); }
+            public event DatagramHandler OnDataReceived;
+            public void Send(EndPoint endpoint, ReadOnlySpan<byte> datagram) => Send(endpoint, datagram.ToArray());
+
+            private void Send(EndPoint endpoint, byte[] buf) { lock (Sent) Sent.Add(buf); ToClient(buf); }
             public void Deliver(byte[] datagram) => OnDataReceived?.Invoke(ClientEndpoint, datagram);
         }
 
         private sealed class ClientPipe : IClientTransport
         {
             public Action<byte[]> ToServer = _ => { };
-            public event EventHandler<byte[]> OnDataReceived;
-            public void Send(byte[] buf) => ToServer(buf);
+            public event DatagramHandler OnDataReceived;
+            public void Send(ReadOnlySpan<byte> datagram) => Send(datagram.ToArray());
+
+            private void Send(byte[] buf) => ToServer(buf);
             public void Deliver(byte[] datagram) => OnDataReceived?.Invoke(null, datagram);
         }
 

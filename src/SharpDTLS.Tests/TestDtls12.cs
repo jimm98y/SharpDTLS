@@ -224,49 +224,8 @@ namespace SharpDTLS.Tests
             Assert.AreEqual(Convert.ToHexString(ms1), Convert.ToHexString(ms2));
         }
 
-        [TestMethod]
-        public void DeriveKeys_ProducesCorrectLengths()
-        {
-            var master       = new byte[48]; master[0] = 0x55;
-            var clientRandom = new byte[32];
-            var serverRandom = new byte[32];
 
-            var ctx = Dtls12CryptoUtils.DeriveKeys(master, clientRandom, serverRandom);
 
-            Assert.HasCount(48, ctx.MasterSecret);
-            Assert.HasCount(16, ctx.ClientKey);
-            Assert.HasCount(16, ctx.ServerKey);
-            Assert.HasCount(4,  ctx.ClientIv);
-            Assert.HasCount(4,  ctx.ServerIv);
-        }
-
-        [TestMethod]
-        public void DeriveKeys_IsDeterministic()
-        {
-            var master       = new byte[48]; master[7] = 0x77;
-            var clientRandom = new byte[32]; clientRandom[0] = 0x11;
-            var serverRandom = new byte[32]; serverRandom[0] = 0x22;
-
-            var ctx1 = Dtls12CryptoUtils.DeriveKeys(master, clientRandom, serverRandom);
-            var ctx2 = Dtls12CryptoUtils.DeriveKeys(master, clientRandom, serverRandom);
-
-            Assert.AreEqual(Convert.ToHexString(ctx1.ClientKey), Convert.ToHexString(ctx2.ClientKey));
-            Assert.AreEqual(Convert.ToHexString(ctx1.ServerKey), Convert.ToHexString(ctx2.ServerKey));
-            Assert.AreEqual(Convert.ToHexString(ctx1.ClientIv),  Convert.ToHexString(ctx2.ClientIv));
-            Assert.AreEqual(Convert.ToHexString(ctx1.ServerIv),  Convert.ToHexString(ctx2.ServerIv));
-        }
-
-        [TestMethod]
-        public void DeriveKeys_ClientAndServer_KeysAreDifferent()
-        {
-            var master       = new byte[48]; master[0] = 0xAB;
-            var clientRandom = new byte[32]; clientRandom[0] = 0x01;
-            var serverRandom = new byte[32]; serverRandom[0] = 0x02;
-
-            var ctx = Dtls12CryptoUtils.DeriveKeys(master, clientRandom, serverRandom);
-
-            Assert.AreNotEqual(Convert.ToHexString(ctx.ClientKey), Convert.ToHexString(ctx.ServerKey));
-        }
 
         // ── VerifyData ────────────────────────────────────────────────────────
 

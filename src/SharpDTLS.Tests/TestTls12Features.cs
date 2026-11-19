@@ -60,9 +60,9 @@ namespace SharpDTLS.Tests
             // A long chain makes the Certificate message span several records.
             var (key, cert) = Pki.Leaf(new[] { "server.test" });
             var intermediates = Enumerable.Range(0, 40).Select(_ => Pki.Intermediate.Cert).ToList();
-            using var server = new Tls12Server(key, cert) { IntermediateCertificates = intermediates };
+            using var server = new Tls12Server(TestCertificates.Server(key, cert)) { IntermediateCertificates = intermediates.Net() };
             var received = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
-            server.ApplicationDataReceived += (_, e) => { received.TrySetResult(e.Data); e.Connection.SendApplicationData(new byte[16384]); };
+            server.ApplicationDataReceived += (conn, e) => { received.TrySetResult(e.ToArray()); conn.SendApplicationData(new byte[16384]); };
             var (_, listener) = TrickleServer(server, chunk);
             try
             {
@@ -70,7 +70,7 @@ namespace SharpDTLS.Tests
                 var client = TestTls12.Connect((IPEndPoint)listener.LocalEndpoint, c => c.ServerCertificateValidator = (_, chain) => { certificateLength = chain.Sum(x => x.Length); return true; });
                 Assert.IsGreaterThan(16384, certificateLength, "the Certificate message should span records");
                 var reply = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
-                client.ApplicationDataReceived += (_, d) => reply.TrySetResult(d);
+                client.ApplicationDataReceived += (_, d) => reply.TrySetResult(d.ToArray());
                 client.SendApplicationData(new byte[16384]);
                 Assert.IsTrue(received.Task.Wait(Timeout));
                 Assert.HasCount(16384, received.Task.Result);
@@ -205,12 +205,10 @@ namespace SharpDTLS.Tests
                 Assert.IsTrue(server.WaitForOutput("ACCEPT", Timeout), server.Output);
                 var client = TestTls12.Connect(new IPEndPoint(IPAddress.Loopback, port), c =>
                 {
-                    c.ClientCertificate = clientCert;
-                    c.ClientCertificateKeyPair = clientKey;
-                    c.ClientIntermediateCertificates = new[] { Pki.Intermediate.Cert };
+                    c.ClientCredentials = TestCertificates.Credentials(clientKey, clientCert, new[] { Pki.Intermediate.Cert });
                     c.ApplicationProtocols = new[] { "http/1.1" };
                     c.ServerName = "server.test";
-                    c.ServerCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }).ForServer("server.test");
+                    c.ServerCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForServer("server.test");
                 });
                 Assert.AreEqual("http/1.1", client.ApplicationProtocol);
                 client.SendApplicationData(Encoding.UTF8.GetBytes("authenticated\n"));
@@ -219,10 +217,10 @@ namespace SharpDTLS.Tests
 
             // OpenSSL client with a certificate, ALPN and SNI; our server requiring the certificate.
             var (key, cert) = Pki.Leaf(new[] { "server.test" });
-            using var tlsServer = new Tls12Server(key, cert)
+            using var tlsServer = new Tls12Server(TestCertificates.Server(key, cert))
             {
-                IntermediateCertificates = new[] { Pki.Intermediate.Cert }, RequireClientCertificate = true,
-                ClientCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }).ForClient(), ApplicationProtocols = new[] { "h2" },
+                IntermediateCertificates = new[] { Pki.Intermediate.Cert }.Net(), RequireClientCertificate = true,
+                ClientCertificateValidator = new CertificateValidator(new[] { Pki.Root.Cert }.Net()).ForClient(), ApplicationProtocols = new[] { "h2" },
             };
             var established = new TaskCompletionSource<Tls12ServerConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
             tlsServer.HandshakeFinished += (_, c) => established.TrySetResult(c);
@@ -231,7 +229,7 @@ namespace SharpDTLS.Tests
                 $"s_client -tls1_2 -connect 127.0.0.1:{tlsServer.LocalEndpoint.Port} -cert {clientCertPath} -key {clientKeyPath} -cert_chain {Path.Combine(dir, "int.pem")} -alpn h2 -servername server.test -CAfile {chain} -verify_return_error",
                 dir);
             Assert.IsTrue(established.Task.Wait(Timeout), openSslClient.Output);
-            Assert.AreEqual(clientCert, established.Task.Result.ClientCertificate);
+            Assert.AreEqual(clientCert, established.Task.Result.ClientCertificate.Bc());
             Assert.AreEqual("server.test", established.Task.Result.ServerName);
             Assert.IsTrue(openSslClient.WaitForOutput("ALPN protocol: h2", Timeout), openSslClient.Output);
             Assert.IsTrue(openSslClient.WaitForOutput("Verify return code: 0 (ok)", Timeout), openSslClient.Output);

@@ -19,8 +19,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 // SOFTWARE.
 
-using Org.BouncyCastle.X509;
 using System;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -39,8 +39,8 @@ namespace SharpDTLS
     {
         private readonly object _sync = new object();
         private readonly object _sendOrder = new object();
-        private readonly Queue<object> _outbox = new Queue<object>(); // byte[] datagrams and Action events, in order
-        private readonly Action<byte[]> _send;
+        private readonly Queue<Outgoing> _outbox = new Queue<Outgoing>(); // datagrams, events and received data, in order
+        private readonly DatagramSink _send;
         private readonly string _protocolName;
         private readonly RetransmitTimer _retransmitTimer;
 
@@ -48,7 +48,7 @@ namespace SharpDTLS
         // retransmitted record needs a fresh record sequence number.
         private readonly List<Func<IEnumerable<byte[]>>> _flight = new List<Func<IEnumerable<byte[]>>>();
 
-        private protected TlsConnectionBase(bool isClient, Action<byte[]> send, string protocolName)
+        private protected TlsConnectionBase(bool isClient, DatagramSink send, string protocolName)
         {
             IsClient = isClient;
             _send = send ?? throw new ArgumentNullException(nameof(send));
@@ -113,10 +113,16 @@ namespace SharpDTLS
         public abstract bool IsResumed { get; }
 
         /// <summary>The X.509 certificate this side authenticated with, or null.</summary>
-        public X509Certificate LocalCertificate { get; protected set; }
+        public X509Certificate2 LocalCertificate { get; protected set; }
 
-        /// <summary>The X.509 certificate the peer authenticated with (or the one of a resumed session), or null.</summary>
-        public abstract X509Certificate PeerCertificate { get; }
+        /// <summary>
+        /// The X.509 certificate the peer authenticated with (or the one of a resumed session), or null.
+        /// It belongs to the connection: do not dispose of it.
+        /// </summary>
+        public X509Certificate2 PeerCertificate => PeerX509Certificate;
+
+        /// <summary>The engine's peer certificate, parsed once as it arrived.</summary>
+        internal abstract X509Certificate2 PeerX509Certificate { get; }
 
         /// <summary>The application protocol negotiated with ALPN (RFC 7301), or null.</summary>
         public string ApplicationProtocol { get; protected set; }
@@ -167,6 +173,9 @@ namespace SharpDTLS
         /// <summary>Server: where this connection sends, the client's address, which can move with connection IDs.</summary>
         public virtual EndPoint RemoteEndPoint => null;
 
+        /// <summary>The cryptography of the connection: its private key operations and its record protection.</summary>
+        internal virtual ITlsCrypto Crypto { get; set; } = BouncyCastleTlsCrypto.Default;
+
         /// <summary>Server: a newer client address awaiting <see cref="ConfirmPeerAddress"/> (when not following automatically).</summary>
         public virtual EndPoint PendingPeerAddress => null;
 
@@ -205,7 +214,8 @@ namespace SharpDTLS
                 throw new DtlsException(AlertDescription.RecordOverflow, $"Record of {payloadLength} bytes exceeds the limit of {ReceiveRecordLimit}.");
         }
 
-        public event EventHandler<byte[]> ApplicationDataReceived;
+        /// <summary>Application data received: the span is valid only during the call (copy it to keep it).</summary>
+        public event TlsDataHandler ApplicationDataReceived;
         public event EventHandler<AlertDescription> AlertReceived;
         public event EventHandler<Exception> Failed;
         public event EventHandler Closed;
@@ -267,7 +277,7 @@ namespace SharpDTLS
         // ── Public operations ────────────────────────────────────────────────────────────────
 
         /// <summary>Processes one received UDP datagram (which may contain several records).</summary>
-        internal void ProcessDatagram(byte[] datagram) => ProcessDatagram(datagram, null);
+        internal void ProcessDatagram(ReadOnlySpan<byte> datagram) => ProcessDatagram(datagram, null);
 
         /// <summary>The source address of the datagram being processed, when the transport reports it.</summary>
         protected EndPoint DatagramSource { get; private set; }
@@ -279,37 +289,80 @@ namespace SharpDTLS
         protected bool InputDetached { get; set; }
 
         /// <summary>Processes a datagram from <paramref name="source"/> (for connection-ID address updates).</summary>
-        internal void ProcessDatagram(byte[] datagram, EndPoint source) => Run(() =>
+        internal void ProcessDatagram(ReadOnlySpan<byte> datagram, EndPoint source)
         {
-            if (IsClosed || InputDetached)
-                return;
-            DatagramSource = source;
-            CurrentDatagram = datagram;
-
-            foreach (var record in DtlsRecordSplitter.Split(datagram, ReceiveConnectionIdLength))
+            // as Run, of no closure: a span cannot be captured
+            lock (_sync)
             {
+                var inspected = TlsInspector.Current != null ? TlsInspector.Enter(this, IsClient) : default;
                 try
                 {
-                    ProcessRecord(record);
+                    if (IsClosed || InputDetached)
+                        return;
+                    DatagramSource = source;
+                    // kept for handing the handshake to another engine, of no use (and no copy) afterwards
+                    CurrentDatagram = IsHandshakeComplete ? null : datagram.ToArray();
+
+                    int position = 0;
+                    int length;
+                    while ((length = DtlsRecordSplitter.RecordLength(datagram, position, ReceiveConnectionIdLength)) > 0)
+                    {
+                        try
+                        {
+                            ProcessRecord(datagram.Slice(position, length));
+                        }
+                        catch (DtlsRecordDiscardedException ex)
+                        {
+                            Debug.WriteLine($"{LogPrefix} Discarded record: {ex.Message}");
+                        }
+                        position += length;
+
+                        if (IsClosed || InputDetached)
+                            break;
+                    }
                 }
-                catch (DtlsRecordDiscardedException ex)
+                catch (Exception ex)
                 {
-                    Debug.WriteLine($"{LogPrefix} Discarded record: {ex.Message}");
+                    Fail(ex);
                 }
-
-                if (IsClosed || InputDetached)
-                    break;
+                finally
+                {
+                    if (TlsInspector.Current != null)
+                        TlsInspector.Exit(inspected);
+                }
             }
-        });
+            Flush();
+        }
 
-        public void SendApplicationData(byte[] data) => Locked(() =>
+        /// <summary>Sends one record of application data; <paramref name="data"/> is copied before the call returns.</summary>
+        public void SendApplicationData(ReadOnlySpan<byte> data)
         {
-            if (!IsHandshakeComplete || IsClosed)
-                throw new InvalidOperationException("The handshake has not completed.");
-            if (data.Length > MaxApplicationDataSize)
-                throw new ArgumentException($"At most {MaxApplicationDataSize} bytes fit in one record.", nameof(data));
-            WriteApplicationData(data);
-        });
+            // as Locked, of no closure: a span cannot be captured
+            try
+            {
+                lock (_sync)
+                {
+                    var inspected = TlsInspector.Current != null ? TlsInspector.Enter(this, IsClient) : default;
+                    try
+                    {
+                        if (!IsHandshakeComplete || IsClosed)
+                            throw new InvalidOperationException("The handshake has not completed.");
+                        if (data.Length > MaxApplicationDataSize)
+                            throw new ArgumentException($"At most {MaxApplicationDataSize} bytes fit in one record.", nameof(data));
+                        WriteApplicationData(data);
+                    }
+                    finally
+                    {
+                        if (TlsInspector.Current != null)
+                            TlsInspector.Exit(inspected);
+                    }
+                }
+            }
+            finally
+            {
+                Flush();
+            }
+        }
 
         /// <summary>Keying material exporter (RFC 5705 for DTLS 1.0/1.2, RFC 8446 §7.5 for DTLS 1.3).</summary>
         public byte[] ExportKeyingMaterial(string label, byte[] context, int length)
@@ -346,11 +399,11 @@ namespace SharpDTLS
 
         // ── Version-specific hooks ───────────────────────────────────────────────────────────
 
-        protected abstract void ProcessRecord(byte[] record);
+        protected abstract void ProcessRecord(ReadOnlySpan<byte> record);
 
         /// <summary>Length of the connection ID in records sent to us (0 without connection IDs).</summary>
         protected virtual int ReceiveConnectionIdLength => 0;
-        protected abstract void WriteApplicationData(byte[] data);
+        protected abstract void WriteApplicationData(ReadOnlySpan<byte> data);
         protected abstract byte[] ExportKeyingMaterialCore(string label, byte[] context, int length);
         protected abstract void SendAlert(AlertDescription description, bool fatal);
 
@@ -466,21 +519,49 @@ namespace SharpDTLS
 
         // ── Output and events ────────────────────────────────────────────────────────────────
 
-        protected void Enqueue(byte[] datagram) => _outbox.Enqueue(datagram);
+        protected void Enqueue(byte[] datagram) => _outbox.Enqueue(new Outgoing(datagram, datagram.Length, rented: false, isData: false, null));
+
+        /// <summary>Queues a datagram of <see cref="RecordBuffers.Pool"/>, returned to it once sent.</summary>
+        protected void EnqueueRented(byte[] datagram, int length) => _outbox.Enqueue(new Outgoing(datagram, length, rented: true, isData: false, null));
 
         /// <summary>Queues an event to be raised after the connection lock is released.</summary>
-        protected void RaiseEvent(Action raise) => _outbox.Enqueue(raise);
+        protected void RaiseEvent(Action raise) => _outbox.Enqueue(new Outgoing(null, 0, rented: false, isData: false, raise));
 
-        protected void RaiseApplicationData(byte[] data)
+        /// <summary>
+        /// Queues application data of <see cref="RecordBuffers.Pool"/>: <paramref name="length"/> bytes from the start of
+        /// <paramref name="rented"/>, which is the outbox's now and returned once the event is raised.
+        /// </summary>
+        protected void RaiseApplicationData(byte[] rented, int length)
         {
             // On a stream an empty record carries nothing: a peer may send a few, not an endless run of them.
-            if (data.Length == 0 && IsReliableTransport)
+            if (length == 0 && IsReliableTransport)
             {
+                RecordBuffers.Pool.Return(rented, clearArray: true);
                 CountEmptyRecord();
                 return;
             }
             _emptyRecords = 0;
-            RaiseEvent(() => ApplicationDataReceived?.Invoke(this, data));
+            _outbox.Enqueue(new Outgoing(rented, length, rented: true, isData: true, null));
+        }
+
+        /// <summary>A datagram to send, an event to raise or application data to deliver, once the lock is released.</summary>
+        private readonly struct Outgoing
+        {
+            public Outgoing(byte[] buffer, int length, bool rented, bool isData, Action raise)
+            {
+                Buffer = buffer;
+                Length = length;
+                Rented = rented;
+                IsData = isData;
+                Raise = raise;
+            }
+
+            public byte[] Buffer { get; }
+            public int Length { get; }
+            public bool Rented { get; }
+            public bool IsData { get; }
+            public Action Raise { get; }
+            public bool IsDatagram => Raise == null && !IsData;
         }
 
         private int _emptyRecords;
@@ -507,6 +588,29 @@ namespace SharpDTLS
                 try
                 {
                     action();
+                }
+                catch (Exception ex)
+                {
+                    Fail(ex);
+                }
+                finally
+                {
+                    if (TlsInspector.Current != null)
+                        TlsInspector.Exit(inspected);
+                }
+            }
+            Flush();
+        }
+
+        /// <summary>As <see cref="Run(Action)"/>, of a static lambda and its state: no closure is allocated.</summary>
+        protected void Run<TState>(TState state, Action<TState> action)
+        {
+            lock (_sync)
+            {
+                var inspected = TlsInspector.Current != null ? TlsInspector.Enter(this, IsClient) : default;
+                try
+                {
+                    action(state);
                 }
                 catch (Exception ex)
                 {
@@ -565,7 +669,7 @@ namespace SharpDTLS
         {
             while (true)
             {
-                object next;
+                Outgoing next;
                 lock (_sync)
                 {
                     if (_outbox.Count == 0)
@@ -575,17 +679,19 @@ namespace SharpDTLS
 
                 try
                 {
-                    if (next is byte[] datagram)
-                        _send(datagram);
+                    if (next.Raise != null)
+                        next.Raise();
+                    else if (next.IsData)
+                        ApplicationDataReceived?.Invoke(this, next.Buffer.AsSpan(0, next.Length));
                     else
-                        ((Action)next)();
+                        _send(next.Buffer.AsSpan(0, next.Length));
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"{LogPrefix} {(next is byte[] ? "Send" : "Event handler")} failed: {ex.Message}");
+                    Debug.WriteLine($"{LogPrefix} {(next.IsDatagram ? "Send" : "Event handler")} failed: {ex.Message}");
                     // A stream that failed a write has lost part of the record stream: the connection is over. (A
                     // datagram lost is retransmitted or not, as any other.)
-                    if (next is byte[] && IsReliableTransport)
+                    if (next.IsDatagram && IsReliableTransport)
                     {
                         lock (_sync)
                         {
@@ -596,6 +702,11 @@ namespace SharpDTLS
                             }
                         }
                     }
+                }
+                finally
+                {
+                    if (next.Rented)
+                        RecordBuffers.Pool.Return(next.Buffer, clearArray: true);
                 }
             }
         }

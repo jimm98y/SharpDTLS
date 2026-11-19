@@ -42,8 +42,8 @@ namespace SharpDTLS.Tests
         {
             var atServer = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             var atClient = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-            server.ApplicationDataReceived += (_, e) => atServer.TrySetResult(Encoding.UTF8.GetString(e.Data));
-            client.ApplicationDataReceived += (_, data) => atClient.TrySetResult(Encoding.UTF8.GetString(data));
+            server.ApplicationDataReceived += (_, e) => atServer.TrySetResult(Encoding.UTF8.GetString(e.ToArray()));
+            client.ApplicationDataReceived += (_, data) => atClient.TrySetResult(Encoding.UTF8.GetString(data.ToArray()));
             client.SendApplicationData(Encoding.UTF8.GetBytes("to the server"));
             serverConnection.SendApplicationData(Encoding.UTF8.GetBytes("to the client"));
             Assert.IsTrue(atServer.Task.Wait(TestTimeouts.InProcess));
@@ -170,6 +170,7 @@ namespace SharpDTLS.Tests
                     serverStream.Write(chunk, 0, chunk.Length);
             });
             Assert.IsFalse(writing.Wait(TimeSpan.FromSeconds(3)), "64 MiB were taken by a reader that read nothing");
+            Assert.IsLessThanOrEqualTo(2 * TlsStream.MaxBufferedBytes, client.BufferCapacity);
 
             // reading drains it all
             byte[] buffer = new byte[1 << 16];
@@ -181,6 +182,8 @@ namespace SharpDTLS.Tests
                 received += n;
             }
             Assert.IsTrue(writing.Wait(TestTimeouts.InProcess));
+            // the burst's array is not kept once read
+            Assert.IsLessThanOrEqualTo(ByteQueue.MaxIdleCapacity, client.BufferCapacity);
             }
             finally
             {
@@ -250,7 +253,7 @@ namespace SharpDTLS.Tests
         private sealed class MultiSourceServerTransport : IServerTransport
         {
             private readonly Dictionary<string, Client> _clients = new();
-            public event EventHandler<byte[]> OnDataReceived;
+            public event DatagramHandler OnDataReceived;
 
             public IClientTransport ClientAt(IPEndPoint endpoint)
             {
@@ -260,7 +263,9 @@ namespace SharpDTLS.Tests
                 return client;
             }
 
-            public void Send(EndPoint endpoint, byte[] buf)
+            public void Send(EndPoint endpoint, ReadOnlySpan<byte> datagram) => Send(endpoint, datagram.ToArray());
+
+            private void Send(EndPoint endpoint, byte[] buf)
             {
                 Client client;
                 lock (_clients)
@@ -272,10 +277,12 @@ namespace SharpDTLS.Tests
             {
                 private readonly MultiSourceServerTransport _server;
                 private readonly IPEndPoint _endpoint;
-                public event EventHandler<byte[]> OnDataReceived;
+                public event DatagramHandler OnDataReceived;
 
                 public Client(MultiSourceServerTransport server, IPEndPoint endpoint) => (_server, _endpoint) = (server, endpoint);
-                public void Send(byte[] buf) => _server.OnDataReceived?.Invoke(_endpoint, buf);
+                public void Send(ReadOnlySpan<byte> datagram) => Send(datagram.ToArray());
+
+                private void Send(byte[] buf) => _server.OnDataReceived?.Invoke(_endpoint, buf);
                 public void Deliver(byte[] buf) => OnDataReceived?.Invoke(null, buf);
             }
         }

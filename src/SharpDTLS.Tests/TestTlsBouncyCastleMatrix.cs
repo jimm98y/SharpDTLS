@@ -92,7 +92,7 @@ namespace SharpDTLS.Tests
                 tcp.Connect((IPEndPoint)listener.LocalEndpoint);
                 var client = new Tls12Client(tcp.GetStream()) { MinimumVersion = version, MaximumVersion = version, CipherSuites = new List<ushort> { id } };
                 if (suite.IsStaticKeyAgreement)
-                    (client.ClientCertificateKeyPair, client.ClientCertificate) = TestCredentials.FixedClientFor(suite);
+                    client.ClientCredentials = TestCertificates.Credentials(TestCredentials.FixedClientFor(suite));
                 if (suite.RequiresSrp)
                     (client.SrpIdentity, client.SrpPassword) = (TestCredentials.SrpIdentity, TestCredentials.SrpPassword);
                 if (suite.RequiresPsk)
@@ -107,7 +107,7 @@ namespace SharpDTLS.Tests
                 {
                     lock (text)
                     {
-                        text.Append(Encoding.UTF8.GetString(d));
+                        text.Append(Encoding.UTF8.GetString(d.ToArray()));
                         if (text.Length >= "pong:ping".Length)
                             received.TrySetResult(text.ToString());
                     }
@@ -141,7 +141,7 @@ namespace SharpDTLS.Tests
                 Assert.Inconclusive("BouncyCastle's TLS client fails to send the empty ClientKeyExchange of fixed (EC)DH "
                     + "authentication (TlsFatalAlert from CheckUint24 in HandshakeMessageOutput.Send); its DTLS client works");
             var (keyPair, certificate) = TestCredentials.For(suite);
-            using var server = new Tls12Server(keyPair, certificate) { MinimumVersion = TlsVersion.Tls10, CipherSuites = new List<ushort> { id } };
+            using var server = new Tls12Server(TestCertificates.Server(keyPair, certificate)) { MinimumVersion = TlsVersion.Tls10, CipherSuites = new List<ushort> { id } };
             var (fixedKeyPair, fixedCertificate) = TestCredentials.FixedClientFor(suite);
             if (suite.IsStaticKeyAgreement)
                 server.RequireClientCertificate = true;
@@ -151,13 +151,13 @@ namespace SharpDTLS.Tests
                 (server.PskIdentityResolver, server.PskIdentityHint) = (TestCredentials.ResolvePsk, TestCredentials.PskHint);
             SharpDTLS.Protocol12.Tls12ServerConnection connection = null;
             var request = new StringBuilder();
-            server.ApplicationDataReceived += (_, e) =>
+            server.ApplicationDataReceived += (conn, e) =>
             {
-                connection = e.Connection; // the connection is gone from Connections once the client hangs up
+                connection = (Protocol12.Tls12ServerConnection)conn; // the connection is gone from Connections once the client hangs up
                 // TLS is a byte stream: with TLS 1.0's 1/n-1 split "ping" comes in two records.
-                request.Append(Encoding.UTF8.GetString(e.Data));
+                request.Append(Encoding.UTF8.GetString(e.ToArray()));
                 if (request.Length == 4)
-                    e.Connection.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + request));
+                    conn.SendApplicationData(Encoding.UTF8.GetBytes("pong:" + request));
             };
             server.Start(new IPEndPoint(IPAddress.Loopback, 0));
 
@@ -180,7 +180,7 @@ namespace SharpDTLS.Tests
             Assert.AreEqual("pong:ping", bcClient.Result);
             Assert.AreEqual(id, connection.CipherSuite.Id);
             if (suite.IsStaticKeyAgreement)
-                Assert.AreEqual(fixedCertificate, connection.ClientCertificate, "fixed (EC)DH client authentication");
+                Assert.AreEqual(fixedCertificate, connection.ClientCertificate.Bc(), "fixed (EC)DH client authentication");
         }
     }
 }

@@ -19,8 +19,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
 // SOFTWARE.
 
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.X509;
 using System;
 using System.Collections.Generic;
 
@@ -33,15 +31,11 @@ namespace SharpDTLS.Protocol12
     /// </summary>
     internal abstract class Tls12ServerBase
     {
-        protected Tls12ServerBase(AsymmetricCipherKeyPair keyPair, X509Certificate certificate, ushort version)
+        protected Tls12ServerBase(TransportCertificate credentials, ushort version)
         {
-            if (certificate != null && keyPair == null)
-                throw new ArgumentException("A certificate needs its key pair.");
-
             Settings = new Tls12ServerSettings
             {
-                KeyPair = keyPair,
-                Certificate = certificate,
+                Credentials = credentials,
                 MinimumVersion = version,
                 MaximumVersion = version,
             };
@@ -53,6 +47,8 @@ namespace SharpDTLS.Protocol12
 
         public Action<string> KeyLogWriter { get => Settings.KeyLogWriter; set => Settings.KeyLogWriter = value; }
 
+        public ITlsCrypto Crypto { get => Settings.Crypto; set => Settings.Crypto = value; }
+
         public ushort MinimumVersion { get => Settings.MinimumVersion; set => Settings.MinimumVersion = value; }
 
         public ushort MaximumVersion { get => Settings.MaximumVersion; set => Settings.MaximumVersion = value; }
@@ -61,13 +57,13 @@ namespace SharpDTLS.Protocol12
         public IList<ushort> CipherSuites { get => Settings.CipherSuites; set => Settings.CipherSuites = value; }
 
         /// <summary>Intermediate CA certificates sent after the server certificate, issuer of the previous one first.</summary>
-        public IList<X509Certificate> IntermediateCertificates { get => Settings.IntermediateCertificates; set => Settings.IntermediateCertificates = value; }
+        public IList<System.Security.Cryptography.X509Certificates.X509Certificate2> IntermediateCertificates { get => Settings.IntermediateCertificates; set => Settings.IntermediateCertificates = value; }
 
         /// <summary>
         /// Chooses the credentials for the client's server_name (RFC 6066), which is null when the client sent none.
         /// Returning null uses the default certificate.
         /// </summary>
-        public Func<string, ServerCredentials> CertificateSelector { get => Settings.CertificateSelector; set => Settings.CertificateSelector = value; }
+        public Func<string, TransportCertificate> CertificateSelector { get => Settings.CertificateSelector; set => Settings.CertificateSelector = value; }
 
         /// <summary>Application protocols (ALPN, RFC 7301) in server preference order; null to ignore ALPN.</summary>
         public IList<string> ApplicationProtocols { get => Settings.ApplicationProtocols; set => Settings.ApplicationProtocols = value; }
@@ -89,10 +85,10 @@ namespace SharpDTLS.Protocol12
         /// Chooses credentials from what the client said (server name, signature schemes); returning null falls back to
         /// <see cref="CertificateSelector"/> and then the default certificate.
         /// </summary>
-        public Func<CertificateSelectionContext, ServerCredentials> CredentialsSelector { get => Settings.CredentialsSelector; set => Settings.CredentialsSelector = value; }
+        public Func<CertificateSelectionContext, TransportCertificate> CredentialsSelector { get => Settings.CredentialsSelector; set => Settings.CredentialsSelector = value; }
 
         /// <summary>CAs whose names a CertificateRequest lists, to guide the client's choice; null lists none.</summary>
-        public IList<X509Certificate> ClientCertificateAuthorities { get => Settings.ClientCertificateAuthorities; set => Settings.ClientCertificateAuthorities = value; }
+        public IList<System.Security.Cryptography.X509Certificates.X509Certificate2> ClientCertificateAuthorities { get => Settings.ClientCertificateAuthorities; set => Settings.ClientCertificateAuthorities = value; }
 
         /// <summary>Checks a client's raw public key (DER SubjectPublicKeyInfo); false aborts with bad_certificate.</summary>
         public Func<byte[], bool> ClientRawPublicKeyValidator { get => Settings.ClientRawPublicKeyValidator; set => Settings.ClientRawPublicKeyValidator = value; }
@@ -100,7 +96,7 @@ namespace SharpDTLS.Protocol12
         /// <summary>A DER OCSP response for the certificate, stapled for clients that ask (RFC 6066 §8); null for none.</summary>
         public byte[] OcspResponse { get => Settings.OcspResponse; set => Settings.OcspResponse = value; }
 
-        public Func<X509Certificate, IReadOnlyList<byte[]>, bool> ClientCertificateValidator
+        public Func<System.Security.Cryptography.X509Certificates.X509Certificate2, IReadOnlyList<byte[]>, bool> ClientCertificateValidator
         {
             get => Settings.ClientCertificateValidator;
             set => Settings.ClientCertificateValidator = value;
@@ -131,7 +127,7 @@ namespace SharpDTLS.Protocol12
         public SessionTicketKeys TicketKeys { get => Settings.TicketKeys; set => Settings.TicketKeys = value; }
 
         /// <summary>Private key for recovering pwd_protect usernames (RFC 8492 §4.3.2); null accepts only pwd_clear.</summary>
-        public Org.BouncyCastle.Crypto.Parameters.ECPrivateKeyParameters PwdProtectionKey { get => Settings.PwdProtectionKey; set => Settings.PwdProtectionKey = value; }
+        public System.Security.Cryptography.ECParameters? PwdProtectionKey { get => Settings.PwdProtectionKey; set => Settings.PwdProtectionKey = value; }
 
         /// <summary>A new connection, before it processes anything; for the version-negotiating servers.</summary>
         internal event Action<Tls12ServerConnection> ConnectionCreated;

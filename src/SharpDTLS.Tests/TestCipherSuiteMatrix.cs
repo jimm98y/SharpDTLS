@@ -41,8 +41,8 @@ namespace SharpDTLS.Tests
 
         public static PwdCredential ResolvePwd(string username) => username == PwdUsername ? _pwdCredential.Value : null;
 
-        private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _rsa = new(() => Dtls12CryptoUtils.GenerateSelfSignedCertificate());
-        private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _ecdsa = new(() => SharpDTLS.Protocol13.Dtls13CryptoUtils.GenerateSelfSignedEcCertificate());
+        private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _rsa = new(() => SelfSigned.Rsa());
+        private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _ecdsa = new(() => SelfSigned.Ec());
         private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _dsa = new(GenerateDsa);
         private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _dhRsa = new(() => GenerateDh(_rsa.Value.Item1.Private, "SHA256WITHRSA"));
         private static readonly Lazy<(AsymmetricCipherKeyPair, X509Certificate)> _dhDss = new(() => GenerateDh(_dsa.Value.Item1.Private, "SHA256WITHDSA"));
@@ -150,12 +150,12 @@ namespace SharpDTLS.Tests
             var (keyPair, certificate) = TestCredentials.For(suite);
 
             var pair = new ScriptedTransportPair();
-            var server = new Dtls12Server(pair.Server, keyPair, certificate) { MinimumVersion = DtlsVersion.Dtls10, CipherSuites = new List<ushort> { id } };
+            var server = new Dtls12Server(pair.Server, TestCertificates.Server(keyPair, certificate)) { MinimumVersion = DtlsVersion.Dtls10, CipherSuites = new List<ushort> { id } };
             var client = new Dtls12Client(pair.Client) { MinimumVersion = version, MaximumVersion = version, CipherSuites = new List<ushort> { id }, MinimumDhPrimeBits = 2048 };
             if (suite.IsStaticKeyAgreement)
             {
                 server.RequireClientCertificate = true;
-                (client.ClientCertificateKeyPair, client.ClientCertificate) = TestCredentials.FixedClientFor(suite);
+                client.ClientCredentials = TestCertificates.Credentials(TestCredentials.FixedClientFor(suite));
             }
             if (suite.RequiresSrp)
             {
@@ -177,7 +177,7 @@ namespace SharpDTLS.Tests
 
             var received = new List<string>();
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            server.ApplicationDataReceived += (_, e) => received.Add(Encoding.UTF8.GetString(e.Data));
+            server.ApplicationDataReceived += (_, e) => received.Add(Encoding.UTF8.GetString(e.ToArray()));
             client.HandshakeFinished += (_, _) => done.TrySetResult(true);
             client.Failed += (_, ex) => done.TrySetException(ex);
 
@@ -188,7 +188,7 @@ namespace SharpDTLS.Tests
             if (suite.RequiresPsk)
                 CollectionAssert.AreEqual(TestCredentials.PskHint, seenHint, "the server's identity hint reaches the client");
             if (suite.IsStaticKeyAgreement)
-                Assert.AreEqual(client.ClientCertificate, server.Connections.Single().ClientCertificate, "fixed (EC)DH client authentication");
+                Assert.AreEqual(client.ClientCredentials.BcCertificate, server.Connections.Single().ClientCertificate.Bc(), "fixed (EC)DH client authentication");
 
             for (int i = 0; i < 20; i++)
                 client.SendApplicationData(Encoding.UTF8.GetBytes($"{name}-{i}"));

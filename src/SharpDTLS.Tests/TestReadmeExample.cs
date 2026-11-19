@@ -20,15 +20,15 @@ namespace SharpDTLS.Tests
             var serverReceived = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             server.ApplicationDataReceived += (sender, e) =>
             {
-                serverReceived.TrySetResult(Encoding.UTF8.GetString(e.Data));
-                e.Connection.SendApplicationData(Encoding.UTF8.GetBytes("Hello from server!"));
+                serverReceived.TrySetResult(Encoding.UTF8.GetString(e.ToArray()));
+                sender.SendApplicationData(Encoding.UTF8.GetBytes("Hello from server!"));
             };
 
             using var clientTransport = new ClientTransport(new IPEndPoint(IPAddress.Loopback, serverTransport.LocalEndpoint.Port));
             var client = new DtlsClient(clientTransport);
             var clientReceived = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             client.HandshakeFinished += (sender, e) => client.SendApplicationData(Encoding.UTF8.GetBytes("Hello from client!"));
-            client.ApplicationDataReceived += (sender, data) => clientReceived.TrySetResult(Encoding.UTF8.GetString(data));
+            client.ApplicationDataReceived += (sender, data) => clientReceived.TrySetResult(Encoding.UTF8.GetString(data.ToArray()));
             client.Failed += (sender, ex) => clientReceived.TrySetException(ex);
             client.BeginHandshake();
 

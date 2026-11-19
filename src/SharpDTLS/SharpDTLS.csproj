@@ -38,6 +38,8 @@
 		<WarningsAsErrors>$(WarningsAsErrors);RS0017</WarningsAsErrors>
 		<!-- overloads with optional parameters are a style choice here, not a break -->
 		<NoWarn>$(NoWarn);RS0026;RS0027</NoWarn>
+		<!-- DtlsServer and TlsServer are inheritable, as released -->
+		<NoWarn>$(NoWarn);RS0022</NoWarn>
 		<EnablePackageValidation>true</EnablePackageValidation>
 		<!-- no baseline until SharpDTLS has a published version; still checks its target frameworks agree -->
 	</PropertyGroup>

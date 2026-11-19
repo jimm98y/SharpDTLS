@@ -38,7 +38,7 @@ namespace SharpDTLS.Protocol13.TLS13
         private readonly Stream _stream;
 
         /// <summary>For <see cref="TlsClient"/>, which reads the stream and feeds the active engine.</summary>
-        internal Tls13Client(System.Action<byte[]> send)
+        internal Tls13Client(DatagramSink send)
             : base(send, stream: true)
         {
         }
